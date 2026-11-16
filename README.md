@@ -4,7 +4,7 @@
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
-**Pages 工作流只发布公开演示模式，当前尚未上线。** 2026-11-16，GitHub 在为此私有仓库启用 Pages 时返回 `422`：当前账号套餐不支持该私有仓库的 Pages。仓库保持私有，未修改公开性；也没有可宣称已发布成功的站点地址。页面中的人物、日期、照片说明和故事均为虚构样例。
+**[在线演示：朝夕 · 我们的记忆](https://jjyuruyucheng.github.io/memory/)**。GitHub Pages 只发布公开演示模式；试写和照片保存在当前浏览器，不是双人云同步。页面中的人物、日期、照片说明和故事均为虚构样例。
 
 ## 演示版与正式版
 
@@ -63,7 +63,7 @@ MEMORY_MODE=live MEMORY_SPACE=spaces/your-space-id node scripts/build.mjs
 
 `Checks` 工作流在 Node.js 22 上运行内建测试和演示构建，不执行 `npm install`。`Publish demo to GitHub Pages` 在 `main` 更新或手动触发时执行测试，强制构建 `demo`，然后上传 `dist` 并部署到 `github-pages` 环境。官方 Actions 使用固定提交 SHA。
 
-**实际发布状态：未发布。** 仓库 Pages 启用 API 已实际返回 `422`，提示当前套餐不支持此私有仓库。工作流文件已准备好，但它们不绕过 GitHub 的套餐限制，也不会自动把仓库改成公开；没有将失败配置描述为成功上线。
+**实际发布状态：已上线公开演示版。** 仓库已设为公开，Pages 构建源为 GitHub Actions；部署工作流成功，线上首页、演示配置和素材署名接口已验证 HTTP 200。正式私密服务不由 Pages 承担。
 
 需要仓库管理员把 Pages 构建源设为 **GitHub Actions**。源仓库私有不代表 Pages 网站私有；私有仓库是否能启用 Pages 取决于账号套餐，不能通过本项目自动改变仓库公开性。[GitHub 官方能力](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages)、[私有发布条件](https://docs.github.com/en/enterprise-cloud%40latest/pages/getting-started-with-github-pages/changing-the-visibility-of-your-github-pages-site)。
 
