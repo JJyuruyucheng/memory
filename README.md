@@ -4,7 +4,7 @@
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
-**[Pages 入口：朝夕](https://jjyuruyucheng.github.io/memory/)**。本轮 Pages 发布目标升级为 `preview`：只显示登录预览，不初始化演示数据或记录服务，不提交真实口令，也没有跳过登录或进入演示的入口。**正式账号登录与私密存储尚未上线。**
+**[Cloudflare 入口：朝夕](https://memory-awv.pages.dev/)** 已完成首次部署，当前登录保持关闭，等待原生验证码及真实 Auth/Storage 权限验收。**正式账号登录与私密存储尚未开放。** [GitHub Pages](https://jjyuruyucheng.github.io/memory/) 继续作为 `preview`：不加载记录、不提交真实口令，也没有跳过登录入口。
 
 ## 三种运行模式
 

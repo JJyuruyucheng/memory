@@ -6,7 +6,9 @@
 
 已完成：官方 Supabase SDK 本地固定版本、前端 provider、七张业务表及 RLS、作者私有草稿、原子选图、媒体登记与 Storage 权限规则。真实云端 SQL 隔离测试通过并全部回滚；匿名 HTTP 请求七表均得到 401/42501。数据库启动门保持 false；项目当前没有 Auth 用户、正式 profiles、记录或 bucket。
 
-尚待完成：用户 Cloudflare 控制台接入、Pages 前端发布、Turnstile 正式域名与原生 Auth CAPTCHA、关闭注册/匿名及无关登录方式、通过官方 API 创建三账号与 private bucket、真实用户 JWT 上传下载及登录验收。没有这些证据时不能把 `MEMORY_AUTH_READY` 或数据库门设为 true。SQL 模拟身份、SDK mock 测试和浏览器登录页加载不等于已验证真实验证码。
+Cloudflare Pages 已关联且只授权 `JJyuruyucheng/memory`，首次部署成功，入口为 https://memory-awv.pages.dev。Turnstile 的 `memory-login` 使用 Managed 模式，仅允许该精确 hostname，pre-clearance 关闭。Supabase 公共 Auth settings 已实际确认公开注册关闭、匿名登录关闭，只有 Email 登录开启。
+
+尚待完成：将 Turnstile Secret 保存到原生 Auth 配置并验证后端验证码拦截，通过官方 API 创建三账号与 private bucket，真实用户 JWT 上传下载及登录验收。没有这些证据时不能把 `MEMORY_AUTH_READY` 或数据库门设为 true。SQL 模拟身份、SDK mock 测试和浏览器登录页加载不等于已验证真实验证码。
 
 数据库安全 Advisor 当前没有 ERROR/WARN；一条 INFO 是 `memory_private.runtime_guard` 启用 RLS 且没有开放策略，这是有意拒绝全部 API 访问。空项目索引尚未使用的 INFO 保留观察，不为消除提示删除必要索引。[Advisor 说明](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy)
 
