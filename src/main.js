@@ -1,0 +1,299 @@
+import { CONFIG } from './config.js';
+import { icon } from './icons.js';
+import { createDemoProvider } from './demo-provider.js';
+import { createMemosProvider } from './memos-provider.js';
+import { escapeHtml as esc, filterEntries, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
+
+const app = document.querySelector('#app');
+const modalRoot = document.querySelector('#modal-root');
+const provider = CONFIG.mode === 'live' ? createMemosProvider(CONFIG) : createDemoProvider();
+const moodNames = { happy: '微笑', neutral: '一般', sad: '难受', unset: '未填写' };
+const moodIcons = { happy: 'smile', neutral: 'neutral', sad: 'sad' };
+const filters = { query: '', type: 'all', mood: 'all', authorId: 'all', month: '', favoritesOnly: false, trash: false };
+let state, searchTimer, toastTimer, dialogReturnFocus, draftTimer;
+let editorFiles = [], editorMedia = [], editorId = null, previewUrls = [];
+let calendarCursor = dayKey(new Date()).slice(0, 7), selectedDay = '';
+const route = () => location.hash.slice(1).split('?')[0] || 'timeline';
+const user = id => state.users.find(u => u.id === id) || { id, name: '已离开的作者', color: 'sage' };
+const dateLabel = (value, full = false) => new Intl.DateTimeFormat('zh-CN', { timeZone: CONFIG.timeZone, ...(full ? { year: 'numeric' } : {}), month: 'long', day: 'numeric' }).format(new Date(value));
+const avatar = (u, small = false) => `<span class="avatar ${u.color === 'rose' || state?.users?.filter(person => person.role !== 'admin').findIndex(person => person.id === u.id) === 1 ? 'rose' : u.role === 'admin' ? 'stone' : 'sage'} ${small ? 'small' : ''}" aria-label="${esc(u.name)}">${esc((u.name || '我').slice(0, 1))}</span>`;
+const canEdit = entry => state.currentUser && (state.currentUser.role === 'admin' || state.currentUser.id === entry.authorId);
+const safeUrl = value => { try { const u = new URL(value, location.href); return u.origin === location.origin || u.protocol === 'blob:' ? esc(u.href) : ''; } catch { return ''; } };
+
+function toast(message, error = false) {
+  const el = document.querySelector('#toast');
+  el.textContent = message; el.className = `visible ${error ? 'error' : ''}`;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.className = '', 4500);
+}
+function dateTimeInput(value) {
+  const date = new Date(value || Date.now());
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: CONFIG.timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date).replace(' ', 'T');
+}
+function filtered() {
+  const view = route();
+  const rows = filterEntries(state.entries, { ...filters, userId: state.currentUser?.id, type: view === 'events' ? 'event' : filters.type, favoritesOnly: view === 'favorites', trash: view === 'trash' });
+  return selectedDay && ['timeline', 'events', 'favorites'].includes(view) ? rows.filter(row => dayKey(row.occurredAt) === selectedDay) : rows;
+}
+const navItems = [['timeline', 'book', '时光线'], ['album', 'photo', '我们的相册'], ['events', 'calendar', '重要时刻'], ['stats', 'chart', '时光统计']];
+function navLink(item) { const [id, symbol, label] = item; return `<a href="#${id}" class="nav-link ${route() === id ? 'active' : ''}" ${route() === id ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${label}</span></a>`; }
+
+function render() {
+  if (!state?.currentUser) return renderLogin();
+  const active = document.activeElement?.id, selection = document.activeElement?.selectionStart;
+  const current = state.currentUser, stats = computeStats(state.entries);
+  app.innerHTML = `
+    <aside class="sidebar" aria-label="主导航">
+      <a class="wordmark" href="#timeline"><img src="./assets/mark.svg" alt="" width="43" height="43" /><span>朝夕<small>我们的记忆</small></span></a>
+      <div class="space-label">${icon('lock')} ${esc(state.settings.spaceName || '两个人的小世界')}</div>
+      <nav>${navItems.map(navLink).join('')}</nav>
+      <div class="sidebar-group"><span class="group-label">好好收藏</span>${navLink(['favorites', 'bookmark', '我的收藏'])}${navLink(['anniversaries', 'heart', '纪念日'])}</div>
+      <div class="sidebar-bottom">${navLink(['us', 'settings', '我们与设置'])}${navLink(['trash', 'trash', '回收站'])}${current.role === 'admin' ? navLink(['admin', 'shield', '管理小屋']) : ''}
+      <div class="account-row">${avatar(current)}<div><strong>${esc(current.name)}</strong><small>${CONFIG.mode === 'demo' ? '示例视角' : current.role === 'admin' ? '维护账号' : '共同空间成员'}</small></div>${CONFIG.mode === 'demo' ? `<label class="switch-view" title="切换示例视角">${icon('down')}<span class="sr-only">切换示例视角</span><select id="user-switch">${state.users.map(u => `<option value="${esc(u.id)}" ${u.id === current.id ? 'selected' : ''}>${esc(u.name)}${u.role === 'admin' ? '（管理员）' : ''}</option>`).join('')}</select></label>` : `<button class="icon-button" data-action="logout" aria-label="退出登录">${icon('logout')}</button>`}</div>
+      <button class="credits-link" data-action="credits">关于朝夕与素材</button></div>
+    </aside>
+    <div class="workspace">
+      <header class="mobile-header"><a href="#timeline"><img src="./assets/mark.svg" alt="" width="30" height="30" /><strong>朝夕</strong></a><span>${esc(state.settings.spaceName)}</span>${CONFIG.mode === 'demo' ? `<label class="mobile-account">${avatar(current, true)}${icon('down')}<span class="sr-only">切换示例视角</span><select id="mobile-user-switch">${state.users.map(u => `<option value="${esc(u.id)}" ${u.id === current.id ? 'selected' : ''}>${esc(u.name)}${u.role === 'admin' ? '（管理员）' : ''}</option>`).join('')}</select></label>` : `<button class="icon-button" data-action="logout" aria-label="退出登录">${icon('logout')}</button>`}</header>
+      <div class="mode-note">${icon(CONFIG.mode === 'demo' ? 'info' : 'lock')}<span>${CONFIG.mode === 'demo' ? '演示空间 · 示例内容与试写仅保存在当前浏览器' : '两个人的共同空间 · 仅登录后可见'}</span><button data-action="about-mode">${CONFIG.mode === 'demo' ? '了解演示' : '权限说明'}</button></div>
+      <main id="main-content" class="canvas" tabindex="-1">${renderView(stats)}</main>
+      <footer class="page-footer"><span>朝夕之间，都是我们。</span><span>${CONFIG.mode === 'demo' ? '演示内容为虚构，勿上传私密资料' : '记录属于作者，回忆属于我们'}</span></footer>
+    </div>
+    <nav class="mobile-nav" aria-label="手机导航">${[['timeline', 'book', '时光'], ['album', 'photo', '相册']].map(navLink).join('')}<button class="mobile-compose" data-action="new" aria-label="记录这一刻">${icon('plus')}</button>${[['stats', 'chart', '统计'], ['us', 'settings', '我们']].map(navLink).join('')}</nav>`;
+  if (active) { const el = document.getElementById(active); if (el) { el.focus({ preventScroll: true }); if (typeof selection === 'number' && el.setSelectionRange) el.setSelectionRange(selection, selection); } }
+}
+function heading(title, subtitle, action = true) {
+  return `<header class="page-heading"><div><h1>${title}</h1><p>${subtitle}</p></div>${action ? `<button class="primary" data-action="new">${icon('plus')}<span>记录这一刻</span></button>` : ''}</header>`;
+}
+function renderView(stats) {
+  switch (route()) {
+    case 'album': return renderAlbum();
+    case 'stats': return renderStats();
+    case 'us': return renderSettings();
+    case 'anniversaries': return renderAnniversaries();
+    case 'admin': return renderAdmin(stats);
+    case 'trash': return `${heading('回收站', '误删的片段，可以在这里找回来。', false)}<div class="info-line">保留记录和附件以便恢复；本版未启用自动永久清理。</div>${renderFeed(filtered(), true)}`;
+    default: {
+      const view = route();
+      const title = view === 'events' ? '那些重要的时刻' : view === 'favorites' ? '舍不得忘的小事' : '把日子，慢慢收藏。';
+      return `${heading(title, view === 'favorites' ? '你标记过的片段，都在这里。' : view === 'events' ? '第一次、纪念日，还有一起经历的每一个特别。' : `${dateLabel(new Date(), true)} · ${esc(state.settings.subtitle || '平凡的小事，也值得被记住。')}`)}
+        <div class="home-grid"><section class="feed-column" aria-label="我们的时光线">
+        <button class="quick-compose" data-action="new">${avatar(state.currentUser, true)}<span>今天，有什么想和 TA 一起记住？</span>${icon('edit')}</button>
+        ${renderFilters()}<div class="feed-summary"><span>${selectedDay ? `${esc(selectedDay)} · ` : ''}共 ${filtered().length} 条${view === 'favorites' ? '收藏' : '回忆'}</span>${selectedDay || filters.query || filters.mood !== 'all' || filters.authorId !== 'all' || filters.type !== 'all' || filters.month ? '<button class="text-button" data-action="clear-filters">清除筛选</button>' : '<span>按发生时间排列</span>'}</div>
+        ${renderFeed(filtered())}</section><aside class="right-rail">${renderTogether(stats)}${renderCalendar()}${renderUpcoming()}<p class="rail-note">${icon('leaf')} 不必特别，和你有关就好。</p></aside></div>`;
+    }
+  }
+}
+function renderFilters() {
+  return `<div class="filters"><label class="search-field">${icon('search')}<span class="sr-only">搜索回忆</span><input id="search" type="search" value="${esc(filters.query)}" placeholder="找找那天的小事…" autocomplete="off" /></label><div class="filter-row">
+    <div class="segmented" aria-label="记录类型">${[['all', '全部'], ['note', '随记'], ['event', '事件']].map(([id, label]) => `<button data-action="filter-type" data-value="${id}" aria-pressed="${filters.type === id}" ${route() === 'events' && id !== 'event' ? 'disabled' : ''}>${label}</button>`).join('')}</div>
+    <label class="select-field"><span class="sr-only">按作者筛选</span><select id="filter-author"><option value="all">我们俩</option>${state.users.filter(u => u.role !== 'admin').map(u => `<option value="${esc(u.id)}" ${filters.authorId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>
+    <label class="select-field"><span class="sr-only">按心情筛选</span><select id="filter-mood"><option value="all">所有心情</option>${Object.entries(moodNames).map(([id, label]) => `<option value="${id}" ${filters.mood === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div></div>`;
+}
+function renderFeed(rows, trash = false) {
+  if (!rows.length) return `<div class="empty-state">${icon(trash ? 'restore' : 'book')}<h2>${trash ? '这里干干净净' : '这一页，留给新的回忆'}</h2><p>${trash ? '删除的记录会先来到这里。' : '换个筛选条件，或者写下今天的一件小事。'}</p>${!trash ? '<button class="secondary" data-action="new">写下第一笔</button>' : ''}</div>`;
+  let lastMonth = '';
+  return `<div class="timeline">${rows.map(entry => { const month = dayKey(entry.occurredAt).slice(0, 7); const marker = month !== lastMonth ? `<div class="month-marker"><span>${month.slice(0, 4)} 年 ${Number(month.slice(5))} 月</span></div>` : ''; lastMonth = month; return marker + renderEntry(entry, trash); }).join('')}</div>`;
+}
+function renderEntry(entry, trash = false) {
+  const author = user(entry.authorId), liked = entry.reactionBy?.includes(state.currentUser.id), saved = entry.favoriteBy?.includes(state.currentUser.id);
+  return `<article class="memory-card ${entry.type === 'event' ? 'event-card' : ''}">
+    <div class="memory-meta">${avatar(author, true)}<div><strong>${esc(author.name)}</strong><time datetime="${esc(entry.occurredAt)}">${dateLabel(entry.occurredAt)}${entry.createdAt && dayKey(entry.createdAt) !== dayKey(entry.occurredAt) ? ' · 补记' : ''}</time></div><span class="entry-kind">${entry.type === 'event' ? `${icon('calendar')}事件` : '随记'}</span>${canEdit(entry) && !trash ? `<button class="icon-button" data-action="edit" data-id="${esc(entry.id)}" aria-label="编辑${esc(entry.title || '这条回忆')}">${icon('edit')}</button>` : ''}</div>
+    ${entry.title ? `<h2>${esc(entry.title)}</h2>` : ''}<p class="memory-text">${esc(entry.content)}</p>
+    ${entry.media?.length ? `<div class="memory-media count-${Math.min(entry.media.length, 3)}">${entry.media.slice(0, 3).map((media, i) => `<button class="media-thumb" data-action="media" data-id="${esc(entry.id)}" data-index="${i}" aria-label="打开${esc(media.name || '回忆照片')}">${media.type === 'video' ? `<video src="${safeUrl(media.url)}" preload="metadata" playsinline></video><span class="video-label">${icon('video')} 视频</span>` : `<img src="${safeUrl(media.url)}" alt="${esc(media.name || entry.title || '回忆照片')}" loading="lazy" />`}${i === 2 && entry.media.length > 3 ? `<span class="more-photos">+${entry.media.length - 3}</span>` : ''}</button>`).join('')}</div>` : ''}
+    <div class="entry-tags">${entry.mood ? `<span class="mood-tag ${entry.mood}">${icon(moodIcons[entry.mood])}${moodNames[entry.mood] || '未填写'}</span>` : ''}${(entry.tags || []).map(tag => `<button class="tag" data-action="search-tag" data-value="${esc(tag)}"># ${esc(tag)}</button>`).join('')}</div>
+    <div class="memory-actions">${trash ? `${canEdit(entry) ? `<button class="text-button" data-action="restore" data-id="${esc(entry.id)}">${icon('restore')}恢复这条回忆</button>` : '<span class="muted">由作者恢复</span>'}` : `<button class="reaction-button ${liked ? 'selected' : ''}" data-action="reaction" data-id="${esc(entry.id)}" aria-pressed="${Boolean(liked)}" aria-label="${liked ? '收回回应' : '回应这条回忆'}">${icon('heart')}<span>${entry.reactionBy?.length || '喜欢'}</span></button><button class="reaction-button" data-action="detail" data-id="${esc(entry.id)}">${icon('comment')}<span>${entry.comments?.length || '说两句'}</span></button><button class="bookmark-button ${saved ? 'selected' : ''}" data-action="favorite" data-id="${esc(entry.id)}" aria-label="${saved ? '取消收藏' : '收藏这条回忆'}" aria-pressed="${Boolean(saved)}">${icon('bookmark')}</button>`}</div>
+  </article>`;
+}
+function renderTogether(stats) {
+  const people = state.users.filter(u => u.role !== 'admin').slice(0, 2);
+  const days = relationshipDays(state.settings.startDate, new Date());
+  return `<section class="together-panel"><div class="couple-avatars">${people.map(u => avatar(u)).join(`<span class="between-heart">${icon('heart')}</span>`)}</div><h2>${people.map(u => esc(u.name)).join('<span class="amp"> & </span>')}</h2><p>一起走过的第</p><div class="together-days num">${Number.isFinite(days) ? days.toLocaleString() : '—'}<small>天</small></div><div class="together-date">从 ${esc(state.settings.startDate || '尚未设置')} 开始</div><div class="together-summary"><span><strong class="num">${stats.total}</strong> 段回忆</span><span><strong class="num">${stats.images}</strong> 张照片</span></div></section>`;
+}
+function renderCalendar() {
+  const [year, month] = calendarCursor.split('-').map(Number);
+  const first = new Date(Date.UTC(year, month - 1, 1)), offset = (first.getUTCDay() + 6) % 7, count = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const dates = new Set(state.entries.filter(e => !e.deletedAt).map(e => dayKey(e.occurredAt)));
+  return `<section class="calendar-panel"><div class="rail-heading"><h2>${year} 年 ${month} 月</h2><div><button class="icon-button previous" data-action="calendar-prev" aria-label="上个月">${icon('chevron')}</button><button class="icon-button" data-action="calendar-next" aria-label="下个月">${icon('chevron')}</button></div></div><div class="calendar-grid">${['一', '二', '三', '四', '五', '六', '日'].map(d => `<span class="weekday">${d}</span>`).join('')}${Array.from({ length: offset }, () => '<span></span>').join('')}${Array.from({ length: count }, (_, i) => { const key = `${year}-${String(month).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`; return `<button data-action="calendar-day" data-value="${key}" class="calendar-day ${dates.has(key) ? 'has-memory' : ''} ${key === dayKey(new Date()) ? 'today' : ''} ${key === selectedDay ? 'selected' : ''}" aria-label="${key}${dates.has(key) ? '，有回忆' : ''}">${i + 1}</button>`; }).join('')}</div><p class="calendar-caption"><span></span>有记录的日子</p></section>`;
+}
+function upcoming() { return (state.settings.anniversaries || []).map(a => anniversaryInfo(a, new Date())).filter(a => !a.isPast).sort((a, b) => a.daysUntil - b.daysUntil); }
+function renderUpcoming() { return `<section class="upcoming-panel"><div class="rail-heading"><h2>下一个小期待</h2><a class="small-link" href="#anniversaries">查看全部</a></div>${upcoming().slice(0, 2).map(a => `<div class="upcoming-row"><div><strong>${esc(a.title)}</strong><small>${esc(a.nextDate || a.date)}</small></div><span>${a.isToday ? '就是今天' : `<b class="num">${a.daysUntil}</b> 天后`}</span></div>`).join('') || '<p class="muted">设置一个值得期待的日子吧。</p>'}</section>`; }
+
+function renderAlbum() {
+  const entries = filtered().filter(e => !e.deletedAt), media = entries.flatMap(entry => entry.media.map((file, index) => ({ ...file, entry, index })));
+  return `${heading('光影里的我们', `${media.length} 个片段，把那天再看一遍。`)}<div class="album-toolbar"><label class="select-field">月份 <input id="filter-month" type="month" value="${esc(filters.month)}" /></label><button class="text-button" data-action="clear-filters">显示全部</button></div>${media.length ? `<div class="album-grid">${media.map(file => `<button class="album-item" data-action="media" data-id="${esc(file.entry.id)}" data-index="${file.index}">${file.type === 'video' ? `<video src="${safeUrl(file.url)}" preload="metadata"></video><span class="video-label">${icon('video')} 视频</span>` : `<img src="${safeUrl(file.url)}" alt="${esc(file.name || file.entry.title)}" loading="lazy" />`}<span class="album-caption"><strong>${esc(file.entry.title || '日常的一帧')}</strong><time>${dateLabel(file.entry.occurredAt)}</time></span></button>`).join('')}</div>` : '<div class="empty-state"><h2>照片会慢慢装满这里</h2><p>记录时选一张喜欢的照片吧。</p><button class="secondary" data-action="new">记录一张照片</button></div>'}`;
+}
+function renderStats() {
+  const rows = filterEntries(state.entries, { month: filters.month }), stats = computeStats(rows);
+  const max = Math.max(1, ...stats.months.map(m => m.count)), filled = stats.moods.happy + stats.moods.neutral + stats.moods.sad;
+  return `${heading('时光有迹可循', '我们留下的，是认真生活的痕迹。', false)}<div class="stats-toolbar"><label class="select-field">统计月份 <input id="filter-month" type="month" value="${esc(filters.month)}" /></label><button class="text-button" data-action="clear-filters">全部时间</button></div>
+    <div class="stats-strip">${[['留下的回忆', stats.total, '条'], ['记录过的日子', stats.days, '天'], ['重要的事件', stats.events, '件'], ['记录的照片', stats.images, '张']].map(([name, value, unit]) => `<div><span>${name}</span><strong class="num">${value}<small>${unit}</small></strong></div>`).join('')}</div>
+    <div class="stats-grid"><section class="stat-panel"><h2>每个月的小事</h2><p class="muted">按发生日期统计，删除的记录不计入。</p><div class="bar-chart" role="img" aria-label="${esc(stats.months.map(m => `${m.month}：${m.count}条`).join('；') || '还没有记录')}"><div class="chart-scale"><span>${max}</span><span>0 条</span></div><div class="chart-bars">${stats.months.map(m => `<div class="bar-column"><span class="num">${m.count}</span><div class="bar-track"><div style="height:${m.count / max * 100}%"></div></div><small>${esc(m.month.slice(2).replace('-', '.'))}</small></div>`).join('') || '<p class="muted">写下第一条后，这里会有变化。</p>'}</div></div></section>
+    <section class="stat-panel"><h2>写下这些时的心情</h2><p class="muted">${filled} 条填写了心情，${stats.moods.unset} 条未填写。</p><div class="mood-distribution">${['happy', 'neutral', 'sad'].map(m => `<div class="mood-stat">${icon(moodIcons[m])}<span>${moodNames[m]}</span><div class="mood-track"><span style="width:${filled ? stats.moods[m] / filled * 100 : 0}%"></span></div><strong class="num">${stats.moods[m]}<small> 条</small></strong></div>`).join('')}</div><p class="stat-footnote">每次记录都是当时的感受，心情分布不代表关系的好坏。</p></section></div>`;
+}
+function renderAnniversaries() {
+  const anniversaries = (state.settings.anniversaries || []).map(a => anniversaryInfo(a, new Date()));
+  return `${heading('值得记住的日子', '有些日期，一想到就会嘴角上扬。', false)}<div class="anniversary-grid">${anniversaries.map(a => `<article class="anniversary-card">${icon('calendar')}<h2>${esc(a.title)}</h2><p>${esc(a.date)}${a.yearly ? ' · 每年纪念' : ''}</p><div class="num">${a.isToday ? '今天' : a.isPast ? '已珍藏' : a.daysUntil}<small>${!a.isToday && !a.isPast ? '天后' : ''}</small></div><span>${a.isPast ? '这一页已经成为回忆' : a.isToday ? '把今天也好好记下来' : `下一次：${esc(a.nextDate)}`}</span></article>`).join('') || '<div class="empty-state"><h2>留一个日子，给期待</h2><p>在“我们与设置”中添加纪念日。</p></div>'}</div><a href="#us" class="secondary inline-button">${icon('settings')}管理纪念日</a>`;
+}
+function renderSettings() {
+  const editable = CONFIG.mode === 'demo' || state.currentUser.role === 'admin';
+  return `${heading('我们与这个小世界', '把喜欢的称呼，和故事的开头留在这里。', false)}<nav class="settings-shortcuts" aria-label="更多回忆入口">${navLink(['favorites', 'bookmark', '我的收藏'])}${navLink(['anniversaries', 'heart', '纪念日'])}${navLink(['trash', 'trash', '回收站'])}${state.currentUser.role === 'admin' ? navLink(['admin', 'shield', '管理小屋']) : ''}</nav><form id="settings-form" class="settings-form">
+    <section class="settings-section"><div><h2>共同空间</h2><p>会显示在首页，也会和回忆一起导出。</p>${!editable ? '<p>共同设置由维护账号修改。</p>' : ''}</div><fieldset ${!editable ? 'disabled' : ''}><label>空间名字<input name="spaceName" value="${esc(state.settings.spaceName)}" maxlength="30" required /></label><label>一句喜欢的话<input name="subtitle" value="${esc(state.settings.subtitle || '')}" maxlength="80" /></label><label>故事开始的那天<input name="startDate" type="date" value="${esc(state.settings.startDate)}" required /></label></fieldset></section>
+    <section class="settings-section"><div><h2>纪念日</h2><p>每年重复的日子，会自动计算下一次相遇。</p></div><fieldset ${!editable ? 'disabled' : ''}><div id="anniversary-fields">${(state.settings.anniversaries || []).map(a => anniversaryFields(a)).join('')}</div><button type="button" class="text-button" data-action="add-anniversary">${icon('plus')}加一个日子</button></fieldset></section>
+    ${editable ? '<div class="settings-submit"><button type="submit" class="primary">保存我们的小世界</button></div>' : ''}</form>
+    <section class="settings-section"><div><h2>数据与账号</h2><p>${CONFIG.mode === 'demo' ? '试写记录保存在此浏览器；清理网站数据会丢失它们。' : '导出含回忆和媒体，请妥善保存。'}</p></div><div class="settings-actions"><button class="secondary" data-action="export-mine">${icon('download')}导出我写的回忆</button>${state.currentUser.role === 'admin' || CONFIG.mode === 'demo' ? '<button class="secondary" data-action="export-all">导出完整共同档案</button>' : ''}${CONFIG.mode === 'demo' ? '<button class="text-button danger" data-action="reset-demo">恢复初始演示内容</button>' : '<button class="text-button" data-action="logout">退出当前账号</button>'}</div></section>`;
+}
+function anniversaryFields(a = {}) { return `<div class="anniversary-fields" data-anniversary="${esc(a.id || crypto.randomUUID())}"><label><span class="sr-only">纪念日名字</span><input name="ann-title" placeholder="例如：第一次见面" value="${esc(a.title || '')}" maxlength="40" required /></label><label><span class="sr-only">纪念日期</span><input name="ann-date" type="date" value="${esc(a.date || '')}" required /></label><label class="checkbox-label"><input name="ann-yearly" type="checkbox" ${a.yearly ? 'checked' : ''} />每年</label><button type="button" class="icon-button" data-action="remove-anniversary" aria-label="移除纪念日">${icon('close')}</button></div>`; }
+function renderAdmin(stats) {
+  if (state.currentUser.role !== 'admin') return `${heading('这扇门留给维护账号', '日常记录不需要管理员权限。', false)}<a href="#timeline" class="secondary inline-button">回到时光线</a>`;
+  const bytes = state.entries.flatMap(e => e.media).reduce((sum, m) => sum + (Number(m.size) || 0), 0);
+  return `${heading('管理小屋', '照顾好这个装着回忆的地方。', false)}<div class="info-line">${CONFIG.mode === 'demo' ? '当前是示例维护视角，操作只影响此浏览器。' : '管理员具有读取、编辑和导出私密内容的权限，请仅在维护时使用。'}</div><div class="stats-strip"><div><span>回忆总数</span><strong class="num">${stats.total}<small>条</small></strong></div><div><span>记录附件大小</span><strong class="num">${(bytes / 1024 / 1024).toFixed(1)}<small>MiB</small></strong></div><div><span>回收站</span><strong class="num">${state.entries.filter(e => e.deletedAt).length}<small>条</small></strong></div></div><div class="settings-section"><div><h2>空间里的账号</h2><p>维护身份与日常身份分开使用。</p></div><div class="member-list">${state.users.map(u => `<div class="member-row">${avatar(u, true)}<strong>${esc(u.name)}</strong><span>${u.role === 'admin' ? '管理员' : '日常成员'}</span></div>`).join('')}</div></div><div class="settings-section"><div><h2>备份与恢复</h2><p>导出档案方便带走内容；完整系统恢复还需数据库、媒体与配置备份。</p></div><div class="settings-actions"><button class="secondary" data-action="export-all">${icon('download')}导出完整共同档案</button><a class="secondary inline-button" href="#trash">${icon('restore')}查看回收站</a><button class="text-button" data-action="backup-help">了解备份范围</button></div></div>`;
+}
+
+function openDialog(content, cls = '') {
+  closeModal(); dialogReturnFocus = document.activeElement;
+  modalRoot.innerHTML = `<dialog class="dialog ${cls}">${content}<button class="dialog-close icon-button" data-action="close" aria-label="关闭窗口">${icon('close')}</button></dialog>`;
+  const dialog = modalRoot.querySelector('dialog'); dialog.showModal();
+  dialog.addEventListener('cancel', e => { e.preventDefault(); closeModal(); });
+  dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) closeModal(); } });
+}
+function closeModal(saveDraft = true) {
+  if (saveDraft) persistDraft();
+  clearTimeout(draftTimer); modalRoot.querySelector('dialog')?.close(); modalRoot.innerHTML = '';
+  previewUrls.forEach(url => URL.revokeObjectURL(url)); previewUrls = [];
+  if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus({ preventScroll: true });
+}
+function openEditor(entry) {
+  editorId = entry?.id || null; editorFiles = []; editorMedia = entry?.media ? [...entry.media] : [];
+  let draft = {};
+  if (!entry) { try { draft = JSON.parse(sessionStorage.getItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`) || '{}'); } catch {} }
+  const data = entry || { ...draft, occurredAt: draft.occurredAt || new Date().toISOString() };
+  openDialog(`<form id="entry-form"><h2>${entry ? '再添一点细节' : '今天，也值得记住'}</h2><p class="dialog-description">${entry ? '修改自己的文字，保留当时的心情。' : '一句话，一张照片，就很好。'}</p><div class="editor-who">${avatar(state.currentUser, true)}<span>${esc(state.currentUser.name)}</span><span>${icon('lock')}${CONFIG.mode === 'demo' ? '仅当前浏览器演示' : '发布后两人可见'}</span></div>
+    <div class="form-two"><label>记录类型<select name="type"><option value="note" ${data.type !== 'event' ? 'selected' : ''}>日常随记</option><option value="event" ${data.type === 'event' ? 'selected' : ''}>重要事件</option></select></label><label>发生在<input name="occurredAt" type="datetime-local" value="${dateTimeInput(data.occurredAt)}" required /></label></div>
+    <label>给这段回忆起个名字 <span class="optional">随记可不填</span><input name="title" value="${esc(data.title || '')}" placeholder="例如：下班路上，一起看了晚霞" maxlength="120" /></label>
+    <label>想记住的事<textarea name="content" rows="5" placeholder="慢慢写，这里没有字数任务。" maxlength="20000">${esc(data.content || '')}</textarea></label>
+    <fieldset class="mood-options"><legend>写下它时的心情 <span class="optional">可以不选</span></legend>${['happy', 'neutral', 'sad'].map(m => `<label class="mood-option"><input type="radio" name="mood" value="${m}" ${data.mood === m ? 'checked' : ''} />${icon(moodIcons[m])}<span>${moodNames[m]}</span></label>`).join('')}<label class="mood-option no-mood"><input type="radio" name="mood" value="" ${!data.mood ? 'checked' : ''} /><span>未填写</span></label></fieldset>
+    <div class="upload-row"><label class="upload-control">${icon('photo')}<span>添加照片或短视频</span><input id="media-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime" multiple /></label><small>最多 9 张图片 · 单个文件 50 MiB</small></div><div id="editor-previews" class="editor-previews"></div>
+    <label>小标签 <span class="optional">用逗号隔开</span><input name="tags" value="${esc((data.tags || []).join('，'))}" placeholder="日常，旅行，一起做饭" maxlength="180" /></label><p id="form-error" class="form-error" role="alert"></p><div class="dialog-footer"><span id="draft-status">${entry ? '作者与发布时间会保留' : draft.content || draft.title ? '已找回当前会话的草稿' : '关闭窗口前会保留文字草稿'}</span><button type="submit" class="primary">${icon('check')}${entry ? '保存修改' : '收好这一刻'}</button></div>${entry && canEdit(entry) ? `<button type="button" class="text-button danger delete-entry" data-action="delete" data-id="${esc(entry.id)}">移到回收站</button>` : ''}</form>`, 'editor-dialog');
+  renderEditorPreviews();
+}
+function renderEditorPreviews() {
+  const target = document.querySelector('#editor-previews'); if (!target) return;
+  previewUrls.forEach(url => URL.revokeObjectURL(url)); previewUrls = [];
+  const files = [...editorMedia, ...editorFiles.map(f => { const url = URL.createObjectURL(f); previewUrls.push(url); return { url, type: f.type.startsWith('video/') ? 'video' : 'image', name: f.name }; })];
+  target.innerHTML = files.map((file, i) => `<div>${file.type === 'video' ? `<video src="${safeUrl(file.url)}" preload="metadata"></video>` : `<img src="${safeUrl(file.url)}" alt="${esc(file.name)}" />`}<button type="button" class="preview-remove" data-action="remove-media" data-index="${i}" aria-label="移除${esc(file.name)}">${icon('close')}</button></div>`).join('');
+}
+function showDetail(id) {
+  const entry = state.entries.find(e => e.id === id); if (!entry) return;
+  openDialog(`<h2>${esc(entry.title || '日常的一页')}</h2><p class="dialog-description">${esc(user(entry.authorId).name)} · ${dateLabel(entry.occurredAt, true)}</p><p class="detail-body">${esc(entry.content)}</p><section class="comments"><h3>在这段回忆里说两句</h3>${entry.comments?.map(c => `<div class="comment-row">${avatar(user(c.authorId), true)}<div><strong>${esc(user(c.authorId).name)}</strong><p>${esc(c.content)}</p><time>${dateLabel(c.createdAt)}</time></div></div>`).join('') || '<p class="muted">还没有留言，写下你的感受吧。</p>'}</section><form id="comment-form" data-id="${esc(id)}"><label>想对 TA 说<textarea name="content" rows="2" maxlength="2000" required placeholder="看到这段回忆，想起了什么？"></textarea></label><button class="primary" type="submit">留在这一页</button><p class="form-error" role="alert"></p></form>`, 'detail-dialog');
+}
+function showMedia(id, index = 0) {
+  const entry = state.entries.find(e => e.id === id), file = entry?.media[index]; if (!file) return;
+  openDialog(`<div class="lightbox-stage">${file.type === 'video' ? `<video controls playsinline src="${safeUrl(file.url)}"></video>` : `<img src="${safeUrl(file.url)}" alt="${esc(file.name || entry.title)}" />`}</div><div class="lightbox-caption"><div><strong>${esc(entry.title || '日常的一帧')}</strong><small>${dateLabel(entry.occurredAt, true)} · ${index + 1} / ${entry.media.length}</small></div><div>${index > 0 ? `<button class="icon-button previous" data-action="media" data-id="${esc(id)}" data-index="${index - 1}" aria-label="上一张">${icon('chevron')}</button>` : ''}${index < entry.media.length - 1 ? `<button class="icon-button" data-action="media" data-id="${esc(id)}" data-index="${index + 1}" aria-label="下一张">${icon('chevron')}</button>` : ''}</div></div>`, 'lightbox');
+}
+function info(title, text) { openDialog(`<h2>${title}</h2><div class="prose">${text}</div>`, 'info-dialog'); }
+async function exportData(scope) {
+  toast('正在打包文字和媒体，请稍等…');
+  const blob = await provider.exportData(scope), url = URL.createObjectURL(blob), link = document.createElement('a');
+  link.href = url; link.download = `朝夕-${scope === 'all' ? '共同档案' : '我的回忆'}-${dayKey(new Date())}.json`; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000); toast('档案已生成，请保存下载文件。');
+}
+
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-action]'); if (!button || button.disabled) return;
+  const { action, id, value, index } = button.dataset;
+  try {
+    switch (action) {
+      case 'new': openEditor(); break;
+      case 'edit': openEditor(state.entries.find(e => e.id === id)); break;
+      case 'close': closeModal(); break;
+      case 'filter-type': filters.type = value; render(); break;
+      case 'clear-filters': Object.assign(filters, { query: '', type: 'all', mood: 'all', authorId: 'all', month: '' }); selectedDay = ''; render(); break;
+      case 'search-tag': filters.query = value; filters.type = 'all'; selectedDay = ''; if (route() !== 'timeline') history.pushState(null, '', '#timeline'); render(); break;
+      case 'reaction': button.disabled = true; await provider.toggleReaction(id); render(); break;
+      case 'favorite': button.disabled = true; await provider.toggleFavorite(id); render(); break;
+      case 'detail': showDetail(id); break;
+      case 'media': showMedia(id, Number(index)); break;
+      case 'delete': await provider.deleteEntry(id); closeModal(); render(); toast('已移到回收站，可以恢复。'); break;
+      case 'restore': await provider.restoreEntry(id); render(); toast('这段回忆已经回来了。'); break;
+      case 'remove-media': { const i = Number(index); i < editorMedia.length ? editorMedia.splice(i, 1) : editorFiles.splice(i - editorMedia.length, 1); renderEditorPreviews(); break; }
+      case 'calendar-day': selectedDay = selectedDay === value ? '' : value; render(); break;
+      case 'calendar-prev': case 'calendar-next': { const [y, m] = calendarCursor.split('-').map(Number), d = new Date(Date.UTC(y, m - 1 + (action === 'calendar-next' ? 1 : -1), 1)); calendarCursor = d.toISOString().slice(0, 7); render(); break; }
+      case 'add-anniversary': document.querySelector('#anniversary-fields').insertAdjacentHTML('beforeend', anniversaryFields()); break;
+      case 'remove-anniversary': button.closest('.anniversary-fields').remove(); break;
+      case 'export-mine': button.disabled = true; await exportData('mine'); button.disabled = false; break;
+      case 'export-all': button.disabled = true; await exportData('all'); button.disabled = false; break;
+      case 'reset-demo': info('恢复初始演示内容', '<p>这会替换此浏览器的试写和设置。需要的记录请先导出。</p><button class="secondary" data-action="confirm-reset">确认恢复示例</button>'); break;
+      case 'confirm-reset': state = await provider.resetDemo(); closeModal(); render(); toast('已恢复初始示例。'); break;
+      case 'resume-demo': await provider.switchUser(value); render(); break;
+      case 'logout': {
+        let failure;
+        try { await provider.logout(); } catch (error) { failure = error; }
+        finally { clearDrafts(); state.currentUser = null; closeModal(false); render(); }
+        if (failure) toast('本机已退出；网络异常，服务器会话退出尚未确认。', true);
+        break;
+      }
+      case 'about-mode': info(CONFIG.mode === 'demo' ? '现在是演示空间' : '共同空间的可见范围', CONFIG.mode === 'demo' ? '<p>你看到的称呼、日期和回忆都是示例。可以切换示例视角、试写、添加照片、留言、收藏和导出。</p><p>这些操作只保存在当前浏览器，不会同步到另一台设备。此公开演示不接收真实密码，请使用非私密的测试素材。</p><p>正式版需部署私密 Memos 服务后启用两人登录。</p>' : '<p>发布后的回忆只在共同空间内可见。草稿留在当前会话，退出时清除。</p><p>管理员具有读取和维护记录的权限；已经下载的内容无法通过网站收回。</p>'); break;
+      case 'backup-help': info('把回忆妥善留住', '<p>内容导出包含文字和媒体，方便离线阅读；它不是服务器的完整备份。</p><p>正式部署还需备份 Memos 数据库、附件卷与配置，保存一份加密异地副本，并实际验证恢复。详细步骤见仓库 docs/deployment.md。</p>'); break;
+      case 'credits': { const credits = await fetch('./assets/credits.json').then(r => r.json()); info('关于朝夕', `<p>朝夕，收藏两个人的日常与重要时刻。演示人物与故事均为虚构。</p><p>私密后端基于 <a href="https://github.com/usememos/memos" target="_blank" rel="noopener noreferrer">Memos（MIT）</a>；组件参考和许可记录见仓库文档。</p><h3>演示照片</h3>${credits.map(c => `<p><a href="${esc(c.source)}" target="_blank" rel="noopener noreferrer">${esc(c.title.replace('File:', ''))}</a><br>${esc(c.author)} · ${esc(c.license)}<br><small>${esc(c.changes)}</small></p>`).join('')}`); break; }
+      case 'retry': location.reload(); break;
+    }
+  } catch (error) { button.disabled = false; if (!state.currentUser) { clearDrafts(); closeModal(false); render(); } toast(error.message || '暂时没能完成，请重试。', true); }
+});
+
+function clearDrafts() { try { Object.keys(sessionStorage).filter(k => k.startsWith('memory-draft:')).forEach(k => sessionStorage.removeItem(k)); } catch {} }
+function persistDraft() {
+  try {
+    const form = document.querySelector('#entry-form');
+    if (!form || editorId || !state.currentUser) return;
+    const data = Object.fromEntries(new FormData(form));
+    data.occurredAt += ':00+08:00';
+    data.tags = (data.tags || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    sessionStorage.setItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`, JSON.stringify(data));
+    const status = document.querySelector('#draft-status');
+    if (status) status.textContent = '文字草稿已保留在当前会话';
+  } catch {}
+}
+
+document.addEventListener('input', event => {
+  if (event.target.id === 'search' && !event.isComposing) { clearTimeout(searchTimer); searchTimer = setTimeout(() => { filters.query = event.target.value; render(); }, 250); }
+  if (event.target.closest('#entry-form') && !editorId && event.target.type !== 'file') {
+    clearTimeout(draftTimer); draftTimer = setTimeout(persistDraft, 250);
+  }
+});
+document.addEventListener('change', async event => {
+  try {
+    if (['user-switch', 'mobile-user-switch'].includes(event.target.id)) { await provider.switchUser(event.target.value); closeModal(); render(); }
+    if (event.target.id === 'filter-author') { filters.authorId = event.target.value; render(); }
+    if (event.target.id === 'filter-mood') { filters.mood = event.target.value; render(); }
+    if (event.target.id === 'filter-month') { filters.month = event.target.value; render(); }
+    if (event.target.id === 'media-input') { editorFiles.push(...event.target.files); event.target.value = ''; renderEditorPreviews(); }
+  } catch (error) { toast(error.message, true); }
+});
+document.addEventListener('submit', async event => {
+  const form = event.target; if (!['entry-form', 'settings-form', 'comment-form', 'login-form'].includes(form.id)) return;
+  event.preventDefault(); const submit = form.querySelector('[type="submit"]'); if (submit) submit.disabled = true;
+  try {
+    const data = Object.fromEntries(new FormData(form));
+    if (form.id === 'entry-form') {
+      const previous = editorId ? state.entries.find(e => e.id === editorId) : {};
+      await provider.saveEntry({ ...previous, title: data.title.trim(), content: data.content.trim(), type: data.type, occurredAt: `${data.occurredAt}:00+08:00`, mood: data.mood || null, tags: (data.tags || '').split(/[,，]/).map(s => s.trim()).filter(Boolean), media: editorMedia }, editorFiles);
+      sessionStorage.removeItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`); closeModal(false); render(); toast(editorId ? '细节已经好好收好了。' : '这一刻，已经留住了。');
+    } else if (form.id === 'settings-form') {
+      const anniversaries = [...form.querySelectorAll('[data-anniversary]')].map(row => ({ id: row.dataset.anniversary, title: row.querySelector('[name="ann-title"]').value.trim(), date: row.querySelector('[name="ann-date"]').value, yearly: row.querySelector('[name="ann-yearly"]').checked }));
+      await provider.saveSettings({ ...state.settings, spaceName: data.spaceName.trim(), subtitle: data.subtitle.trim(), startDate: data.startDate, anniversaries }); render(); toast('我们的小世界，已更新。');
+    } else if (form.id === 'comment-form') { await provider.addComment(form.dataset.id, data.content.trim()); const id = form.dataset.id; render(); showDetail(id); toast('你的话，留在这段回忆里了。'); }
+    else { state = await provider.login(data.username, data.password); form.reset(); render(); }
+  } catch (error) { if (!state.currentUser && form.id !== 'login-form') { clearDrafts(); closeModal(false); render(); toast('登录已失效，请重新登录。', true); } else { const target = form.querySelector('.form-error'); if (target) target.textContent = error.message; else toast(error.message, true); } }
+  finally { if (submit?.isConnected) submit.disabled = false; }
+});
+window.addEventListener('hashchange', () => { selectedDay = ''; filters.query = ''; filters.type = route() === 'events' ? 'event' : 'all'; render(); window.scrollTo({ top: 0 }); });
+
+function renderLogin() {
+  if (CONFIG.mode === 'demo') {
+    app.innerHTML = `<main class="boot"><img src="./assets/mark.svg" alt="" width="48" height="48" /><h1>选一个示例视角</h1><p>这是本机演示，不需要密码。</p>${state.users.map(u => `<button class="secondary" data-action="resume-demo" data-value="${esc(u.id)}">${esc(u.name)}</button>`).join('')}</main>`;
+    return;
+  }
+  app.innerHTML = `<main class="login-page"><div class="login-brand"><img src="./assets/mark.svg" alt="" width="56" height="56" /><span>朝夕</span></div><div class="login-panel"><h1>回到我们的小世界</h1><p>那些平凡又珍贵的日子，都在这里。</p><form id="login-form"><label>账号<input name="username" autocomplete="username" required /></label><label>密码<input name="password" type="password" autocomplete="current-password" required /></label><p class="form-error" role="alert"></p><button type="submit" class="primary">翻开我们的记忆${icon('arrow')}</button></form><p class="login-footnote">${icon('lock')}仅受邀的两位成员可登录 · 维护账号另行使用</p></div><span class="login-close">朝夕之间，都是我们。</span></main>`;
+}
+
+try { state = await provider.init(); render(); }
+catch (error) { app.innerHTML = `<main class="boot"><img src="./assets/mark.svg" alt="" width="48" height="48" /><h1>这页暂时没能打开</h1><p>${esc(error.message || '请检查网络或浏览器存储设置。')}</p><button class="secondary" data-action="retry">再试一次</button></main>`; }

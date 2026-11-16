@@ -1,0 +1,5 @@
+# Optional local-only native Memos admin access. Do not change 127.0.0.1 to 0.0.0.0.
+services:
+  memos:
+    ports:
+      - "127.0.0.1:5231:5230"

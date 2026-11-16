@@ -1,0 +1,38 @@
+[
+  {
+    "file": "photo-coffee.jpg",
+    "title": "File:Cup of coffee in Café Butter - Prenzlauer Berg, Berlin.jpg",
+    "author": "Edward",
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "source": "https://commons.wikimedia.org/wiki/File:Cup_of_coffee_in_Caf%C3%A9_Butter_-_Prenzlauer_Berg,_Berlin.jpg",
+    "changes": "在界面中按容器裁切展示；下载文件未作编辑。"
+  },
+  {
+    "file": "photo-sea.jpg",
+    "title": "File:Rapanui Rock during sunset, Sumner, Christchurch, New Zealand.jpg",
+    "author": "Michal Klajban",
+    "license": "CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Rapanui_Rock_during_sunset,_Sumner,_Christchurch,_New_Zealand.jpg",
+    "changes": "在界面中按容器裁切展示；下载文件未作编辑。"
+  },
+  {
+    "file": "photo-dinner.jpg",
+    "title": "File:Romantic dinner for one (Unsplash).jpg",
+    "author": "Janko Ferlič thepootphotographer",
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "source": "https://commons.wikimedia.org/wiki/File:Romantic_dinner_for_one_(Unsplash).jpg",
+    "changes": "在界面中按容器裁切展示；下载文件未作编辑。"
+  },
+  {
+    "file": "photo-city.jpg",
+    "title": "File:Night view of Rokkō Island and Higashinada-ku, Kobe, Japan.jpg",
+    "author": "Laitr Keiows",
+    "license": "CC BY-SA 3.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Night_view_of_Rokk%C5%8D_Island_and_Higashinada-ku,_Kobe,_Japan.jpg",
+    "changes": "在界面中按容器裁切展示；下载文件未作编辑。"
+  }
+]

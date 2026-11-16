@@ -1,0 +1,104 @@
+/*
+ * Primary icon feedback adapted from Uiverse.io by alexmaracinaru.
+ * Component: https://uiverse.io/alexmaracinaru/brown-bobcat-65
+ * Source: https://github.com/uiverse-io/galaxy/blob/adbd2adde0a299a3956ea288fb444ec01891ca41/Buttons/alexmaracinaru_brown-bobcat-65.html
+ * Adaptation: scoped selectors, gentle displacement, existing page palette,
+ * disabled guards, keyboard focus and reduced-motion support. The original
+ * expanding blue disc, font and SVG artwork are not included.
+ * Reaction-button styling below is original to Memory contributors.
+ *
+ * MIT License
+ * Copyright - 2026 alexmaracinaru (Alex Maracinaru)
+ * Copyright (c) 2023 Uiverse.io
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+.primary .icon {
+  flex-shrink: 0;
+  transform-origin: center;
+  transition: transform 220ms cubic-bezier(0.2, 0.75, 0.3, 1.35);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .primary:not(:disabled):not([aria-disabled="true"]):hover .icon {
+    transform: translateX(2px);
+  }
+}
+
+.primary:not(:disabled):not([aria-disabled="true"]):focus-visible .icon {
+  transform: translateX(2px);
+}
+
+.primary:not(:disabled):not([aria-disabled="true"]):active .icon {
+  transform: translateX(1px) scale(0.94);
+}
+
+.primary:focus-visible,
+.reaction-button:focus-visible {
+  outline: 3px solid var(--component-focus, #6d8765);
+  outline-offset: 3px;
+}
+
+.reaction-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.reaction-button .icon {
+  transform-origin: 50% 60%;
+  transition: transform 160ms ease, fill 160ms ease;
+}
+
+.reaction-button[aria-pressed="true"] {
+  color: var(--reaction-ink, #9d4d60);
+  background-color: var(--reaction-fill, #f7e4e9);
+}
+
+.reaction-button[aria-pressed="true"] .icon {
+  fill: currentColor;
+  animation: memory-heart-acknowledge 320ms ease-out 1;
+}
+
+.reaction-button:not(:disabled):not([aria-disabled="true"]):active .icon {
+  transform: scale(0.94);
+}
+
+.reaction-button:disabled .icon,
+.reaction-button[aria-disabled="true"] .icon {
+  animation: none;
+}
+
+@keyframes memory-heart-acknowledge {
+  0%, 100% { transform: scale(1); }
+  45% { transform: scale(1.14); }
+  72% { transform: scale(0.98); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primary .icon,
+  .reaction-button,
+  .reaction-button .icon {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}

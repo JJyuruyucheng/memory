@@ -1,0 +1,11 @@
+dist/
+node_modules/
+.env
+.env.*
+!.env.example
+data/
+backups/
+*.log
+.taste-skill/
+artifacts/
+deploy/config.local.json
