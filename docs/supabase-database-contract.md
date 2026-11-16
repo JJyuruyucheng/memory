@@ -1,6 +1,6 @@
 # Supabase 数据库与 Provider 契约
 
-状态：正式迁移为 `supabase/migrations/20261116041930_memory_private_space.sql`，已应用于专用 memory 项目。先用官方 CLI 创建迁移文件，工具应用后按远端实际 migration version 对齐文件名。`supabase/verify-isolation.sql` 已在云端单事务执行通过并回滚，临时 Auth 用户没有残留。之后已通过官方 API 初始化三身份、UUID 白名单及私有桶，并用真实用户 JWT 完成 Storage 字节请求和十一项权限检查，测试文件、记录和会话清理后另经 SQL 核对。原生密码接口缺失及伪造 CAPTCHA 均被拒；真实 widget 加口令登录仍待验。最新部署及开关状态见 [验证记录](verification-free.md)，不能把 SQL 模拟身份断言等同真实认证。
+状态：正式迁移为 `supabase/migrations/20261116041930_memory_private_space.sql`，已应用于专用 memory 项目。先用官方 CLI 创建迁移文件，工具应用后按远端实际 migration version 对齐文件名。`supabase/verify-isolation.sql` 已在云端单事务执行通过并回滚，临时 Auth 用户没有残留。之后已通过官方 API 初始化三身份、UUID 白名单及私有桶，并用真实用户 JWT 完成 Storage 字节请求和十一项权限检查，测试文件、记录和会话清理后另经 SQL 核对。原生密码接口缺失及伪造 CAPTCHA 均被拒；用户已确认真实 widget 加口令登录并进入时间线，过期及重放专项仍待验。最新部署及开关状态见 [验证记录](verification-free.md)，不能把 SQL 模拟身份断言等同真实认证。
 
 ## 身份与启动门
 

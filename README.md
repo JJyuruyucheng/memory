@@ -4,13 +4,13 @@
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
-**[Cloudflare 正式入口：朝夕](https://memory-awv.pages.dev/)** 已部署，目前正在验收真实 Turnstile 与账号口令登录，尚未完成日常使用验收。原生 Auth 已拒绝缺失和伪造验证码，真实用户 JWT 下的记录与私有图片权限探针已通过；这些结果不代表真实 widget 验证码与口令登录已经成功。[GitHub Pages](https://jjyuruyucheng.github.io/memory/) 继续作为 `preview`：不加载记录、不提交真实口令，也没有跳过登录入口。
+**[Cloudflare 正式入口：朝夕](https://memory-awv.pages.dev/)** 已上线；用户已确认使用 `xbl` 完成真实 Turnstile 与口令登录并进入时间线。原生 Auth 已拒绝缺失和伪造验证码，真实用户 JWT 下的记录与私有图片权限探针也已通过。真实验证码 token 的过期与重放拒绝仍待专项验收。[GitHub Pages](https://jjyuruyucheng.github.io/memory/) 继续作为 `preview`：不加载记录、不提交真实口令，也没有跳过登录入口。
 
 ## 四种运行模式
 
 | 能力 | GitHub Pages 预览 `preview` | 本地演示 `demo` | Memos 自托管 `live` | Supabase 免费托管 `supabase` |
 | --- | --- | --- | --- | --- |
-| 登录界面 | 仅展示，不提交真实口令 | 演示身份交互，不是真实认证 | 网关验证码与 Memos 账号会话 | 原生 Auth 与 Turnstile；真实登录验收中 |
+| 登录界面 | 仅展示，不提交真实口令 | 演示身份交互，不是真实认证 | 网关验证码与 Memos 账号会话 | 原生 Auth 与 Turnstile；用户已确认真实登录成功 |
 | 记录与照片 | 不加载，不提供演示绕过入口 | 虚构样例及当前浏览器试写 | 通过 Memos 读写 | 登录后经数据库 RLS 与私有 Storage 读写 |
 | 发布、评论、收藏 | 不可使用 | 本机演示数据 | 依赖正式部署与授权 | 已实现，依赖真实会话与数据库授权 |
 | 双人跨设备同步 | 不支持 | 不支持 | 依赖运行中的 Memos 和共享空间 | 共享云端数据，双设备使用仍待验 |
@@ -84,9 +84,9 @@ GitHub Pages 只托管静态页面，不能运行 Memos、数据库或私密存�
 
 ## 正式使用
 
-当前优先 [免费起步方案](docs/hosting-free.md)：Cloudflare Pages 托管前端，Supabase Free 提供原生认证、数据库与私有媒体，Turnstile 负责验证码。固定三账号、业务身份与私有桶已初始化，公开注册和匿名登录已关闭。使用公共 key 的直接密码请求在缺失或伪造验证码时均被原生 Auth 拒绝；真实 widget token 与正确口令的成功登录仍在验收中，尚不能称日常使用已经开放。口令和私密密钥不写入仓库或浏览器构建包。
+当前使用 [免费起步方案](docs/hosting-free.md)：Cloudflare Pages 托管前端，Supabase Free 提供原生认证、数据库与私有媒体，Turnstile 负责验证码。固定三账号、业务身份与私有桶已初始化，公开注册和匿名登录已关闭。使用公共 key 的直接密码请求在缺失或伪造验证码时均被原生 Auth 拒绝；用户已在正式入口使用 `xbl` 完成真实 widget 验证与口令登录，并确认成功进入时间线。真实 token 的过期、重放拒绝尚未专项测试，双设备使用及完整恢复也仍待验。口令和私密密钥不写入仓库或浏览器构建包。
 
-真实 HTTP 权限探针的 11 项检查已全部通过，包含九图发布、三账号鉴权下载、匿名拒绝、跨作者修改拒绝及原子换图；业务断言使用普通用户 JWT，管理员凭证只用于测试会话准备与本次测试数据清理。清理后独立查询确认测试记录、媒体登记、Storage 对象和测试会话均无残留，初始化与探针端点均已覆写为 410。探针使用管理员生成的临时 magic-link 会话，不能代替密码或 CAPTCHA 成功验收；详见 [验收记录](docs/verification-free.md)。
+真实 HTTP 权限探针的 11 项检查已全部通过，包含九图发布、三账号鉴权下载、匿名拒绝、跨作者修改拒绝及原子换图；业务断言使用普通用户 JWT，管理员凭证只用于测试会话准备与本次测试数据清理。清理后独立查询确认测试记录、媒体登记、Storage 对象和测试会话均无残留，初始化与探针端点均已覆写为 410。探针使用管理员生成的临时 magic-link 会话，其权限结论与上述用户实际密码及验证码登录证据分别记录；详见 [验收记录](docs/verification-free.md)。
 
 现有 Memos/Render 模板保留为付费自托管备选，没有创建其资源或订阅。
 

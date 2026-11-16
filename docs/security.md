@@ -6,6 +6,8 @@
 
 - `supabase` 是免费托管适配。官方 SDK 禁用令牌持久化及 URL 会话检测；访问与刷新令牌只留内存，退出清理页面与 Blob URL。业务表和私有 Storage 通过受保护 `profiles` 的 UUID/角色授权，所有成员及媒体策略还受数据库默认关闭的 `runtime_guard.authReady` 限制。该开关不能由前端或 service_role 修改；未完成原生 CAPTCHA、关闭注册及权限实测时不能打开。
 - Supabase 密码接口的 CAPTCHA 必须在 Auth 原生配置启用；前端 `authReady` 和按钮禁用不构成后端防护。Supabase 使用自己的原生限流，不沿用下文 Memos 网关的 IP/账号计数或 hostname/action 校验声明。Turnstile widget 必须限定正式域名。验证码不保证抵御所有分布式攻击，短初始口令仍有风险。
+- 本次已在 Supabase 控制台保存两项更严格的限额：token endpoint 与 sign-ups/sign-ins 均为每 IP 每五分钟补充 5 次请求额度；token endpoint 包括密码与会话刷新。平台使用令牌桶，仍可允许短时突发，因此不能称为“输错五次锁号”或严格固定窗口计数；尚未通过压测验证 429。IP Address Forwarding 保持关闭。[官方限流语义](https://supabase.com/docs/guides/auth/rate-limits)
+- Turnstile Managed 根据风险决定是否交互，自动通过仍须由原生 Auth 服务端校验。官方说明 token 重用检测存在分布式传播窗口，近同时验证可能重复成功；此免费模式未增加跨实例原子 token 占用表，不承诺绝对防重放。真实 token 过期与重放专项尚未验证。[服务端校验及传播限制](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)
 - 新帖先作为作者私有草稿，媒体预留并上传验证后，通过 `publish_entry` 原子切换最终附件。正式最多九张图片；临时上传也有独立上限。数据库与对象存储不共享事务，发布成功后旧附件清理失败会明确提示；缺失原字节时完整导出失败，不虚报完整备份。
 
 - `demo` 是本地演示，身份切换不是登录。文字与上传文件保存在当前浏览器 IndexedDB，不向 Memos 同步，不适合保存私人资料。

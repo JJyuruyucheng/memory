@@ -1,18 +1,22 @@
 # 免费起步方案
 
-核查日期：2026-11-16。当前采用 **Cloudflare Pages Free + Supabase Free + Cloudflare Turnstile Free** 路线。GitHub 的 `memory` 仓库继续管理源码；现有 GitHub Pages 仍是登录预览。用户已批准在指定 Free 组织创建专用 `memory` 项目（新加坡），实际创建报价为 **$0/月**；项目已创建并应用业务数据库迁移。数据库门及本地发布配置已启用，线上新配置部署和真实登录尚待验收。
+核查日期：2026-11-16。当前采用 **Cloudflare Pages Free + Supabase Free + Cloudflare Turnstile Free** 路线。GitHub 的 `memory` 仓库继续管理源码；现有 GitHub Pages 仍是登录预览。用户已批准在指定 Free 组织创建专用 `memory` 项目（新加坡），实际创建报价为 **$0/月**；项目已创建并应用业务数据库迁移。数据库门及线上登录配置已启用，用户已确认通过正式页面的密码与 widget 验证进入时间线。
 
 ## 当前已完成和待完成
 
-已完成：官方 Supabase SDK 本地固定版本、前端 provider、七张业务表及 RLS、作者私有草稿、原子选图、媒体登记与 Storage 权限规则。真实云端 SQL 隔离测试通过并全部回滚；匿名 HTTP 请求七表均得到 401/42501。现已通过官方 API 初始化三个已确认、非匿名的固定 Auth 身份及 private bucket，并写入三条 UUID 白名单 profiles；桶上限为 50,000,000 字节、八种 MIME。
+已完成：官方 Supabase SDK 本地固定版本、前端 provider、七张业务表及 RLS、作者私有草稿、原子选图、媒体登记与 Storage 权限规则。真实云端 SQL 隔离测试通过并全部回滚；匿名 HTTP 请求七表均得到 401/42501，在数据库门开启为 `true` 后使用公共 publishable key 复测仍全部为 401/42501。现已通过官方 API 初始化三个已确认、非匿名的固定 Auth 身份及 private bucket，并写入三条 UUID 白名单 profiles；桶上限为 50,000,000 字节、八种 MIME。
 
 Cloudflare Pages 已关联且只授权 `JJyuruyucheng/memory`，首次部署成功，入口为 https://memory-awv.pages.dev。Turnstile 的 `memory-login` 使用 Managed 模式，仅允许该精确 hostname，pre-clearance 关闭。Supabase 公共 Auth settings 已实际确认公开注册关闭、匿名登录关闭，只有 Email 登录开启。
 
+后续历史发布提交 `009ce6b` 的 Cloudflare 部署检查成功。正式域名无查询参数的 `/src/config.js` 实际返回 HTTP 200，`mode=supabase`、`authReady=true`，含 `Cache-Control: no-store` 与 CSP 响应头；实际浏览器页面正常，官方 Turnstile 自动显示“安全验证已完成”。其后用户明确确认使用 `xbl`、密码与 widget 验证成功进入正式站时间线；该成功事实来自用户确认，并非维护者亲自观察或代为输入口令。
+
+用户已选择保留 Managed 自动通过，重点保证后端防护。Managed 模式只在必要时要求交互，自动完成不等于关闭验证码；原生 Auth 仍须验证 token。[官方 widget 模式](https://developers.cloudflare.com/turnstile/concepts/widget/)
+
 Supabase 控制台已开启并保存原生 Turnstile；使用公共 key 的原生密码接口对缺失及伪造验证码均实际返回 400/`captcha_failed`，未产生会话。真实 HTTP 权限探针已用官方签发的三个用户 JWT 完成 11 项检查，94 次请求及 10 个真实微型 PNG 的上传、下载、九图限制、原子替换和隔离检查全部通过；Storage、业务行和会话均已清理。探针使用管理员生成的 magiclink，明确没有测试密码 CAPTCHA。
 
-探针结束后独立读回 Auth 用户和 profiles 各为 3，entries、media、storage.objects、sessions 均为 0。两项临时工具均已退役为 410，原 capability 复测确认关闭。维护者随后核对状态，已开启数据库门；本地前端 `authReady=true` 构建成功，线上新配置仍待推送部署确认。接下来进行真实 widget token 加密码的页面登录及操作验收。有效 token 的成功、过期和重放尚未验证，不能把管理员 magiclink 或伪造 token 的拒绝当作这些证据。
+探针结束后独立读回 Auth 用户和 profiles 各为 3，entries、media、storage.objects、sessions 均为 0；这是用户正式登录之前的清理时点，不代表登录后仍无会话。两项临时工具均已退役为 410，原 capability 复测确认关闭。维护者随后开启数据库门，前端 `authReady=true` 构建及线上部署均已确认，用户其后确认真实页面登录成功。真实 token 过期、重放及进一步页面操作仍未验收，不能以一次成功登录、管理员 magiclink 或伪造 token 的拒绝替代。
 
-最新数据库安全 Advisor 有一条 WARN：泄露密码保护未启用；控制台该项不可操作，原因及套餐可用性尚未核实。一条 INFO 是 `memory_private.runtime_guard` 启用 RLS 且没有开放策略，这是有意拒绝全部 API 访问。此前空项目索引尚未使用的 INFO 保留观察，不为消除提示删除必要索引。[Advisor 说明](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy)
+最新数据库安全 Advisor 有一条 WARN：泄露密码保护未启用。官方文档已核实该功能仅 Pro 及以上提供，定价页明确 Free 不包含；当前保持免费方案，不升级付费，此告警仍保留。[密码安全](https://supabase.com/docs/guides/auth/password-security)、[套餐限制](https://supabase.com/pricing)。一条 INFO 是 `memory_private.runtime_guard` 启用 RLS 且没有开放策略，这是有意拒绝全部 API 访问。此前空项目索引尚未使用的 INFO 保留观察，不为消除提示删除必要索引。[Advisor 说明](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy)
 
 具体证据和未验收范围见 [本轮验证记录](verification-free.md)。
 
@@ -44,7 +48,9 @@ Supabase 控制台已开启并保存原生 Turnstile；使用公共 key 的原�
 4. 照片和视频保存在 **private bucket**，下载也执行 RLS；继续采用鉴权下载后生成 Blob URL，不使用公开桶或可转发的长期签名链接。退出时清理页面、令牌和 Blob URL。[私有存储权限](https://supabase.com/docs/guides/storage/buckets/fundamentals)
 5. 浏览器仅允许公共 publishable key，绝不放入 `service_role`、数据库密码或验证码 Secret。纯静态前端无法沿用 Memos 同源 HttpOnly Cookie；初版建议关闭 SDK 默认持久化、令牌只留内存，刷新后重新登录。如要保留刷新会话，须另行设计并审查服务端会话层。[前端数据安全](https://supabase.com/docs/guides/database/secure-data)、[Auth 客户端](https://supabase.com/docs/reference/javascript/auth)
 
-原生 Auth 已有限流，但不是每账号永久锁定，也不是防御分布式攻击的保证。短初始口令的风险不会被验证码消除。[Auth 限流](https://supabase.com/docs/guides/auth/rate-limits)
+本轮已在 Supabase Rate Limits 控制台把 token refresh 从 150/5min、signups/signins 从 30/5min 均改为 5/5min；保存后重新读取页面，两项值均为 5、两个 Save 按钮均禁用，IP forwarding 关闭。仅确认配置保存，尚未进行 HTTP 429 压测。官方 token endpoint 限流覆盖 password、refresh、ID token、PKCE，使用 token bucket 并允许最高 30 次突发，因此配置值不代表“严格五分钟五次”或“五次失败锁号”，也不能保证阻止分布式攻击。短初始口令的风险不会被验证码消除。[Auth 限流](https://supabase.com/docs/guides/auth/rate-limits)
+
+真实 token 的过期和重放专项仍未测试。Cloudflare 官方说明 token 复用状态最终一致，近同时的重复验证可能都成功；本项目不宣称跨实例原子防重放。一次登录成功和伪造 token 被拒不能替代这项边界验收。[服务端校验及网络收敛](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)
 
 ## 实施顺序与验收
 
@@ -52,11 +58,11 @@ Supabase 已连接，专用项目、迁移和 provider 已准备。Cloudflare �
 
 若独立使用 `node scripts/build.mjs`，仍可采用 [公开环境变量模板](../deploy/cloudflare.env.example)；不能混淆两个入口的配置来源。
 
-本轮已按 [数据库契约和初始化顺序](supabase-database-contract.md) 用官方 Auth Admin / Storage API 初始化固定三身份及私有桶，并由维护者写入真实 UUID 白名单。原生验证码拒绝行为确认后，曾受控打开数据库门完成真实 HTTP 权限验收，finally 重新关闭；完成清理复核后，维护者已再次开启数据库门并启用本地前端发布配置，尚待线上部署确认及真实页面登录验收。需要的 Secret 仅进入可信服务端或平台配置，不发送到聊天或公开仓库。
+本轮已按 [数据库契约和初始化顺序](supabase-database-contract.md) 用官方 Auth Admin / Storage API 初始化固定三身份及私有桶，并由维护者写入真实 UUID 白名单。原生验证码拒绝行为确认后，曾受控打开数据库门完成真实 HTTP 权限验收，finally 重新关闭；完成清理复核后，维护者再次开启数据库门并完成前端启用配置的线上部署，用户已确认正式页面密码登录成功。需要的 Secret 仅进入可信服务端或平台配置，不发送到聊天或公开仓库。
 
 已提供默认关闭的 [短期初始化工具](../supabase/bootstrap/README.md)，仅创建固定三身份及严格私有桶，不修改既有密码、不写 profiles、不打开权限门。本轮已短期部署执行成功，随后覆盖为 HTTP 410，并用原 capability 复测关闭；原生 Admin API 另行读回身份及桶配置。它的 17 项本地 mock 测试与这次真实执行是不同证据。[真实 HTTP 权限探针](../supabase/verification/README.md) 也已执行并同样退役。Supabase 原生密码硬下限为 6 字符，不能保留 5 字符初始口令，也不能用前端补位绕过。
 
-真实 HTTP 验收已覆盖匿名记录与原图拒绝、跨作者修改拒绝、草稿隔离及管理员维护权限。开放入口后的页面验收仍需验证真实验证码和密码成功登录、退出后不再显示内容、九图完整展示、网络失败不误报保存成功，并验证双设备访问与包含原始媒体的导出。源码文件存在或模拟测试通过，不能替代真实云权限及页面验收。
+真实 HTTP 验收已覆盖匿名记录与原图拒绝、跨作者修改拒绝、草稿隔离及管理员维护权限，用户已确认一次正式页面密码与 widget 登录成功。后续仍需验证真实 token 过期和重放、退出后不再显示内容、九图完整展示、网络失败不误报保存成功，并验证双设备访问与包含原始媒体的导出。源码文件存在或模拟测试通过，不能替代真实云权限及页面验收。
 
 旧 IndexedDB 演示记录不会因方案切换自动删除，但**尚未实现迁入 Supabase 的工具**，也不应声称它们已经云端备份。上传前压缩可以作为控制用量的选择，不自动替换已有原图。
 
