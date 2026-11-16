@@ -20,7 +20,7 @@ function loadTurnstile() {
   return scriptPromise;
 }
 
-export function mountLoginVerification(root, { isBusy = () => false } = {}) {
+export function mountLoginVerification(root, { isBusy = () => false, getConfig } = {}) {
   const form = root.querySelector('#login-form');
   const submit = form.querySelector('[type="submit"]');
   const status = root.querySelector('#verification-status');
@@ -38,9 +38,13 @@ export function mountLoginVerification(root, { isBusy = () => false } = {}) {
     if (loading || destroyed) return;
     loading = true; invalidate('正在准备安全验证…');
     try {
-      const response = await fetch('/auth/config', { cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]) });
-      if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('登录服务暂时不可用，请稍后重试。');
-      const config = await response.json();
+      let config;
+      if (getConfig) config = await getConfig();
+      else {
+        const response = await fetch('/auth/config', { cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]) });
+        if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('登录服务暂时不可用，请稍后重试。');
+        config = await response.json();
+      }
       if (!config.configured || typeof config.siteKey !== 'string' || !/^[A-Za-z0-9_-]{10,100}$/.test(config.siteKey) || config.action !== 'login') throw new Error('安全登录尚未配置完成，请联系管理员。');
       api = await loadTurnstile();
       if (destroyed) return;

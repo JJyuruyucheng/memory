@@ -1,4 +1,14 @@
 import test from 'node:test';
+
+test('无法下载的单个附件显示提示且不生成空原图请求，保留其他照片索引', () => {
+  const html = renderEntryMedia({ id: 'memory', media: [
+    { type: 'image', name: '缺失的照片', unavailable: true, url: '' },
+    { type: 'image', name: '仍可打开', url: 'blob:ok' },
+  ] }, escapeHtml);
+  assert.match(html, /附件暂时无法加载/);
+  assert.ok(!html.includes('src=""'));
+  assert.match(html, /data-index="1"/);
+});
 import assert from 'node:assert/strict';
 import { escapeHtml } from '../src/domain.js';
 import { renderEntryMedia } from '../src/entry-media.js';

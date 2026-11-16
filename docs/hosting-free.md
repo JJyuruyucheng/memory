@@ -1,6 +1,16 @@
 # 免费起步方案
 
-核查日期：2026-11-16。当前推荐 **Cloudflare Pages Free + Supabase Free + Cloudflare Turnstile Free**。GitHub 的 `memory` 仓库继续管理源码；现有 GitHub Pages 仍是登录预览。本文件是核实后的实施方案，**尚未创建免费云项目、实现 Supabase provider 或启用正式登录**。
+核查日期：2026-11-16。当前采用 **Cloudflare Pages Free + Supabase Free + Cloudflare Turnstile Free** 路线。GitHub 的 `memory` 仓库继续管理源码；现有 GitHub Pages 仍是登录预览。用户已批准在指定 Free 组织创建专用 `memory` 项目（新加坡），实际创建报价为 **$0/月**；项目已创建并应用业务数据库迁移。正式登录尚未启用。
+
+## 当前已完成和待完成
+
+已完成：官方 Supabase SDK 本地固定版本、前端 provider、七张业务表及 RLS、作者私有草稿、原子选图、媒体登记与 Storage 权限规则。真实云端 SQL 隔离测试通过并全部回滚；匿名 HTTP 请求七表均得到 401/42501。数据库启动门保持 false；项目当前没有 Auth 用户、正式 profiles、记录或 bucket。
+
+尚待完成：用户 Cloudflare 控制台接入、Pages 前端发布、Turnstile 正式域名与原生 Auth CAPTCHA、关闭注册/匿名及无关登录方式、通过官方 API 创建三账号与 private bucket、真实用户 JWT 上传下载及登录验收。没有这些证据时不能把 `MEMORY_AUTH_READY` 或数据库门设为 true。SQL 模拟身份、SDK mock 测试和浏览器登录页加载不等于已验证真实验证码。
+
+数据库安全 Advisor 当前没有 ERROR/WARN；一条 INFO 是 `memory_private.runtime_guard` 启用 RLS 且没有开放策略，这是有意拒绝全部 API 访问。空项目索引尚未使用的 INFO 保留观察，不为消除提示删除必要索引。[Advisor 说明](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy)
+
+具体证据和未验收范围见 [本轮验证记录](verification-free.md)。
 
 ## 推荐判断
 
@@ -20,7 +30,7 @@
 
 来源：[Supabase 定价](https://supabase.com/pricing)、[上传上限](https://supabase.com/docs/guides/storage/uploads/file-limits)、[当前暂停政策](https://supabase.com/docs/guides/platform/free-project-pausing)、[Turnstile 方案](https://developers.cloudflare.com/turnstile/plans/)。以上为当前额度，不是永久不变的承诺。Supabase 官方说明免费超额会通知并可能限制服务；不应默认为升级付费。[计费 FAQ](https://supabase.com/docs/guides/platform/billing-faq)
 
-本轮确认官方提供 Free，但**尚未在用户账号实际走完无绑卡开通流程**。如控制台要求付款、升级或开通按量收费产品，应停止并说明，不代替用户接受新账单。大陆网络下两人的登录、上传及验证码实际可达性也尚未验证。
+本轮已在用户 Free 组织实际创建 $0/月项目，未开通付费订阅。如后续控制台要求付款、升级或开通按量收费产品，应停止并说明，不代替用户接受新账单。大陆网络下两人的登录、上传及验证码实际可达性尚未验证。
 
 ## 登录、权限与媒体方案
 
@@ -34,7 +44,9 @@
 
 ## 实施顺序与验收
 
-先安装并连接用户的 Supabase 账号，确认组织为 Free、可用项目额度与实际开通要求；再准备专用项目、可审阅数据库迁移、受保护成员表、RLS 与私有 bucket。然后新增 Supabase provider，适配原有页面接口，并配置 Cloudflare Pages 与 Turnstile。
+Supabase 已连接，专用项目、迁移和 provider 已准备。Cloudflare 构建使用 [公开环境变量模板](../deploy/cloudflare.env.example)：构建命令 `node scripts/build.mjs`、产物目录 `dist`、Node 24。先以 `MEMORY_AUTH_READY=false` 发布空登录壳取得正式域名，再限定 Turnstile hostname，配置 Supabase Auth 原生 CAPTCHA，关闭公开注册/匿名及无关认证方式。官方连接目前不提供 Auth 配置更新接口，这些配置需要已登录的控制台完成；不提取连接的 OAuth/PAT 绕过。
+
+之后按 [数据库契约和初始化顺序](supabase-database-contract.md) 用官方 Auth Admin / Storage API 初始化固定三身份及私有桶，写入真实 UUID 白名单；真实验证码与权限实测完成后才打开数据库门及前端登录。需要的 Secret 仅进入可信服务端或平台配置，不发送到聊天或公开仓库。
 
 在开放正式入口前，实际验证：匿名无法读取记录/统计/原图，未知账号不能进入，普通成员不能修改对方记录或伪造管理员，无验证码直接调用原生登录失败，退出后不再显示内容，九图完整展示，网络失败不误报保存成功。还需验证双设备访问与包含原始媒体的导出。源码文件存在或模拟测试通过，不能替代真实云权限验收。
 

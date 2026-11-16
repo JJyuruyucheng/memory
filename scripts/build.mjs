@@ -3,6 +3,8 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { securityHeaders } from './security-headers.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const checkProcess = promisify(execFile);
@@ -137,13 +139,35 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
   const dist = path.resolve(outDir ?? path.join(root, 'dist'));
   const defaultOutput = path.join(root, 'dist');
   const mode = env.MEMORY_MODE ?? 'demo';
-  if (!['demo', 'preview', 'live'].includes(mode)) throw new Error('MEMORY_MODE 只能为 demo、preview 或 live。');
+  if (!['demo', 'preview', 'live', 'supabase'].includes(mode)) throw new Error('MEMORY_MODE 只能为 demo、preview、live 或 supabase。');
   const space = mode === 'live' ? (env.MEMORY_SPACE ?? '').trim() : '';
   if (mode === 'live' && !/^spaces\/[A-Za-z0-9_-]+$/.test(space)) {
     throw new Error('live 构建必须指定 MEMORY_SPACE=spaces/<id>，例如 spaces/our-story。');
   }
   if (env.MEMORY_TARGET === 'pages' && mode !== 'preview') {
     throw new Error('GitHub Pages 只允许发布 preview 登录预览模式。');
+  }
+  const supabase = {};
+  let sdk;
+  if (mode === 'supabase') {
+    const origin = (env.MEMORY_SUPABASE_URL ?? '').trim();
+    const key = (env.MEMORY_SUPABASE_PUBLISHABLE_KEY ?? '').trim();
+    if (!/^https:\/\/[a-z]{20}\.supabase\.co$/.test(origin)) throw new Error('MEMORY_SUPABASE_URL 必须为专用项目的 HTTPS 地址。');
+    if (!/^sb_publishable_[A-Za-z0-9_-]{20,200}$/.test(key)) throw new Error('只允许 Supabase publishable 公共密钥，禁止 secret/service_role。');
+    const siteKey = (env.MEMORY_TURNSTILE_SITE_KEY ?? '').trim();
+    const authReady = env.MEMORY_AUTH_READY === 'true';
+    if (authReady && (!/^[A-Za-z0-9_-]{20,100}$/.test(siteKey) || /^[123]x0/.test(siteKey))) throw new Error('正式登录需要真实 Turnstile Site Key，不能使用测试密钥。');
+    Object.assign(supabase, {
+      supabaseUrl: origin, supabasePublishableKey: key,
+      turnstileSiteKey: siteKey, authReady, bucket: 'memory-media',
+      loginIdentities: { xbl: 'xbl@memory.invalid', ll: 'll@memory.invalid', 'memory-admin': 'memory-admin@memory.invalid' },
+    });
+    const lock = JSON.parse(await readFile(await requireFile(root, 'vendor/supabase.lock.json'), 'utf8'));
+    if (lock.version !== '2.119.0' || lock.file !== 'public/assets/supabase-client-2.119.0.js'
+      || lock.sha256 !== 'a867edbcfb029370aeec7223dd6180b560b621fbe3bc64c6584fb0369d1b7bce') throw new Error('Supabase SDK 锁定清单不匹配。');
+    sdk = await readFile(await requireFile(root, lock.file));
+    if (createHash('sha256').update(sdk).digest('hex') !== lock.sha256) throw new Error('Supabase SDK 完整性检查失败。');
+    await requireFile(root, lock.licenseFile);
   }
   const excluded = mode === 'demo' ? new Set() : DEMO_ONLY_FILES;
 
@@ -176,6 +200,12 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
   await copyWhitelistedDirectory(path.join(root, 'public', 'assets'), path.join(dist, 'assets'), ASSET_EXTENSIONS, root, excluded);
   // This one attribution manifest is the only JSON allowed into the static site.
   await writeFile(path.join(dist, 'assets', 'credits.json'), await readFile(path.join(root, 'public', 'assets', 'credits.json')));
+  if (sdk) {
+    await writeFile(path.join(dist, 'assets', 'supabase-client-2.119.0.js'), sdk);
+    await writeFile(path.join(dist, 'assets', 'SUPABASE-LICENSE.txt'), await readFile(path.join(root, 'vendor', 'SUPABASE-LICENSE')));
+    const headers = securityHeaders(supabase.supabaseUrl);
+    await writeFile(path.join(dist, '_headers'), `/*\n${Object.entries(headers).map(([key, value]) => `  ${key}: ${value}`).join('\n')}\n`);
+  }
 
   // Explicit values prevent build-time secrets or an arbitrary API URL entering the bundle.
   const config = {
@@ -183,12 +213,13 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
     apiBase: '',
     space,
     maxImages: 9,
-    maxFileBytes: 50 * 1024 * 1024,
+    maxFileBytes: mode === 'supabase' ? 50_000_000 : 50 * 1024 * 1024,
     timeZone: 'Asia/Shanghai',
+    ...supabase,
   };
   await writeFile(path.join(dist, 'src', 'config.js'),
     `export const CONFIG = Object.freeze(${JSON.stringify(config, null, 2)});\n`);
-  if (!quiet) console.log(`已构建 ${path.relative(root, dist)}：${mode} 模式${space ? `，空间 ${space}` : mode === 'preview' ? '，仅登录预览，不连接记录服务' : '，仅含演示数据'}。`);
+  if (!quiet) console.log(`已构建 ${path.relative(root, dist)}：${mode} 模式${space ? `，空间 ${space}` : mode === 'supabase' ? `，免费记录服务，登录${supabase.authReady ? '已启用' : '保持关闭'}` : mode === 'preview' ? '，仅登录预览，不连接记录服务' : '，仅含演示数据'}。`);
   return { outDir: dist, mode, space };
 }
 

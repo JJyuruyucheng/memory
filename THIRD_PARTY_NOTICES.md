@@ -1,5 +1,9 @@
 # Third-party notices
 
+## Supabase JavaScript SDK
+
+The free hosting provider uses the official [`@supabase/supabase-js`](https://github.com/supabase/supabase-js) 2.119.0 browser bundle under the MIT license. The original bundle is vendored without modification; [the license](vendor/SUPABASE-LICENSE) and [the version, archive integrity and bundle checksum](vendor/supabase.lock.json) are preserved. The Supabase build ships the license beside the bundle. No CDN executes third-party SDK updates at runtime.
+
 ## Uiverse / Galaxy — primary-button icon interaction
 
 Author: alexmaracinaru (Alex Maracinaru)

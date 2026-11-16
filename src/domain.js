@@ -112,7 +112,7 @@ export function validateEntry(entry, files = [], config = {}) {
     const type = ALLOWED_FILE_TYPES[file?.type];
     if (!type) errors.push(`不支持附件“${String(file?.name ?? '未命名文件')}”的类型。请使用 JPG、PNG、WebP、GIF、AVIF、MP4、WebM 或 MOV。`);
     if (type === 'image') images += 1;
-    if (!Number.isFinite(file?.size) || file.size <= 0 || file.size > maxFileBytes) errors.push(`附件“${String(file?.name ?? '未命名文件')}”为空或超过 ${Math.floor(maxFileBytes / 1024 / 1024)} MB。`);
+    if (!Number.isFinite(file?.size) || file.size <= 0 || file.size > maxFileBytes) errors.push(`附件“${String(file?.name ?? '未命名文件')}”为空或超过 ${maxFileBytes === 50_000_000 ? '50 MB' : `${Math.floor(maxFileBytes / 1024 / 1024)} MiB`}。`);
   }
   if (images > maxImages) errors.push(`每条记录最多保存 ${maxImages} 张图片。`);
   if (entry.tags !== undefined && (!Array.isArray(entry.tags) || entry.tags.length > 20 || entry.tags.some(tag => typeof tag !== 'string' || tag.length > 40))) errors.push('标签格式无效，每条最多 20 个标签，每个最多 40 个字符。');

@@ -1,6 +1,6 @@
 # 朝夕 · Memory
 
-为两个人记录平凡小事和重要时刻的温柔生活记录本。时间线、文字与事件、心情、图片与少量视频、日历、统计和设置使用同一套页面。前端使用原生 JavaScript ES Modules；当前已实现的 live 模式采用 [Memos](https://github.com/usememos/memos)；免费优先的 Supabase 路线尚待适配与云端权限验收。
+为两个人记录平凡小事和重要时刻的温柔生活记录本。时间线、文字与事件、心情、图片与少量视频、日历、统计和设置使用同一套页面。前端使用原生 JavaScript ES Modules；免费优先模式接入官方 Supabase SDK、认证、数据库与私有存储；原有 Memos 模式保留为自托管备选。
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
@@ -40,7 +40,9 @@ node scripts/serve.mjs --source
 
 ## 构建模式
 
-`MEMORY_MODE` 支持 `demo`、`preview`、`live`，默认 `demo`。构建先对全部 `src` JavaScript 执行 `node --check`，核对入口、静态/动态模块、样式和素材署名依赖，再复制白名单资源并重新生成 `dist/src/config.js`。唯一复制的 JSON 是 `assets/credits.json`；`.env`、部署配置、数据库、备份和文档不进入产物。`apiBase` 固定为空字符串，表示同源请求，不能通过 URL 参数切换到真实后端。
+免费模式使用 `MEMORY_MODE=supabase`，Cloudflare Pages 构建参数见 [cloudflare.env.example](deploy/cloudflare.env.example)。它只接收项目 URL、publishable 公共密钥及 Turnstile Site Key；默认 `authReady=false`。SDK 版本固定为 2.119.0，构建校验 SHA-256 并本地打包，带出原 MIT 许可证和 Cloudflare CSP 响应头。私有资料、示例记录、后台密钥和口令均不进入此产物。正式配置与验收进度见 [免费托管指南](docs/hosting-free.md)。
+
+`MEMORY_MODE` 支持 `demo`、`preview`、`live`、`supabase`，默认 `demo`。构建先对全部 `src` JavaScript 执行 `node --check`，核对入口、静态/动态模块、样式和素材署名依赖，再复制白名单资源并重新生成 `dist/src/config.js`。唯一复制的 JSON 是 `assets/credits.json`；`.env`、部署配置、数据库、备份和文档不进入产物。`apiBase` 固定为空字符串供 Memos 使用；Supabase 的 HTTPS 项目 URL 另由构建校验，不能通过 URL 参数替换后端。
 
 `preview` 和 `live` 在复制阶段排除 `demo-provider.js`、`sample-data.js` 及四张虚构示例 JPG，不采用“先复制再删除”。素材署名清单可保留来源记录；它不表示这些图片仍在非演示产物中。普通本地模块（包括 `login-controller.js`）自动参与依赖检查与复制。非演示入口如果仍静态导入已排除的演示模块，构建会失败；演示分支应使用动态导入。
 
@@ -52,7 +54,7 @@ $env:MEMORY_TARGET = 'pages'
 node scripts/build.mjs
 ```
 
-`MEMORY_TARGET=pages` 严格拒绝 `demo` 和 `live`。回到本地演示前清除 `MEMORY_TARGET` 并设 `MEMORY_MODE=demo`，避免沿用上一条命令的环境设置。
+`MEMORY_TARGET=pages` 严格拒绝除 `preview` 外的模式。回到本地演示前清除 `MEMORY_TARGET` 并设 `MEMORY_MODE=demo`，避免沿用上一条命令的环境设置。
 
 PowerShell 正式构建示例：
 
@@ -82,7 +84,7 @@ Pages 只托管静态页面，不能运行 Memos、数据库或私密存储。Ac
 
 ## 正式使用
 
-当前优先 [免费起步方案](docs/hosting-free.md)：Cloudflare Pages 托管前端，Supabase Free 提供原生认证、数据库与私有媒体，Turnstile 负责验证码。免费额度、低活跃暂停、账号连接及真实权限验收是前提；Supabase provider 尚未实现，不能称正式登录或云端存储已经上线。现有 Memos/Render 模板保留为付费备选，没有创建资源或订阅。口令和私密密钥不写入仓库或浏览器构建包。
+当前优先 [免费起步方案](docs/hosting-free.md)：Cloudflare Pages 托管前端，Supabase Free 提供原生认证、数据库与私有媒体，Turnstile 负责验证码。Supabase 项目已在指定 Free 组织创建；前端适配已实现。正式账号登录仍须完成原生验证码、关闭注册、私有 bucket 和真实权限验收，不能把代码测试通过等同于正式上线。现有 Memos/Render 模板保留为付费备选，没有创建其资源或订阅。口令和私密密钥不写入仓库或浏览器构建包。
 
 已有底座证据：本地使用官方 **Memos 26.11.1 Windows release** 和独立临时数据库验证两个成员及管理员登录、`SPACE` 共享、PNG 媒体鉴权、评论、回应/收藏、软删恢复及含媒体的内容导出。安全网关验证验证码后转交官方 Connect 与会话 Cookie，访问令牌仅保留在内存；本轮也已通过实际网关联测，Cloudflare Siteverify 使用测试替身。演示浏览器的发布、刷新保留和评论也已检查；这些证据不等于新的 Render 网关或正式双设备使用已经验收。
 

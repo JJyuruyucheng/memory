@@ -122,7 +122,8 @@ function renderUpcoming() { return `<section class="upcoming-panel"><div class="
 
 function renderAlbum() {
   const entries = filtered().filter(e => !e.deletedAt), media = entries.flatMap(entry => entry.media.map((file, index) => ({ ...file, entry, index })));
-  return `${heading('光影里的我们', `${media.length} 个片段，把那天再看一遍。`)}<div class="album-toolbar"><label class="select-field">月份 <input id="filter-month" type="month" value="${esc(filters.month)}" /></label><button class="text-button" data-action="clear-filters">显示全部</button></div>${media.length ? `<div class="album-grid">${media.map(file => `<button class="album-item" data-action="media" data-id="${esc(file.entry.id)}" data-index="${file.index}">${file.type === 'video' ? `<video src="${safeUrl(file.url)}" preload="metadata"></video><span class="video-label">${icon('video')} 视频</span>` : `<img src="${safeUrl(file.url)}" alt="${esc(file.name || file.entry.title)}" loading="lazy" />`}<span class="album-caption"><strong>${esc(file.entry.title || '日常的一帧')}</strong><time>${dateLabel(file.entry.occurredAt)}</time></span></button>`).join('')}</div>` : '<div class="empty-state"><h2>照片会慢慢装满这里</h2><p>记录时选一张喜欢的照片吧。</p><button class="secondary" data-action="new">记录一张照片</button></div>'}`;
+  const items = media.map(file => `<button class="album-item" data-action="media" data-id="${esc(file.entry.id)}" data-index="${file.index}" ${file.unavailable ? 'disabled' : ''}>${file.unavailable ? '<span class="media-unavailable">附件暂时无法加载<br />刷新页面重试</span>' : file.type === 'video' ? `<video src="${safeUrl(file.url)}" preload="metadata"></video><span class="video-label">${icon('video')} 视频</span>` : `<img src="${safeUrl(file.url)}" alt="${esc(file.name || file.entry.title)}" loading="lazy" />`}<span class="album-caption"><strong>${esc(file.entry.title || '日常的一帧')}</strong><time>${dateLabel(file.entry.occurredAt)}</time></span></button>`).join('');
+  return `${heading('光影里的我们', `${media.length} 个片段，把那天再看一遍。`)}<div class="album-toolbar"><label class="select-field">月份 <input id="filter-month" type="month" value="${esc(filters.month)}" /></label><button class="text-button" data-action="clear-filters">显示全部</button></div>${media.length ? `<div class="album-grid">${items}</div>` : '<div class="empty-state"><h2>照片会慢慢装满这里</h2><p>记录时选一张喜欢的照片吧。</p><button class="secondary" data-action="new">记录一张照片</button></div>'}`;
 }
 function renderStats() {
   const rows = filterEntries(state.entries, { month: filters.month }), stats = computeStats(rows);
@@ -174,7 +175,7 @@ function openEditor(entry) {
     <label>给这段回忆起个名字 <span class="optional">随记可不填</span><input name="title" value="${esc(data.title || '')}" placeholder="例如：下班路上，一起看了晚霞" maxlength="120" /></label>
     <label>想记住的事<textarea name="content" rows="5" placeholder="慢慢写，这里没有字数任务。" maxlength="20000">${esc(data.content || '')}</textarea></label>
     <fieldset class="mood-options"><legend>写下它时的心情 <span class="optional">可以不选</span></legend>${['happy', 'neutral', 'sad'].map(m => `<label class="mood-option"><input type="radio" name="mood" value="${m}" ${data.mood === m ? 'checked' : ''} />${icon(moodIcons[m])}<span>${moodNames[m]}</span></label>`).join('')}<label class="mood-option no-mood"><input type="radio" name="mood" value="" ${!data.mood ? 'checked' : ''} /><span>未填写</span></label></fieldset>
-    <div class="upload-row"><label class="upload-control">${icon('photo')}<span>添加照片或短视频</span><input id="media-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime" multiple /></label><small>最多 9 张图片 · 单个文件 50 MiB</small></div><div id="editor-previews" class="editor-previews"></div>
+    <div class="upload-row"><label class="upload-control">${icon('photo')}<span>添加照片或短视频</span><input id="media-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif,video/mp4,video/webm,video/quicktime" multiple /></label><small>最多 9 张图片 · 单个文件 ${CONFIG.mode === 'supabase' ? '50 MB' : '50 MiB'}</small></div><div id="editor-previews" class="editor-previews"></div>
     <label>小标签 <span class="optional">用逗号隔开</span><input name="tags" value="${esc((data.tags || []).join('，'))}" placeholder="日常，旅行，一起做饭" maxlength="180" /></label><p id="form-error" class="form-error" role="alert"></p><div class="dialog-footer"><span id="draft-status">${entry ? '作者与发布时间会保留' : draft.content || draft.title ? '已找回当前会话的草稿' : '关闭窗口前会保留文字草稿'}</span><button type="submit" class="primary">${icon('check')}${entry ? '保存修改' : '收好这一刻'}</button></div>${entry && canEdit(entry) ? `<button type="button" class="text-button danger delete-entry" data-action="delete" data-id="${esc(entry.id)}">移到回收站</button>` : ''}</form>`, 'editor-dialog');
   renderEditorPreviews();
 }
@@ -190,6 +191,7 @@ function showDetail(id) {
 }
 function showMedia(id, index = 0) {
   const entry = state.entries.find(e => e.id === id), file = entry?.media[index]; if (!file) return;
+  if (file.unavailable) { toast('这份附件暂时无法加载，请刷新页面重试。', true); return; }
   openDialog(`<div class="lightbox-stage">${file.type === 'video' ? `<video controls playsinline src="${safeUrl(file.url)}"></video>` : `<img src="${safeUrl(file.url)}" alt="${esc(file.name || entry.title)}" />`}</div><div class="lightbox-caption"><div><strong>${esc(entry.title || '日常的一帧')}</strong><small>${dateLabel(entry.occurredAt, true)} · ${index + 1} / ${entry.media.length}</small></div><div>${index > 0 ? `<button class="icon-button previous" data-action="media" data-id="${esc(id)}" data-index="${index - 1}" aria-label="上一张">${icon('chevron')}</button>` : ''}${index < entry.media.length - 1 ? `<button class="icon-button" data-action="media" data-id="${esc(id)}" data-index="${index + 1}" aria-label="下一张">${icon('chevron')}</button>` : ''}</div></div>`, 'lightbox');
 }
 function info(title, text) { openDialog(`<h2>${title}</h2><div class="prose">${text}</div>`, 'info-dialog'); }
@@ -280,14 +282,14 @@ document.addEventListener('submit', async event => {
     const data = Object.fromEntries(new FormData(form));
     if (form.id === 'entry-form') {
       const previous = editorId ? state.entries.find(e => e.id === editorId) : {};
-      await provider.saveEntry({ ...previous, title: data.title.trim(), content: data.content.trim(), type: data.type, occurredAt: `${data.occurredAt}:00+08:00`, mood: data.mood || null, tags: (data.tags || '').split(/[,，]/).map(s => s.trim()).filter(Boolean), media: editorMedia }, editorFiles);
-      sessionStorage.removeItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`); closeModal(false); render(); toast(editorId ? '细节已经好好收好了。' : '这一刻，已经留住了。');
+      const saved = await provider.saveEntry({ ...previous, title: data.title.trim(), content: data.content.trim(), type: data.type, occurredAt: `${data.occurredAt}:00+08:00`, mood: data.mood || null, tags: (data.tags || '').split(/[,，]/).map(s => s.trim()).filter(Boolean), media: editorMedia }, editorFiles);
+      sessionStorage.removeItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`); closeModal(false); render(); toast(saved?.cleanupWarning || (editorId ? '细节已经好好收好了。' : '这一刻，已经留住了。'));
     } else if (form.id === 'settings-form') {
       const anniversaries = [...form.querySelectorAll('[data-anniversary]')].map(row => ({ id: row.dataset.anniversary, title: row.querySelector('[name="ann-title"]').value.trim(), date: row.querySelector('[name="ann-date"]').value, yearly: row.querySelector('[name="ann-yearly"]').checked }));
       await provider.saveSettings({ ...state.settings, spaceName: data.spaceName.trim(), subtitle: data.subtitle.trim(), startDate: data.startDate, anniversaries }); render(); toast('我们的小世界，已更新。');
     } else if (form.id === 'comment-form') { await provider.addComment(form.dataset.id, data.content.trim()); const id = form.dataset.id; render(); showDetail(id); toast('你的话，留在这段回忆里了。'); }
     else {
-      if (CONFIG.mode !== 'live' || !loginVerification?.getToken()) throw new Error('请先完成安全验证。');
+      if (!['live', 'supabase'].includes(CONFIG.mode) || !loginVerification?.getToken()) throw new Error('请先完成安全验证。');
       loginPending = true; form.setAttribute('aria-busy', 'true');
       form.querySelectorAll('input').forEach(input => { input.disabled = true; });
       try { state = await provider.login(data.username, data.password, loginVerification.getToken()); }
@@ -304,7 +306,7 @@ document.addEventListener('submit', async event => {
   } catch (error) { if (!state.currentUser && form.id !== 'login-form') { clearDrafts(); closeModal(false); render(); toast('登录已失效，请重新登录。', true); } else { const target = form.id === 'login-form' ? document.querySelector('#login-form .form-error') : form.querySelector('.form-error'); if (target) target.textContent = error.message; else toast(error.message, true); } }
   finally { if (submit?.isConnected) submit.disabled = form.id === 'login-form' ? !loginVerification?.getToken() : false; }
 });
-window.addEventListener('hashchange', () => { if (bootPending) return; selectedDay = ''; filters.query = ''; filters.type = route() === 'events' ? 'event' : 'all'; render(); window.scrollTo({ top: 0 }); });
+window.addEventListener('hashchange', () => { if (bootPending || (!provider && CONFIG.mode !== 'preview')) return; selectedDay = ''; filters.query = ''; filters.type = route() === 'events' ? 'event' : 'all'; render(); window.scrollTo({ top: 0 }); });
 
 function renderLogin() {
   loginVerification?.destroy(); loginVerification = null;
@@ -319,16 +321,21 @@ function renderLogin() {
       document.querySelector('#login-form').setAttribute('aria-busy', 'true');
       document.querySelectorAll('#login-form input').forEach(input => { input.disabled = true; });
     }
-    loginVerification = mountLoginVerification(app, { isBusy: () => loginPending });
+    loginVerification = mountLoginVerification(app, {
+      isBusy: () => loginPending,
+      ...(CONFIG.mode === 'supabase' ? { getConfig: async () => ({ configured: CONFIG.authReady === true && Boolean(CONFIG.turnstileSiteKey), siteKey: CONFIG.turnstileSiteKey, action: 'login' }) } : {}),
+    });
   }
 }
 
 try {
   if (CONFIG.mode === 'preview') state = { mode: 'preview', currentUser: null, users: [], entries: [], settings: {} };
   else {
-    provider = CONFIG.mode === 'live'
-      ? (await import('./memos-provider.js')).createMemosProvider(CONFIG)
-      : (await import('./demo-provider.js')).createDemoProvider();
+    if (CONFIG.mode === 'live') provider = (await import('./memos-provider.js')).createMemosProvider(CONFIG);
+    else if (CONFIG.mode === 'supabase') {
+      const client = await (await import('./supabase-client.js')).createBrowserSupabaseClient(CONFIG);
+      provider = (await import('./supabase-provider.js')).createSupabaseProvider({ ...CONFIG, client });
+    } else provider = (await import('./demo-provider.js')).createDemoProvider();
     state = await provider.init();
   }
   render();

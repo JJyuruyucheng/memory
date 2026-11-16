@@ -1,8 +1,9 @@
 import { createReadStream } from 'node:fs';
-import { access, lstat, realpath } from 'node:fs/promises';
+import { access, lstat, realpath, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { securityHeaders } from './security-headers.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const MIME = {
@@ -12,7 +13,7 @@ const MIME = {
   '.avif': 'image/avif', '.ico': 'image/x-icon', '.mp4': 'video/mp4', '.webm': 'video/webm',
   '.mov': 'video/quicktime', '.woff': 'font/woff', '.woff2': 'font/woff2',
   '.ttf': 'font/ttf', '.otf': 'font/otf', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav',
-  '.json': 'application/json; charset=utf-8',
+  '.json': 'application/json; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
 };
 const SOURCE_EXTENSIONS = new Set(['.js', '.css']);
 const SPA_ROUTES = new Set(['timeline', 'calendar', 'albums', 'album', 'stats', 'statistics', 'settings', 'admin', 'login', 'entry', 'memories', 'new']);
@@ -61,6 +62,10 @@ export async function startServer({ port = 5173, source = false } = {}) {
   const hasDist = await access(path.join(ROOT, 'dist', 'index.html')).then(() => true, () => false);
   const built = !source && hasDist;
   const base = built ? path.join(ROOT, 'dist') : ROOT;
+  // Read only a validated public URL; never evaluate the built config as server code.
+  const configText = await readFile(path.join(base, 'src', 'config.js'), 'utf8');
+  const supabaseOrigin = /"supabaseUrl":\s*"(https:\/\/[a-z]{20}\.supabase\.co)"/.exec(configText)?.[1] ?? '';
+  const headersForBuild = securityHeaders(supabaseOrigin);
 
   const server = createServer(async (request, response) => {
     if (!['GET', 'HEAD'].includes(request.method)) {
@@ -86,11 +91,11 @@ export async function startServer({ port = 5173, source = false } = {}) {
         && SOURCE_EXTENSIONS.has(path.extname(decoded).toLowerCase())) {
         boundary = path.join(base, 'src');
         file = path.join(boundary, ...segments.slice(1));
-      } else if (decoded === '/assets/credits.json') {
+      } else if (decoded === '/assets/credits.json' || (supabaseOrigin && ['/assets/supabase-client-2.119.0.js', '/assets/SUPABASE-LICENSE.txt'].includes(decoded))) {
         boundary = built ? path.join(base, 'assets') : path.join(ROOT, 'public', 'assets');
-        file = path.join(boundary, 'credits.json');
+        file = path.join(boundary, segments.at(-1));
       } else if (segments[0] === 'assets' && segments.length > 1
-        && MIME[path.extname(decoded).toLowerCase()] && !['.html', '.js', '.css', '.json'].includes(path.extname(decoded).toLowerCase())) {
+        && MIME[path.extname(decoded).toLowerCase()] && !['.html', '.js', '.css', '.json', '.txt'].includes(path.extname(decoded).toLowerCase())) {
         boundary = built ? path.join(base, 'assets') : path.join(ROOT, 'public', 'assets');
         file = path.join(boundary, ...segments.slice(1));
       } else {
@@ -98,7 +103,7 @@ export async function startServer({ port = 5173, source = false } = {}) {
       }
       if (!(await isRegularUnlinkedFile(file, boundary))) { fail(response, 404); return; }
       const info = await lstat(file);
-      const headers = { ...SECURITY_HEADERS, 'Content-Type': MIME[path.extname(file).toLowerCase()], 'Accept-Ranges': 'bytes' };
+      const headers = { ...headersForBuild, 'Content-Type': MIME[path.extname(file).toLowerCase()], 'Accept-Ranges': 'bytes' };
       let start = 0;
       let end = info.size - 1;
       let status = 200;

@@ -1,4 +1,4 @@
-// Source development stays in demo. Builds explicitly generate demo, preview or live.
+// Source development stays in demo. Builds explicitly generate the selected backend.
 export const CONFIG = Object.freeze({
   mode: 'demo',
   apiBase: '',

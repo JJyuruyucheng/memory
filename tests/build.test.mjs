@@ -9,6 +9,47 @@ import { build } from '../scripts/build.mjs';
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const DEMO = { MEMORY_MODE: 'demo', MEMORY_SPACE: '' };
 
+test('Supabase 构建仅发送公共配置，验证 SDK 完整性，默认关闭登录并排除演示资料', async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'memory-build-'));
+  const fixture = path.join(temporary, 'source');
+  await mkdir(fixture);
+  try {
+    for (const directory of ['src', 'public', 'vendor']) await cp(path.join(ROOT, directory), path.join(fixture, directory), { recursive: true });
+    await cp(path.join(ROOT, 'index.html'), path.join(fixture, 'index.html'));
+    await writeFile(path.join(fixture, 'package.json'), '{"type":"module"}');
+    const env = {
+      MEMORY_MODE: 'supabase', MEMORY_SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co',
+      MEMORY_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_abcdefghijklmnopqrstuvwxyz123456',
+      SERVICE_ROLE_KEY: 'must-not-ship', TURNSTILE_SECRET: 'must-not-ship',
+    };
+    const output = path.join(temporary, 'cloudflare');
+    await build({ rootDir: fixture, outDir: output, env, quiet: true });
+    const config = await readFile(path.join(output, 'src', 'config.js'), 'utf8');
+    assert.match(config, /"authReady": false/);
+    assert.match(config, /"maxFileBytes": 50000000/);
+    assert.ok(!config.includes('must-not-ship'));
+    const files = await readdir(output, { recursive: true });
+    assert.ok(files.includes(path.join('assets', 'supabase-client-2.119.0.js')));
+    assert.ok(!files.includes(path.join('assets', 'photo-coffee.jpg')));
+    assert.ok(!files.includes(path.join('src', 'sample-data.js')));
+    const headers = await readFile(path.join(output, '_headers'), 'utf8');
+    assert.match(headers, /connect-src 'self' https:\/\/challenges\.cloudflare\.com https:\/\/abcdefghijklmnopqrst\.supabase\.co;/);
+    assert.ok(!headers.includes('unsafe-eval'));
+    await assert.rejects(build({ rootDir: fixture, env: { ...env, MEMORY_TARGET: 'pages' }, quiet: true }), /Pages 只允许/);
+    await assert.rejects(build({ rootDir: fixture, env: { ...env, MEMORY_SUPABASE_PUBLISHABLE_KEY: 'sb_secret_wrong' }, quiet: true }), /publishable/);
+    await assert.rejects(build({ rootDir: fixture, env: { ...env, MEMORY_AUTH_READY: 'true', MEMORY_TURNSTILE_SITE_KEY: '1x00000000000000000000AA' }, quiet: true }), /不能使用测试密钥/);
+    await mkdir(path.join(fixture, 'dist'));
+    await writeFile(path.join(fixture, 'dist', 'keep.txt'), 'last-good-build');
+    await writeFile(path.join(fixture, 'public', 'assets', 'supabase-client-2.119.0.js'), 'tampered');
+    await assert.rejects(build({ rootDir: fixture, env, quiet: true }), /完整性检查失败/);
+    assert.equal(await readFile(path.join(fixture, 'dist', 'keep.txt'), 'utf8'), 'last-good-build');
+  } finally {
+    assert.equal(path.dirname(temporary), os.tmpdir());
+    assert.ok(path.basename(temporary).startsWith('memory-build-'));
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
 test('构建保留素材授权、限制 JSON，并在坏入口覆盖旧产物前拒绝', async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'memory-build-'));
   const fixture = path.join(temporary, 'source');

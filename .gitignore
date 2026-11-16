@@ -9,3 +9,4 @@ backups/
 .taste-skill/
 artifacts/
 deploy/config.local.json
+supabase/.temp/
