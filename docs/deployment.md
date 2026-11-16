@@ -1,6 +1,6 @@
 # 部署、隐私与恢复
 
-**没有服务器时，采用 [Render 托管指南](hosting-render.md)。** 这是当前推荐方案：一个付费 Docker Web Service、一个持久磁盘，平台提供 HTTPS，不需要自己管理 Linux。仓库只包含可审阅模板，尚未创建任何付费资源，也没有已配置好的 Turnstile 密钥或实际托管站点。
+**优先免费时，采用 [免费起步方案](hosting-free.md)：Cloudflare Pages + Supabase Free + Turnstile。** 这需要新增 Supabase 适配与实际权限验收；当前尚未创建用户的云项目或启用正式登录。已有 Memos 代码仍可用于 [Render 付费备选](hosting-render.md) 或自有 Docker 主机，下面描述的是该已有实现，不能误当免费后端已经完成。没有创建任何付费资源或订阅。
 
 GitHub Pages 是公开静态托管，不能安全保存登录口令、会话或私人记录。本项目公开预览只展示登录壳，不能作为双人真实数据后端。真实内容、照片、视频及备份不得提交 GitHub。正式入口统一经过 `deploy/auth-gateway.mjs`：所有公开登录都先服务端验证 Turnstile，原生 Memos 登录、注册、公开分享路由被阻断。旧 nginx 直通部署文件已移除，不能拿过去的 `/api/auth/signin` 直通方案绕开验证码。
 

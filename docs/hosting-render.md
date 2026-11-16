@@ -1,6 +1,6 @@
 # Render 托管方案
 
-推荐保留成熟开源 [Memos](https://github.com/usememos/memos)，采用 Render 托管容器与持久盘，避免现在重写认证、数据库、文件权限和 Provider。现有模板为 `deploy/render.yaml` 与 `deploy/render.Dockerfile`；它们只准备可审阅配置，**没有创建资源、订阅或扣款**。
+本文件保留成熟开源 [Memos](https://github.com/usememos/memos) 的付费托管备选，现有模板为 `deploy/render.yaml` 与 `deploy/render.Dockerfile`。**当前优先采用 [免费起步路线](hosting-free.md)**；本 Render 模板没有创建资源、订阅或扣款，也不会自动部署。
 
 ## 费用与账号前提
 
@@ -65,10 +65,10 @@ Render 完整恢复包需要在该服务实例的受信任 Shell 中完成应用
 - 生产代码没有 Turnstile 失败放行、默认密码或测试认证后门。当前没有创建 Render 服务、填写真实 Secrets、购买实例或把口令写进 GitHub。
 - 本机没有 Docker，因此 Linux 镜像构建、Render 内存/卷权限、实际 HTTPS cookie、真实 Turnstile、大文件和备份恢复仍需目标环境验证。`render.yaml` 是可审阅部署配置，不是上线完成证明。
 
-## 其他托管路线为何暂不采用
+## 其他路线与改造范围
 
 Railway Hobby 最低 $5/月并计入资源用量，卷 $0.15/GB/月、当前 Hobby 卷上限 5 GB，实际账单还依 CPU、RAM、流量；可以运行同一镜像，但不能把“最低 $5”当固定总价。[Railway 定价](https://docs.railway.com/pricing)、[卷](https://docs.railway.com/volumes/reference)
 
-Supabase 提供成熟开源 Auth/DB/Storage 及原生 Turnstile。Free 有 500 MB 数据库、1 GB 文件，闲置一周会暂停；Pro 从 $25/月。切换需要重写 Provider、表结构和 RLS，并迁移账号/文件/评论；本阶段不是最小改造。[定价](https://supabase.com/pricing)、[CAPTCHA](https://supabase.com/docs/guides/auth/auth-captcha)、[私有存储](https://supabase.com/docs/guides/storage/buckets/fundamentals)
+Supabase 提供成熟开源 Auth/DB/Storage 及原生 Turnstile，当前已作为 [免费优先路线](hosting-free.md)。Free 有 500 MB 数据库、1 GB 文件，过去七天低活动可能暂停；Pro 从 $25/月。切换需要新增 Provider、表结构与 RLS，并迁移账号/文件/评论；不能当作仅修改部署配置。[定价](https://supabase.com/pricing)、[CAPTCHA](https://supabase.com/docs/guides/auth/auth-captcha)、[私有存储](https://supabase.com/docs/guides/storage/buckets/fundamentals)
 
 Cloudflare Workers+D1+R2 可降低小站基础用量费用（Workers Free 10 万请求/日，D1 Free 5 GB，R2 Standard 每月含 10 GB-month），但要更换 Memos 后端、认证和 Provider，重新实现并审查文件鉴权与迁移。它不是把 Memos Docker 直接放上去；R2 还要开通计费订阅，免费额度不代表无账户/账单前提。[Workers](https://developers.cloudflare.com/workers/platform/pricing/)、[D1](https://developers.cloudflare.com/d1/platform/pricing/)、[R2](https://developers.cloudflare.com/r2/pricing/)、[R2 开通](https://developers.cloudflare.com/r2/get-started/)

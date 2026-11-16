@@ -1,6 +1,6 @@
 # 朝夕 · Memory
 
-为两个人记录平凡小事和重要时刻的温柔生活记录本。时间线、文字与事件、心情、图片与少量视频、日历、统计和设置使用同一套页面。前端使用原生 JavaScript ES Modules；正式版以 [Memos](https://github.com/usememos/memos) 为认证和数据后端。
+为两个人记录平凡小事和重要时刻的温柔生活记录本。时间线、文字与事件、心情、图片与少量视频、日历、统计和设置使用同一套页面。前端使用原生 JavaScript ES Modules；当前已实现的 live 模式采用 [Memos](https://github.com/usememos/memos)；免费优先的 Supabase 路线尚待适配与云端权限验收。
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
@@ -82,7 +82,7 @@ Pages 只托管静态页面，不能运行 Memos、数据库或私密存储。Ac
 
 ## 正式使用
 
-正式版计划在 Render 上运行真实网关、Memos、数据库与媒体持久存储，并保持网站及 API 同源 HTTPS。还需要用户提供相应的付费账户与所需 Cloudflare 密钥；这些条件未齐备时，不宣称正式登录或云端存储已经上线。真实口令和密钥只配置到部署平台的受保护设置，不写入仓库文件或浏览器构建配置。
+当前优先 [免费起步方案](docs/hosting-free.md)：Cloudflare Pages 托管前端，Supabase Free 提供原生认证、数据库与私有媒体，Turnstile 负责验证码。免费额度、低活跃暂停、账号连接及真实权限验收是前提；Supabase provider 尚未实现，不能称正式登录或云端存储已经上线。现有 Memos/Render 模板保留为付费备选，没有创建资源或订阅。口令和私密密钥不写入仓库或浏览器构建包。
 
 已有底座证据：本地使用官方 **Memos 26.11.1 Windows release** 和独立临时数据库验证两个成员及管理员登录、`SPACE` 共享、PNG 媒体鉴权、评论、回应/收藏、软删恢复及含媒体的内容导出。安全网关验证验证码后转交官方 Connect 与会话 Cookie，访问令牌仅保留在内存；本轮也已通过实际网关联测，Cloudflare Siteverify 使用测试替身。演示浏览器的发布、刷新保留和评论也已检查；这些证据不等于新的 Render 网关或正式双设备使用已经验收。
 
