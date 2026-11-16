@@ -46,6 +46,13 @@ test('anonymous init preserves a real logged-out state', async () => {
   assert.equal(state.currentUser, null); assert.deepEqual(state.entries, []); assert.equal(calls.length, 1);
 });
 
+test('Memos refuses a whisper before uploading or writing because SPACE cannot enforce its privacy contract', async () => {
+  const { provider, calls } = fixture(); await provider.init();
+  const start = calls.length;
+  await assert.rejects(provider.saveEntry({ ...input(), type: 'whisper' }, [new File(['private'], 'private.png', { type: 'image/png' })]), error => error.code === 'UNSUPPORTED_PRIVATE_TYPE');
+  assert.ok(!calls.slice(start).some(call => call.method !== 'GET'));
+});
+
 function deferred() {
   let resolve;
   const promise = new Promise(done => { resolve = done; });

@@ -13,9 +13,9 @@ const ok = data => ({ data, error: null });
 
 // A narrow SDK boundary fixture, not a second provider. It enforces server
 // ownership, immutable fields and reservation/upload/finalization sequencing.
-function fixture({ before = async () => {}, author = U1, initialMedia = false, profiles: customProfiles } = {}) {
+function fixture({ before = async () => {}, author = U1, initialMedia = false, profiles: customProfiles, onSessionChanged, initialSessionUserId = null } = {}) {
   const calls = [], listeners = new Set(), urls = [], revoked = [];
-  let session = null, serial = 10, tick = 0;
+  let session = initialSessionUserId ? { access_token: 'never-export-restored-jwt', user: { id: initialSessionUserId } } : null, serial = 10, tick = 0;
   const generated = prefix => `${prefix}0000000-0000-4000-8000-${String(++serial).padStart(12, '0')}`;
   const tables = {
     profiles: customProfiles || [
@@ -139,8 +139,8 @@ function fixture({ before = async () => {}, author = U1, initialMedia = false, p
       };
     } },
   };
-  const provider = createSupabaseProvider({ client, loginIdentities: identities, now: () => NOW, urlAPI: { createObjectURL(blob) { const url = `blob:private-${urls.length + 1}`; urls.push({ url, blob }); return url; }, revokeObjectURL(url) { revoked.push(url); } } });
-  return { provider, client, tables, objects, calls, urls, revoked, session: () => session, signIn: (username = 'xbl') => provider.login(username, 'test-password', 'valid-test-captcha') };
+  const provider = createSupabaseProvider({ client, loginIdentities: identities, onSessionChanged, now: () => NOW, urlAPI: { createObjectURL(blob) { const url = `blob:private-${urls.length + 1}`; urls.push({ url, blob }); return url; }, revokeObjectURL(url) { revoked.push(url); } } });
+  return { provider, client, tables, objects, calls, urls, revoked, session: () => session, emitAuth(event, userId) { session = event === 'SIGNED_OUT' ? null : { access_token: 'never-export-switched-jwt', user: { id: userId } }; listeners.forEach(listener => listener(event, session)); }, signIn: (username = 'xbl') => provider.login(username, 'test-password', 'valid-test-captcha') };
 }
 
 test('missing client fails closed; anonymous init loads no private tables', async () => {
@@ -222,6 +222,89 @@ test('logout during the protected login-name check cannot start private hydratio
   assert.ok(f.calls.filter(value => value.kind === 'table').every(value => value.table === 'profiles' && value.filters.length === 1));
 });
 
+test('a different-account auth event immediately clears old private state and URLs before dispatching UI restoration', async () => {
+  for (const event of ['SIGNED_IN', 'TOKEN_REFRESHED']) {
+    let changed = 0; const dispatched = [];
+    const f = fixture({ initialMedia: true, onSessionChanged: payload => { changed++; dispatched.push(payload); } }); f.tables.entries[0].type = 'whisper';
+    const state = await f.signIn(), entries = state.entries;
+    f.emitAuth(event, U1); await Promise.resolve();
+    assert.equal(state.currentUser.id, U1); assert.equal(changed, 0, 'normal same-user token refresh preserves the loaded view');
+    f.emitAuth(event, U2);
+    assert.equal(state.currentUser, null); assert.deepEqual(entries, []); assert.deepEqual(state.users, []);
+    assert.deepEqual(f.revoked, ['blob:private-1']); assert.equal(changed, 0, 'SDK callback does not synchronously call restoration');
+    await Promise.resolve(); assert.equal(changed, 1); assert.deepEqual(dispatched, [{ restore: true }]);
+    f.tables.entries.splice(0); f.tables.media.splice(0); // New identity receives correct empty RLS result.
+    const restored = await f.provider.init();
+    assert.equal(restored.currentUser.id, U2); assert.equal(restored.entries, entries);
+    assert.deepEqual(restored.entries, []);
+  }
+});
+
+test('a cross-tab sign-out clears private state and tells the UI not to restore a session', async () => {
+  const dispatched = [];
+  const f = fixture({ initialMedia: true, onSessionChanged: payload => dispatched.push(payload) }), state = await f.signIn();
+  f.emitAuth('SIGNED_OUT');
+  assert.equal(state.currentUser, null); assert.deepEqual(state.entries, []); assert.deepEqual(f.revoked, ['blob:private-1']);
+  assert.deepEqual(dispatched, []); await Promise.resolve(); assert.deepEqual(dispatched, [{ restore: false }]);
+  const before = f.calls.length; await f.provider.init(); assert.equal(f.calls.length, before, 'an explicit sign-out cannot implicitly restore');
+});
+
+test('a late previous-account mutation cannot restore its state after a cross-tab account change', async () => {
+  const entered = deferred(), release = deferred(); let hold = false, changed = 0;
+  const f = fixture({ onSessionChanged: () => { changed++; }, before: async call => { if (hold && call.table === 'entries' && call.action === 'update') { entered.resolve(); await release.promise; } } });
+  const state = await f.signIn(); hold = true;
+  const mutation = f.provider.saveEntry({ id: ENTRY, content: 'old-account-pending' }), rejected = assert.rejects(mutation, error => error.code === 'AUTH_CANCELLED');
+  await entered.promise; f.emitAuth('TOKEN_REFRESHED', U2); release.resolve(); await rejected;
+  assert.equal(changed, 1); assert.equal(state.currentUser, null); assert.deepEqual(state.entries, []);
+  assert.equal(f.session().user.id, U2, 'cancelling old work cannot log out the new identity');
+});
+
+test('restoration cannot commit an old identity if another tab changes accounts during getUser or table hydration', async () => {
+  for (const stage of ['getUser', 'tables']) {
+    const entered = deferred(), release = deferred(), dispatched = []; let held = false;
+    const f = fixture({ initialSessionUserId: ADMIN, onSessionChanged: payload => dispatched.push(payload), before: async call => {
+      if (!held && (stage === 'getUser' ? call.action === 'getUser' : call.kind === 'table' && call.table === 'entries')) { held = true; entered.resolve(); await release.promise; }
+    } });
+    const pending = f.provider.init(), rejected = assert.rejects(pending, error => error.code === 'AUTH_CANCELLED');
+    await entered.promise; f.emitAuth('TOKEN_REFRESHED', U2);
+    const restored = await f.provider.init();
+    assert.equal(restored.currentUser.id, U2); assert.equal(restored.currentUser.role, 'member');
+    release.resolve(); await rejected;
+    assert.equal(restored.currentUser.id, U2, 'the stale administrator load cannot replace the new member view');
+    assert.deepEqual(dispatched, [{ restore: true }]); assert.equal(f.session().user.id, U2);
+  }
+});
+
+test('password login is cancelled if another tab changes accounts during the name check or table hydration', async () => {
+  for (const stage of ['name', 'tables']) {
+    const entered = deferred(), release = deferred(), dispatched = []; let held = false;
+    const f = fixture({ onSessionChanged: payload => dispatched.push(payload), before: async call => {
+      if (!held && call.kind === 'table' && (stage === 'name' ? call.table === 'profiles' && call.filters.length : call.table === 'entries')) { held = true; entered.resolve(); await release.promise; }
+    } });
+    const pending = f.signIn('memory-admin'), rejected = assert.rejects(pending, error => error.code === 'AUTH_CANCELLED');
+    await entered.promise; f.emitAuth('SIGNED_IN', U1);
+    const restored = await f.provider.init(); assert.equal(restored.currentUser.id, U1); assert.equal(restored.currentUser.role, 'member');
+    release.resolve(); await rejected;
+    assert.equal(restored.currentUser.id, U1); assert.equal(f.session().user.id, U1);
+    assert.ok(!f.calls.some(call => call.action === 'logout'), 'an obsolete login cannot sign out the newer identity');
+    assert.deepEqual(dispatched, [{ restore: true }]);
+  }
+});
+
+test('cross-tab sign-out cancels pending restoration and pending password hydration before they can commit', async () => {
+  for (const mode of ['init', 'login']) {
+    const entered = deferred(), release = deferred(), dispatched = []; let held = false;
+    const f = fixture({ initialSessionUserId: mode === 'init' ? ADMIN : null, onSessionChanged: payload => dispatched.push(payload), before: async call => {
+      if (!held && call.kind === 'table' && call.table === 'entries') { held = true; entered.resolve(); await release.promise; }
+    } });
+    const pending = mode === 'init' ? f.provider.init() : f.signIn('memory-admin'), rejected = assert.rejects(pending, error => error.code === 'AUTH_CANCELLED');
+    await entered.promise; f.emitAuth('SIGNED_OUT'); release.resolve(); await rejected;
+    const restored = await f.provider.init();
+    assert.equal(restored.currentUser, null); assert.deepEqual(restored.entries, []); assert.equal(f.session(), null);
+    assert.deepEqual(dispatched, [{ restore: false }]);
+  }
+});
+
 test('private downloads create Blob URLs; logout revokes them and export has original bytes without credentials', async () => {
   const f = fixture({ initialMedia: true }), state = await f.signIn();
   assert.equal(state.entries[0].media[0].url, 'blob:private-1');
@@ -231,6 +314,67 @@ test('private downloads create Blob URLs; logout revokes them and export has ori
   assert.equal(exported.entries[0].media[0].mimeType, 'image/png'); assert.equal(exported.entries[0].media[0].url, undefined);
   assert.ok(!/test-password|never-export/.test(JSON.stringify(exported)));
   await f.provider.logout(); assert.deepEqual(f.revoked, ['blob:private-1']);
+});
+
+test('author saves and exports a whisper with the actual backend type rather than a local hidden flag', async () => {
+  const f = fixture(), state = await f.signIn();
+  const saved = await f.provider.saveEntry({ ...input(), type: 'whisper', content: 'author private fixture' }, [file('private.png', 'private-bytes')]);
+  assert.equal(saved.type, 'whisper'); assert.equal(saved.authorId, U1);
+  assert.equal(f.calls.find(call => call.table === 'entries' && call.action === 'insert').payload.type, 'whisper');
+  assert.ok(state.entries.some(entry => entry.id === saved.id));
+  const exported = JSON.parse(await (await f.provider.exportData('mine')).text());
+  assert.equal(exported.entries.find(entry => entry.id === saved.id).media[0].data, Buffer.from('private-bytes').toString('base64'));
+});
+
+test('administrator can hydrate and maintain a published whisper from either author', async () => {
+  for (const author of [U1, U2]) {
+    const f = fixture({ author, initialMedia: true }); f.tables.entries[0].type = 'whisper';
+    const state = await f.signIn('memory-admin');
+    assert.equal(state.entries[0].type, 'whisper'); assert.equal(state.entries[0].media.length, 1);
+    const saved = await f.provider.saveEntry({ id: ENTRY, content: 'maintained whisper' });
+    assert.equal(saved.type, 'whisper'); assert.equal(saved.authorId, author);
+  }
+});
+
+test('unexpected hidden whisper rows fail closed before a partner can download, render or export them', async () => {
+  // This SDK fixture deliberately returns a row that correct RLS would hide;
+  // the live SQL verification separately proves actual database authorization.
+  const f = fixture({ author: U2, initialMedia: true }); f.tables.entries[0].type = 'whisper';
+  const state = await f.provider.init();
+  await assert.rejects(f.signIn('xbl'), error => error.code === 'INVALID_RESPONSE');
+  assert.equal(state.currentUser, null); assert.deepEqual(state.entries, []);
+  assert.equal(f.session(), null); assert.ok(!f.calls.some(call => call.kind === 'storage'));
+  await assert.rejects(f.provider.exportData(), error => error.code === 'UNAUTHENTICATED');
+});
+
+test('administrator cannot hydrate a leaked unpublished whisper draft from another author', async () => {
+  const f = fixture({ author: U1, initialMedia: true }); Object.assign(f.tables.entries[0], { type: 'whisper', status: 'draft' });
+  await assert.rejects(f.signIn('memory-admin'), error => error.code === 'INVALID_RESPONSE');
+  assert.ok(!f.calls.some(call => call.kind === 'storage'));
+});
+
+test('a whisper cannot become shared in the same save that removes or adds private attachments', async () => {
+  for (const [patch, files] of [[{ media: [] }, []], [{}, [file('new-private.png')]]]) {
+    const f = fixture({ initialMedia: true }); f.tables.entries[0].type = 'whisper';
+    const state = await f.signIn(), start = f.calls.length;
+    await assert.rejects(f.provider.saveEntry({ id: ENTRY, type: 'note', ...patch }, files), error => error.code === 'PRIVATE_MEDIA_CHANGE');
+    assert.equal(f.calls.length, start, 'privacy validation precedes every write and upload');
+    assert.equal(f.tables.entries[0].type, 'whisper'); assert.equal(state.entries[0].media[0].id, MEDIA);
+  }
+});
+
+test('private attachment edits can be saved first, followed by an explicit shared-type save retaining the final media', async () => {
+  const f = fixture({ initialMedia: true }); f.tables.entries[0].type = 'whisper';
+  const state = await f.signIn();
+  const cleaned = await f.provider.saveEntry({ id: ENTRY, type: 'whisper', media: [] });
+  assert.equal(cleaned.type, 'whisper'); assert.deepEqual(cleaned.media, []);
+  assert.ok(!f.objects.size);
+  const shared = await f.provider.saveEntry({ id: ENTRY, type: 'note' });
+  assert.equal(shared.type, 'note'); assert.deepEqual(shared.media, []);
+  assert.equal(state.entries[0], shared);
+  const keeping = fixture({ initialMedia: true }); keeping.tables.entries[0].type = 'whisper';
+  await keeping.signIn(); const direct = await keeping.provider.saveEntry({ id: ENTRY, type: 'event', title: 'Explicitly shared event' });
+  assert.equal(direct.type, 'event'); assert.equal(direct.media[0].id, MEDIA, 'unchanged private photos can be explicitly shared');
 });
 
 test('edits retain attachments by default; explicit replacement confirms new media before removing old media', async () => {

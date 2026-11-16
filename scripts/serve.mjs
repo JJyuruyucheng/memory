@@ -91,7 +91,7 @@ export async function startServer({ port = 5173, source = false } = {}) {
         && SOURCE_EXTENSIONS.has(path.extname(decoded).toLowerCase())) {
         boundary = path.join(base, 'src');
         file = path.join(boundary, ...segments.slice(1));
-      } else if (decoded === '/assets/credits.json' || (supabaseOrigin && ['/assets/supabase-client-2.119.0.js', '/assets/SUPABASE-LICENSE.txt'].includes(decoded))) {
+      } else if (['/assets/credits.json', '/assets/air-datepicker-3.6.0.js', '/assets/air-datepicker-3.6.0.css', '/assets/AIR-DATEPICKER-LICENSE.txt'].includes(decoded) || (supabaseOrigin && ['/assets/supabase-client-2.119.0.js', '/assets/SUPABASE-LICENSE.txt'].includes(decoded))) {
         boundary = built ? path.join(base, 'assets') : path.join(ROOT, 'public', 'assets');
         file = path.join(boundary, segments.at(-1));
       } else if (segments[0] === 'assets' && segments.length > 1

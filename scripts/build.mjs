@@ -170,6 +170,15 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
     await requireFile(root, lock.licenseFile);
   }
   const excluded = mode === 'demo' ? new Set() : DEMO_ONLY_FILES;
+  const pickerLock = JSON.parse(await readFile(new URL('../vendor/air-datepicker.lock.json', import.meta.url), 'utf8'));
+  if (pickerLock.version !== '3.6.0' || pickerLock.files.length !== 3) throw new Error('日期组件锁定清单不匹配。');
+  const pickerAssets = [];
+  for (const item of pickerLock.files) {
+    if (!/^public\/assets\/(air-datepicker-3\.6\.0\.(js|css)|AIR-DATEPICKER-LICENSE\.txt)$/.test(item.file)) throw new Error('日期组件路径不在白名单。');
+    const bytes = await readFile(await requireFile(root, item.file));
+    if (createHash('sha256').update(bytes).digest('hex') !== item.sha256) throw new Error('日期组件完整性检查失败。');
+    pickerAssets.push({ file: item.file, bytes });
+  }
 
   // Validate before touching a previous build, so failed source checks preserve it.
   await preflight(root, excluded);
@@ -200,6 +209,7 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
   await copyWhitelistedDirectory(path.join(root, 'public', 'assets'), path.join(dist, 'assets'), ASSET_EXTENSIONS, root, excluded);
   // This one attribution manifest is the only JSON allowed into the static site.
   await writeFile(path.join(dist, 'assets', 'credits.json'), await readFile(path.join(root, 'public', 'assets', 'credits.json')));
+  for (const item of pickerAssets) await writeFile(path.join(dist, 'assets', path.basename(item.file)), item.bytes);
   if (sdk) {
     await writeFile(path.join(dist, 'assets', 'supabase-client-2.119.0.js'), sdk);
     await writeFile(path.join(dist, 'assets', 'SUPABASE-LICENSE.txt'), await readFile(path.join(root, 'vendor', 'SUPABASE-LICENSE')));

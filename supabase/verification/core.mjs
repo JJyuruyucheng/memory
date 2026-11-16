@@ -18,7 +18,13 @@ const DIFFERENT_PNG = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQA
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HEX = /^[0-9a-f]{64}$/;
 const JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
-const CHECKS = ['identitiesAndProfiles', 'draftIsolation', 'crossAuthorUpdateDenied', 'pngPipeline', 'memberDownloads', 'anonymousDenied', 'attachedDeleteDenied', 'upsertDenied', 'nineImageLimit', 'atomicReplacement', 'adminPublishedUpdate'];
+const CHECKS = ['identitiesAndProfiles', 'draftIsolation', 'crossAuthorUpdateDenied', 'pngPipeline', 'memberDownloads', 'anonymousDenied', 'attachedDeleteDenied', 'upsertDenied', 'nineImageLimit', 'atomicReplacement', 'adminPublishedUpdate', 'whisperNewIsolation', 'whisperChildIsolation', 'whisperMediaIsolation', 'convertedWhisperFreshAccessDenied', 'convertedWhisperColdAccessDenied', 'whisperAdminMaintain'];
+const CACHE_STATUSES = new Set(['HIT','MISS','DYNAMIC','EXPIRED','REVALIDATED','UPDATING','BYPASS','STALE','NONE']);
+function downloadObservation(value) {
+  const status = value.headers.get('cf-cache-status')?.toUpperCase() ?? null;
+  const age = value.headers.get('age');
+  return { status: value.status, cacheStatus: CACHE_STATUSES.has(status) ? status : null, ageSeconds: /^\d{1,10}$/.test(age ?? '') ? Number(age) : null };
+}
 class SafeError extends Error {
   constructor(status, code) { super(code); this.status = status; this.code = code; }
 }
@@ -111,7 +117,7 @@ export function createVerificationHandler(policy, dependencies = {}) {
   return async function verification(request) {
     let authorized = false;
     const sessions = new Map(), fixtures = [], objects = new Map(), cleanupEligible = new Set();
-    const metrics = { authMethod: 'admin-generated-magiclink', passwordCaptchaTested: false, checks: Object.fromEntries(CHECKS.map(key => [key, false])), requests: 0, uploadedObjects: 0 };
+    const metrics = { authMethod: 'admin-generated-magiclink', passwordCaptchaTested: false, checks: Object.fromEntries(CHECKS.map(key => [key, false])), requests: 0, uploadedObjects: 0, knownCachedSharedAccess: false, convertedWhisperDownloads: { warmSharedUrl: null, freshCacheNonce: null, previouslyColdPath: null } };
     const cleanup = { complete: false, storage: false, rows: false, sessions: false, remainingFixtureIds: [], errors: [] };
     let origin, privileged, marker, runId, workDeadline, cleanupDeadline, publicKey, failure;
     let httpStatus = 200;
@@ -171,7 +177,7 @@ export function createVerificationHandler(policy, dependencies = {}) {
     async function data(path, options, code) {
       const response = await api(path, options); check(response.ok, code); return response.data;
     }
-    const fixtureQuery = fixture => query('entries', { id: `eq.${fixture.id}`, select: 'id,authorId,content,title,status,updatedAt' });
+    const fixtureQuery = fixture => query('entries', { id: `eq.${fixture.id}`, select: 'id,authorId,content,title,type,status,updatedAt' });
     async function entry(fixture, username, cleaning = false) {
       return one(await data(fixtureQuery(fixture), { username, cleaning }, 'FIXTURE_READ_FAILED'), 'FIXTURE_READ_FAILED');
     }
@@ -181,21 +187,48 @@ export function createVerificationHandler(policy, dependencies = {}) {
       const value = await data('/rest/v1/rpc/publish_entry', { username: fixture.username, cleaning, method: 'POST', body: { p_entry_id: fixture.id, p_media_ids: ids, p_expected_updated_at: current.updatedAt } }, 'PUBLISH_FAILED');
       check(value?.id === fixture.id && value.status === 'published', 'PUBLISH_FAILED'); return value;
     }
-    async function download(path, username, mode = 'user', cleaning = false) {
-      return api(storagePath(path), { username, mode, binary: true, cleaning });
+    async function download(path, username, mode = 'user', cleaning = false, fresh = false) {
+      // cacheNonce is the documented Supabase origin-bypass parameter. It does
+      // not revoke any already downloaded bytes or previously warmed URL.
+      return api(`${storagePath(path)}${fresh ? `?cacheNonce=${encodeURIComponent(runId)}` : ''}`, { username, mode, binary: true, cleaning, ...(fresh ? { extra: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } } : {}) });
     }
     async function assertPng(path, username) {
       const response = await download(path, username);
       check(response.ok && response.headers.get('content-type')?.split(';')[0] === 'image/png' && equalBytes(response.data, PNG_BYTES), 'PRIVATE_DOWNLOAD_FAILED');
     }
-    async function upload(fixture) {
+    async function reserve(fixture) {
       const value = await data('/rest/v1/rpc/reserve_media', { username: fixture.username, method: 'POST', body: { p_entry_id: fixture.id, p_name: 'verification.png', p_mime_type: 'image/png', p_size: PNG_BYTES.length } }, 'RESERVE_FAILED');
       const path = mediaPath(value, fixture.id, fixture.authorId); objects.set(path, fixture);
+      return { id: value.id, path };
+    }
+    async function uploadReserved(fixture, reservation) {
+      const { id, path } = reservation;
       const uploaded = await api(storagePath(path), { username: fixture.username, method: 'POST', binary: true, body: PNG_BYTES, extra: { 'x-upsert': 'false', 'cache-control': '0' } });
       check(uploaded.ok, 'UPLOAD_FAILED'); metrics.uploadedObjects++;
-      const ready = await data('/rest/v1/rpc/finalize_media', { username: fixture.username, method: 'POST', body: { p_media_id: value.id } }, 'FINALIZE_FAILED');
-      check(ready?.id === value.id && ready.entryId === fixture.id && ready.storagePath === path && ready.status === 'ready' && ready.attached === false, 'FINALIZE_FAILED');
-      return { id: value.id, path };
+      const ready = await data('/rest/v1/rpc/finalize_media', { username: fixture.username, method: 'POST', body: { p_media_id: id } }, 'FINALIZE_FAILED');
+      check(ready?.id === id && ready.entryId === fixture.id && ready.storagePath === path && ready.status === 'ready' && ready.attached === false, 'FINALIZE_FAILED');
+      return reservation;
+    }
+    async function upload(fixture) { return uploadReserved(fixture, await reserve(fixture)); }
+    async function child(fixture, table, username) {
+      return data(`/rest/v1/${table}`, { username, method: 'POST', extra: { Prefer: 'return=representation' }, body: { entryId: fixture.id, ...(table === 'comments' ? { content: marker } : {}) } }, 'CHILD_CREATE_FAILED');
+    }
+    async function hiddenRows(fixture, username) {
+      for (const table of ['entries', 'comments', 'reactions', 'favorites', 'media']) {
+        const path = table === 'entries' ? fixtureQuery(fixture) : query(table, { entryId: `eq.${fixture.id}`, select: '*' });
+        const rows = await data(path, { username }, 'WHISPER_ROWS_VISIBLE');
+        check(Array.isArray(rows) && rows.length === 0, 'WHISPER_ROWS_VISIBLE');
+      }
+      const counted = await api(query('entries', { id: `eq.${fixture.id}`, content: `eq.${marker}`, select: 'id' }), { username, extra: { Prefer: 'count=exact' } });
+      check(counted.ok && Array.isArray(counted.data) && counted.data.length === 0 && counted.headers.get('content-range')?.endsWith('/0'), 'WHISPER_COUNT_VISIBLE');
+    }
+    async function deniedWrite(path, username, body, code, method = 'POST') {
+      const value = await api(path, { username, method, body, extra: { Prefer: 'return=representation' } });
+      check((!value.ok && [401, 403].includes(value.status)) || (method !== 'POST' && value.ok && Array.isArray(value.data) && value.data.length === 0), code);
+    }
+    async function deniedDownload(path, username) {
+      const value = await download(path, username);
+      check(!value.ok && [400, 401, 403, 404].includes(value.status), 'WHISPER_DOWNLOAD_ALLOWED');
     }
     async function cleanupAll() {
       const removable = [];
@@ -298,14 +331,14 @@ export function createVerificationHandler(policy, dependencies = {}) {
       }
       metrics.checks.identitiesAndProfiles = true;
       runId = randomUUID(); check(UUID.test(runId), 'INVALID_FIXTURE_ID'); marker = `memory-verification:${runId}`;
-      for (const username of ['xbl', 'll']) {
+      for (const [username, type] of [['xbl', 'note'], ['ll', 'note'], ['xbl', 'whisper']]) {
         const fixture = { id: randomUUID(), username, authorId: expected.get(username) };
         check(UUID.test(fixture.id) && fixture.id !== runId && !fixtures.some(value => value.id === fixture.id), 'INVALID_FIXTURE_ID'); fixtures.push(fixture);
-        const saved = one(await data('/rest/v1/entries', { username, method: 'POST', extra: { Prefer: 'return=representation' }, body: { id: fixture.id, type: 'note', title: marker, content: marker, occurredAt: new Date(now()).toISOString(), mood: null, tags: [] } }, 'FIXTURE_CREATE_FAILED'), 'FIXTURE_CREATE_FAILED');
-        check(saved.id === fixture.id && saved.authorId === fixture.authorId && saved.content === marker && saved.status === 'draft', 'FIXTURE_CREATE_FAILED');
+        const saved = one(await data('/rest/v1/entries', { username, method: 'POST', extra: { Prefer: 'return=representation' }, body: { id: fixture.id, type, title: marker, content: marker, occurredAt: new Date(now()).toISOString(), mood: null, tags: [] } }, 'FIXTURE_CREATE_FAILED'), 'FIXTURE_CREATE_FAILED');
+        check(saved.id === fixture.id && saved.authorId === fixture.authorId && saved.content === marker && saved.type === type && saved.status === 'draft', 'FIXTURE_CREATE_FAILED');
       }
-      const [a, b] = fixtures;
-      for (const [fixture, viewers] of [[a, ['ll', 'memory-admin']], [b, ['xbl', 'memory-admin']]]) for (const username of viewers) {
+      const [a, b, privateA] = fixtures;
+      for (const [fixture, viewers] of [[a, ['ll', 'memory-admin']], [b, ['xbl', 'memory-admin']], [privateA, ['ll', 'memory-admin']]]) for (const username of viewers) {
         const rows = await data(fixtureQuery(fixture), { username }, 'DRAFT_ISOLATION_FAILED'); check(Array.isArray(rows) && rows.length === 0, 'DRAFT_ISOLATION_FAILED');
       }
       metrics.checks.draftIsolation = true;
@@ -339,6 +372,70 @@ export function createVerificationHandler(policy, dependencies = {}) {
       await assertPng(replacement.path, 'll'); metrics.checks.atomicReplacement = true;
       const adminUpdate = one(await data(query('entries', { id: `eq.${a.id}` }), { username: 'memory-admin', method: 'PATCH', extra: { Prefer: 'return=representation' }, body: { title: `${marker}:admin` } }, 'ADMIN_UPDATE_FAILED'), 'ADMIN_UPDATE_FAILED');
       check(adminUpdate.id === a.id && adminUpdate.authorId === a.authorId && adminUpdate.title === `${marker}:admin` && (await entry(a, 'll')).title === `${marker}:admin`, 'ADMIN_UPDATE_FAILED'); metrics.checks.adminPublishedUpdate = true;
+
+      // A new whisper is created through the same authenticated public API.
+      const privateFile = await upload(privateA);
+      await publish(privateA, [privateFile.id]);
+      for (const table of ['comments', 'reactions', 'favorites']) await child(privateA, table, 'xbl');
+      await hiddenRows(privateA, 'll');
+      check((await entry(privateA, 'xbl')).type === 'whisper' && (await entry(privateA, 'memory-admin')).type === 'whisper', 'WHISPER_OWNER_ADMIN_READ_FAILED');
+      metrics.checks.whisperNewIsolation = true;
+      for (const table of ['comments', 'reactions', 'favorites']) {
+        const visible = await data(query(table, { entryId: `eq.${privateA.id}`, select: '*' }), { username: 'memory-admin' }, 'WHISPER_ADMIN_CHILD_READ_FAILED');
+        check(Array.isArray(visible) && visible.length === 1, 'WHISPER_ADMIN_CHILD_READ_FAILED');
+        await deniedWrite(`/rest/v1/${table}`, 'll', { entryId: privateA.id, ...(table === 'comments' ? { content: marker } : {}) }, 'WHISPER_CHILD_WRITE_ALLOWED');
+      }
+      await deniedWrite(query('entries', { id: `eq.${privateA.id}` }), 'll', { type: 'note', title: `${marker}:forbidden` }, 'WHISPER_UPDATE_ALLOWED', 'PATCH');
+      await deniedWrite('/rest/v1/rpc/reserve_media', 'll', { p_entry_id: privateA.id, p_name: 'forbidden.png', p_mime_type: 'image/png', p_size: PNG_BYTES.length }, 'WHISPER_RESERVE_ALLOWED');
+      await deniedWrite('/rest/v1/rpc/finalize_media', 'll', { p_media_id: privateFile.id }, 'WHISPER_FINALIZE_ALLOWED');
+      await deniedWrite('/rest/v1/rpc/publish_entry', 'll', { p_entry_id: privateA.id, p_media_ids: [privateFile.id], p_expected_updated_at: (await entry(privateA, 'xbl')).updatedAt }, 'WHISPER_PUBLISH_ALLOWED');
+      metrics.checks.whisperChildIsolation = true;
+
+      await deniedDownload(privateFile.path, 'll');
+      await assertPng(privateFile.path, 'xbl'); await assertPng(privateFile.path, 'memory-admin');
+      // A fresh pending path proves Storage INSERT is denied, rather than merely
+      // getting a duplicate-file error against an already existing object.
+      const pending = await reserve(privateA);
+      const forbiddenUpload = await api(storagePath(pending.path), { username: 'll', method: 'POST', binary: true, body: PNG_BYTES, extra: { 'x-upsert': 'false' } });
+      check(!forbiddenUpload.ok && [400, 401, 403].includes(forbiddenUpload.status), 'WHISPER_STORAGE_INSERT_ALLOWED');
+      await uploadReserved(privateA, pending);
+      await deniedDownload(pending.path, 'll');
+      const forbiddenDelete = await api(`/storage/v1/object/${BUCKET_ID}`, { username: 'll', method: 'DELETE', body: { prefixes: [pending.path] } });
+      check((!forbiddenDelete.ok && [400, 401, 403].includes(forbiddenDelete.status)) || (forbiddenDelete.ok && Array.isArray(forbiddenDelete.data) && forbiddenDelete.data.length === 0), 'WHISPER_STORAGE_DELETE_ALLOWED');
+      await assertPng(pending.path, 'xbl'); await assertPng(pending.path, 'memory-admin');
+      metrics.checks.whisperMediaIsolation = true;
+
+      // Existing rows/paths were intentionally visible to the partner above.
+      // Converting only this run's note must also hide its pre-existing children.
+      for (const table of ['comments', 'reactions', 'favorites']) await child(a, table, 'll');
+      await assertPng(replacement.path, 'll');
+      const converted = one(await data(query('entries', { id: `eq.${a.id}` }), { username: 'xbl', method: 'PATCH', extra: { Prefer: 'return=representation' }, body: { type: 'whisper' } }, 'WHISPER_CONVERSION_FAILED'), 'WHISPER_CONVERSION_FAILED');
+      check(converted.id === a.id && converted.type === 'whisper' && converted.content === marker, 'WHISPER_CONVERSION_FAILED');
+      await hiddenRows(a, 'll');
+      // Never conceal a still-readable previously warmed authenticated URL.
+      // Supabase documents authenticated CDN cache surviving policy changes.
+      // Record that boundary separately from fresh-origin RLS authorization.
+      const warm = await download(replacement.path, 'll');
+      metrics.convertedWhisperDownloads.warmSharedUrl = downloadObservation(warm);
+      if (warm.ok) {
+        check(warm.headers.get('content-type')?.split(';')[0] === 'image/png' && equalBytes(warm.data, PNG_BYTES), 'WARM_SHARED_URL_UNEXPECTED_BYTES');
+        metrics.knownCachedSharedAccess = true;
+      } else check([400, 401, 403, 404].includes(warm.status), 'WARM_SHARED_URL_PROBE_FAILED');
+      const fresh = await download(replacement.path, 'll', 'user', false, true);
+      metrics.convertedWhisperDownloads.freshCacheNonce = downloadObservation(fresh);
+      check(!fresh.ok && [400, 401, 403, 404].includes(fresh.status), 'CONVERTED_WHISPER_FRESH_DOWNLOAD_ALLOWED');
+      metrics.checks.convertedWhisperFreshAccessDenied = true;
+      // Original image #2 was retained and was never downloaded by ll while
+      // shared, giving a separate cold-path control with the same user JWT.
+      const cold = await download(original[1].path, 'll');
+      metrics.convertedWhisperDownloads.previouslyColdPath = downloadObservation(cold);
+      check(!cold.ok && [400, 401, 403, 404].includes(cold.status), 'CONVERTED_WHISPER_COLD_DOWNLOAD_ALLOWED');
+      metrics.checks.convertedWhisperColdAccessDenied = true;
+      for (const table of ['reactions', 'favorites']) await deniedWrite(query(table, { entryId: `eq.${a.id}` }), 'll', undefined, 'HIDDEN_WHISPER_DELETE_ALLOWED', 'DELETE');
+      await assertPng(replacement.path, 'xbl'); await assertPng(replacement.path, 'memory-admin');
+      const maintained = one(await data(query('entries', { id: `eq.${privateA.id}` }), { username: 'memory-admin', method: 'PATCH', extra: { Prefer: 'return=representation' }, body: { title: `${marker}:private-admin` } }, 'WHISPER_ADMIN_UPDATE_FAILED'), 'WHISPER_ADMIN_UPDATE_FAILED');
+      check(maintained.id === privateA.id && maintained.type === 'whisper' && maintained.authorId === privateA.authorId && (await entry(privateA, 'xbl')).title === `${marker}:private-admin`, 'WHISPER_ADMIN_UPDATE_FAILED');
+      await hiddenRows(privateA, 'll'); metrics.checks.whisperAdminMaintain = true;
     } catch (error) {
       failure = error instanceof SafeError ? error.code : 'VERIFICATION_FAILED'; httpStatus = error instanceof SafeError ? error.status : 503;
     } finally {

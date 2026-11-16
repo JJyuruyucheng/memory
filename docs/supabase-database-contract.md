@@ -21,7 +21,7 @@
 | 表 | 字段与用途 |
 | --- | --- |
 | profiles | `id uuid, slot, username, name, role:member/admin, color:#RRGGBB`；前三个真实 UUID 构成白名单。 |
-| entries | `id uuid, authorId uuid, status:draft/published, type:note/event, title, content, occurredAt, mood:happy/neutral/sad/null, tags:text[], createdAt, updatedAt, deletedAt`。 |
+| entries | `id uuid, authorId uuid, status:draft/published, type:note/event/whisper, title, content, occurredAt, mood:happy/neutral/sad/null, tags:text[], createdAt, updatedAt, deletedAt`。 |
 | media | `id uuid, entryId uuid, authorId uuid, uploadedBy uuid, name, mimeType, size bigint, type:image/video, storagePath, position, status:pending/ready/retired, attached:boolean, createdAt`。 |
 | comments | `id uuid, entryId uuid, authorId uuid, content, createdAt`。 |
 | reactions | `entryId uuid, userId uuid, createdAt`，二元主键；一个用户对一帖最多一个爱心。 |
@@ -36,11 +36,17 @@
 
 ## REST 与草稿发布
 
-读取 `/rest/v1/{table}?select=*` 并分页。entries 的 RLS 允许三名成员读取 published 记录；draft 严格只对作者可见，业务 admin 也不能读取他人的未发布草稿。Provider 列表只组装 `status='published'`；保留 draft 原始数据用于恢复，不把未完成内容放入共享 UI。软删除仍属共享空间回收站，published 原文及 attached 附件对三人保留读取权限，不能把软删除称为撤回对方访问权。
+读取 `/rest/v1/{table}?select=*` 并分页。entries 的 RLS 允许三名成员读取 published 的 note/event；published 的 whisper（悄悄话）仅作者和业务 admin 可读，情侣另一方不能通过已知 UUID、搜索、统计计数、回收站或导出访问。draft 严格只对作者可见，业务 admin 也不能读取他人的未发布草稿。Provider 列表只组装 `status='published'`；保留 draft 原始数据用于恢复，不把未完成内容放入共享 UI。软删除保留原有可读范围，不能把删除称为撤回已下载的副本。
+
+悄悄话的权限迁移文件是 `supabase/migrations/20261116092604_private_whispers.sql`。它同时约束 entries、comments、reactions、favorites、media 与私有 Storage 读取；禁止仅在 UI 隐藏正文而仍公开附件。管理员可以维护已发布悄悄话。普通记录改为悄悄话后，新的鉴权请求按私有权限处理，但不能收回对方此前已经看见、下载、缓存或另存的内容，也不能保证收回此前已签发且未到期的 Storage signed URL（本应用下载仅用鉴权请求与 Blob URL，不主动创建 signed URL）；改回日常随记或事件会重新向对方公开。迁移已在目标云端应用并完成真实文件验证，见 [v0.4.0 验证记录](release-v0.4.0.md)。
+
+本地 Demo 仅模拟身份隔离，并不是防护同一设备的安全边界；完整示例数据仍存在该浏览器 IndexedDB。Memos 的现有 SPACE 协议不能提供“作者与独立管理员可见”的私密约束，因此该 Provider 会拒绝保存 whisper，不降级为共享记录。
 
 新记录 POST entries，status 由数据库默认 draft，authorId 默认当前 UUID。可发送 `id, authorId, type, title, content, occurredAt, mood, tags`；不可设置 status、createdAt、updatedAt、deletedAt。允许空 note 草稿，给纯图片记录留上传阶段；空草稿不得发布。普通成员仅能修改自己记录，管理员可以维护 published 记录；draft 只能作者改。
 
 更新 PATCH entries 可以发送 `type,title,content,occurredAt,mood,tags,deletedAt`。配合 `id=eq.<id>&updatedAt=eq.<rawTimestamp>`、返回单行检测并发；0 行视为冲突/不可编辑，不得假成功。只改 deletedAt 完成软删除及恢复，数据库用服务端时间标记删除；回收站记录须先恢复才能改正文。
+
+Provider 禁止在同一次保存中把 whisper 改成共享类型并移除旧附件或新增文件，且必须在任何写入前拒绝；先保留悄悄话类型保存最终附件集合，再单独切换为日常随记/事件。这样可避免 type 先公开而旧私密附件尚未解除 attached 的时间窗口。保留相同附件集合时，用户仍可明确将整条记录改为共享。
 
 评论 POST comments 的 `entryId,content`；authorId 默认当前用户，不能冒充他人。爱心/收藏 POST `entryId`，DELETE 时按 entryId 与当前 userId 定位。仅 published 且未删除的记录可新增回应、爱心、收藏；移除自己的爱心/收藏仍允许。settings PATCH 仅管理员通过 RLS 生效。
 
@@ -64,7 +70,7 @@ Bucket 固定 **memory-media**，通过官方 Storage API 创建，配置 `publi
 5. 上传全部完成后调用 publish_entry，p_media_ids 是最终保留的旧 ready 附件加新 ready 附件的完整 ID 集合，p_expected_updated_at 用上一步 entries 返回的原始值。RPC 锁行并核验唯一 ID、同一 entry/作者、ready、真实对象仍存在、最终附件数≤10且图片数≤9、正文/标题/媒体至少一项；CAS 冲突 SQLSTATE **40001**。同一事务把选中附件 attached=true，把移除的旧 attached 附件改 retired/attached=false，并把 entry 置 published。空文本/空图不能发布，也不能通过普通 PATCH 把 published 文本帖改空。
 6. 发布失败不会从本次操作中先删旧图。发布成功之后，才对本次移除的 retired 附件逐一 Storage.remove(path)→discard_media(id)。清理失败表示“发布成功，但存在待清理附件”，不能谎称发布回滚，也不能把未确认完成当完整备份。原子选图只覆盖数据库登记；Storage 对象字节、Auth、HTTP 和 SQL 不属于同一个事务，仍要真实请求验证。
 
-Storage SELECT 只允许：作者自己的草稿/临时文件；published attached ready 文件允许三人读取；业务 admin 可维护 published 记录的临时文件。对方不能读新草稿或别人暂存上传。Storage DELETE 仅允许有编辑权的人删除未 attached 文件；不能直接删仍在正式记录或回收站中的 attached 文件。先通过 publish_entry 解除附着后才删物理对象，能降低“还在展示但字节已删除”的风险。
+Storage SELECT 只允许：作者自己的草稿/临时文件；published note/event 的 attached ready 文件允许三人读取，published whisper 的 attached ready 文件仅作者和业务 admin 可读；业务 admin 可维护 published 记录的临时文件。对方不能读新草稿、悄悄话或别人暂存上传。Storage DELETE 仅允许有编辑权的人删除未 attached 文件；不能直接删仍在正式记录或回收站中的 attached 文件。先通过 publish_entry 解除附着后才删物理对象，能降低“还在展示但字节已删除”的风险。
 
 ## 失败与维护恢复
 

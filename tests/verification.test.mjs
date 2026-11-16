@@ -20,12 +20,14 @@ const request = ({ method = 'POST', headers = {}, body = { run: true }, url = 'h
 // The mock verifies credential separation and cleanup scope at actual HTTP
 // boundaries. It is not evidence that hosted RLS or password CAPTCHA passed.
 function setup({ config = {}, env: extraEnv = {}, users = IDS.map((_, index) => user(index)), hook, after, profileMismatch = false, profileOverrides = {}, cleanupFails = false, randomUUID } = {}) {
-  const calls = [], entries = new Map([[EXISTING, { id: EXISTING, authorId: IDS[0], status: 'published', title: 'pre-existing', content: 'must remain unchanged', updatedAt: '2026-01-01T00:00:00Z' }]]), media = new Map(), objects = new Map([['unrelated/existing.png', PNG_BYTES]]), sessions = new Set(), loggedOut = [];
+  const calls = [], entries = new Map([[EXISTING, { id: EXISTING, authorId: IDS[0], status: 'published', type: 'note', title: 'pre-existing', content: 'must remain unchanged', updatedAt: '2026-01-01T00:00:00Z' }]]), media = new Map(), children = { comments: new Map(), reactions: new Map(), favorites: new Map() }, objects = new Map([['unrelated/existing.png', PNG_BYTES]]), sessions = new Set(), loggedOut = [];
   let serial = 100, ticks = 0;
   const uuid = () => `10000000-0000-4000-8000-${String(++serial).padStart(12, '0')}`;
   const env = { SUPABASE_URL: PROJECT_ORIGIN, SUPABASE_SECRET_KEYS: JSON.stringify({ default: SECRET }), ...extraEnv };
   const member = headers => { const value = headers.get('authorization'); const index = IDS.findIndex((_, i) => value === `Bearer ${token(i)}`); return index >= 0 && sessions.has(token(index)) ? index : -1; };
-  const visible = (row, index) => index >= 0 && (row.status === 'published' || row.authorId === IDS[index]);
+  const visible = (row, index) => index >= 0 && row && (row.authorId === IDS[index] || (row.status === 'published' && (row.type !== 'whisper' || index === 2)));
+  const editable = (row, index) => visible(row, index) && (row.authorId === IDS[index] || (row.status === 'published' && index === 2));
+  const published = (row, index) => row?.status === 'published' && visible(row, index);
   const filtered = (rows, search) => rows.filter(row => [...search].every(([key, value]) => ['select', 'order', 'limit'].includes(key) || (value.startsWith('eq.') ? String(row[key]) === value.slice(3) : value.startsWith('in.(') ? value.slice(4, -1).split(',').includes(row[key]) : true)));
   async function fetcher(input, init) {
     const url = new URL(input), headers = new Headers(init.headers), privileged = headers.get('apikey') === SECRET || headers.get('apikey') === 'legacy.service.fixture';
@@ -33,7 +35,7 @@ function setup({ config = {}, env: extraEnv = {}, users = IDS.map((_, index) => 
     const body = init.body instanceof Uint8Array ? new Uint8Array(init.body) : init.body ? JSON.parse(init.body) : undefined;
     const call = { url, path: url.pathname, method: init.method, headers, body, privileged };
     calls.push(call);
-    const override = await hook?.(call, { entries, media, objects, sessions, calls }); if (override) return override;
+    const override = await hook?.(call, { entries, media, children, objects, sessions, calls }); if (override) return override;
     let result;
     const index = member(headers), actor = IDS[index];
     if (call.path.startsWith('/auth/v1/admin/')) {
@@ -60,16 +62,21 @@ function setup({ config = {}, env: extraEnv = {}, users = IDS.map((_, index) => 
     } else if (call.path.startsWith('/rest/v1/rpc/')) {
       assert.equal(privileged, false, 'all RPC assertions must use a real user JWT'); assert.equal(headers.get('apikey'), PUBLIC); assert.ok(index >= 0);
       if (call.path.endsWith('/reserve_media')) {
-        const parent = entries.get(body.p_entry_id); assert.equal(parent.authorId, actor);
-        const id = uuid(), storagePath = `${actor}/${parent.id}/${id}`;
-        const raw = { id, entryId: parent.id, authorId: actor, uploadedBy: actor, name: body.p_name, mimeType: body.p_mime_type, size: body.p_size, type: 'image', storagePath, status: 'pending', attached: false };
-        media.set(id, raw); result = response(raw);
+        const parent = entries.get(body.p_entry_id);
+        if (!editable(parent, index)) result = response({ code: '42501' }, 403);
+        else {
+          const id = uuid(), storagePath = `${parent.authorId}/${parent.id}/${id}`;
+          const raw = { id, entryId: parent.id, authorId: parent.authorId, uploadedBy: actor, name: body.p_name, mimeType: body.p_mime_type, size: body.p_size, type: 'image', storagePath, status: 'pending', attached: false };
+          media.set(id, raw); result = response(raw);
+        }
       } else if (call.path.endsWith('/finalize_media')) {
-        const raw = media.get(body.p_media_id); assert.equal(raw.authorId, actor); assert.deepEqual(objects.get(raw.storagePath), PNG_BYTES);
-        raw.status = 'ready'; result = response(raw);
+        const raw = media.get(body.p_media_id);
+        if (!raw || !editable(entries.get(raw.entryId), index)) result = response({ code: '42501' }, 403);
+        else { assert.deepEqual(objects.get(raw.storagePath), PNG_BYTES); raw.status = 'ready'; result = response(raw); }
       } else {
-        assert.ok(call.path.endsWith('/publish_entry')); const parent = entries.get(body.p_entry_id); assert.equal(parent.authorId, actor);
-        if (body.p_media_ids.length > 9) result = response({ code: '23514', message: 'too many images' }, 400);
+        assert.ok(call.path.endsWith('/publish_entry')); const parent = entries.get(body.p_entry_id);
+        if (!editable(parent, index)) result = response({ code: '42501' }, 403);
+        else if (body.p_media_ids.length > 9) result = response({ code: '23514', message: 'too many images' }, 400);
         else {
           assert.equal(parent.updatedAt, body.p_expected_updated_at);
           const selected = body.p_media_ids.map(id => media.get(id)); assert.ok(selected.every(value => value?.entryId === parent.id && value.status === 'ready'));
@@ -87,21 +94,40 @@ function setup({ config = {}, env: extraEnv = {}, users = IDS.map((_, index) => 
         assert.ok(['GET', 'DELETE'].includes(call.method), 'server REST credential is fixture cleanup only');
         const filter = url.searchParams.get(child ? 'entryId' : 'id'); assert.ok(filter && (call.method !== 'DELETE' || !filter.includes(EXISTING)), 'cleanup never deletes an existing record');
       } else assert.equal(headers.get('apikey'), PUBLIC);
-      let rows = child ? table === 'media' ? [...media.values()] : [] : [...entries.values()];
+      const store = child ? table === 'media' ? media : children[table] : entries;
+      let rows = [...store.values()];
       rows = filtered(rows, url.searchParams);
       if (!privileged && index < 0) result = response({ code: '42501' }, 403);
-      else if (call.method === 'GET') result = response(rows.filter(row => privileged || (child ? visible(entries.get(row.entryId), index) && (row.authorId === actor || (row.attached && row.status === 'ready') || index === 2) : visible(row, index))));
+      else if (call.method === 'GET') {
+        const selected = rows.filter(row => privileged || (child ? table === 'media' ? row.authorId === actor || published(entries.get(row.entryId), index) && (row.attached && row.status === 'ready' || index === 2) : published(entries.get(row.entryId), index) : visible(row, index)));
+        result = response(selected, 200, headers.get('prefer') === 'count=exact' ? { 'content-range': selected.length ? `0-${selected.length - 1}/${selected.length}` : '*/0' } : {});
+      }
       else if (call.method === 'POST') {
-        assert.equal(privileged, false); assert.equal(table, 'entries'); assert.equal(body.authorId, undefined);
-        if (entries.has(body.id)) result = response({ code: '23505' }, 409);
-        else { const row = { ...body, authorId: actor, status: 'draft', updatedAt: new Date(NOW + ++ticks * 1000).toISOString() }; entries.set(row.id, row); result = response([row], 201); }
+        assert.equal(privileged, false); assert.equal(body.authorId, undefined);
+        if (table === 'entries') {
+          if (entries.has(body.id)) result = response({ code: '23505' }, 409);
+          else { const row = { ...body, authorId: actor, status: 'draft', updatedAt: new Date(NOW + ++ticks * 1000).toISOString() }; entries.set(row.id, row); result = response([row], 201); }
+        } else {
+          assert.ok(children[table]);
+          if (!published(entries.get(body.entryId), index)) result = response({ code: '42501' }, 403);
+          else {
+            const id = table === 'comments' ? uuid() : `${body.entryId}:${actor}`;
+            if (store.has(id)) result = response({ code: '23505' }, 409);
+            else { const row = { id, ...body, ...(table === 'comments' ? { authorId: actor } : { userId: actor }) }; store.set(id, row); result = response([row], 201); }
+          }
+        }
       } else if (call.method === 'PATCH') {
         assert.equal(privileged, false);
-        const changed = rows.filter(row => visible(row, index) && (row.authorId === actor || (row.status === 'published' && index === 2)));
+        const changed = rows.filter(row => editable(row, index));
         changed.forEach(row => Object.assign(row, body, { updatedAt: new Date(NOW + ++ticks * 1000).toISOString() })); result = response(changed);
       } else {
-        assert.equal(call.method, 'DELETE'); assert.equal(privileged, true);
-        rows.forEach(row => (child ? media : entries).delete(row.id)); result = new Response(null, { status: 204 });
+        assert.equal(call.method, 'DELETE');
+        if (privileged) { rows.forEach(row => store.delete(row.id)); result = new Response(null, { status: 204 }); }
+        else {
+          assert.ok(['reactions', 'favorites'].includes(table));
+          const selected = rows.filter(row => row.userId === actor && published(entries.get(row.entryId), index));
+          selected.forEach(row => store.delete(row.id)); result = response(selected);
+        }
       }
     } else if (call.path.startsWith('/storage/v1/object/')) {
       const base = '/storage/v1/object/memory-media', info = '/storage/v1/object/info/memory-media/';
@@ -119,24 +145,24 @@ function setup({ config = {}, env: extraEnv = {}, users = IDS.map((_, index) => 
       } else if (call.method === 'POST') {
         assert.ok(index >= 0); assert.equal(headers.get('apikey'), PUBLIC); assert.equal(headers.get('Content-Type'), 'image/png');
         const path = call.path.slice(base.length + 1), raw = [...media.values()].find(value => value.storagePath === path);
-        assert.equal(raw.authorId, actor);
-        if (objects.has(path)) { assert.equal(headers.get('x-upsert'), 'true'); assert.notDeepEqual(body, PNG_BYTES, 'upsert tries different valid PNG bytes'); result = response({ code: 'AccessDenied' }, 403); }
+        if (!raw || raw.uploadedBy !== actor || !editable(entries.get(raw.entryId), index)) result = response({ code: 'AccessDenied' }, 403);
+        else if (objects.has(path)) { assert.equal(headers.get('x-upsert'), 'true'); assert.notDeepEqual(body, PNG_BYTES, 'upsert tries different valid PNG bytes'); result = response({ code: 'AccessDenied' }, 403); }
         else { assert.equal(headers.get('x-upsert'), 'false'); objects.set(path, body); result = response({ Key: `memory-media/${path}` }); }
       } else if (call.method === 'DELETE') {
         assert.ok(index >= 0); assert.equal(headers.get('apikey'), PUBLIC);
-        assert.ok(body.prefixes.every(path => [...media.values()].some(value => value.storagePath === path && value.attached)));
-        result = response([], 200); // RLS-filtered DELETE is not itself proof of safety.
+        const selected = body.prefixes.filter(path => [...media.values()].some(value => value.storagePath === path && !value.attached && editable(entries.get(value.entryId), index)));
+        selected.forEach(path => objects.delete(path)); result = response(selected.map(name => ({ name }))); // Empty response alone is not proof; harness re-downloads.
       } else {
         assert.equal(call.method, 'GET'); const path = call.path.slice(base.length + 1), raw = [...media.values()].find(value => value.storagePath === path);
         const parent = raw && entries.get(raw.entryId);
-        if (index < 0 || !objects.has(path) || !raw || !(raw.authorId === actor || parent.status === 'published' && raw.attached)) result = response({ statusCode: '404', error: 'not_found' }, 400);
+        if (index < 0 || !objects.has(path) || !raw || !(raw.authorId === actor || published(parent, index) && (raw.attached && raw.status === 'ready' || index === 2))) result = response({ statusCode: '404', error: 'not_found' }, 400);
         else result = new Response(objects.get(path), { status: 200, headers: { 'Content-Type': 'image/png' } });
       }
     } else throw new Error('unexpected HTTP endpoint');
-    const changed = await after?.(call, result, { entries, media, objects, sessions, calls }); return changed || result;
+    const changed = await after?.(call, result, { entries, media, children, objects, sessions, calls }); return changed || result;
   }
   const handler = createVerificationHandler(policy(config), { fetch: fetcher, env: key => env[key], now: () => NOW, randomUUID: randomUUID || uuid });
-  return { handler, calls, entries, media, objects, sessions, loggedOut };
+  return { handler, calls, entries, media, children, objects, sessions, loggedOut };
 }
 
 test('default template, retired template and invalid leases never access a project', async () => {
@@ -172,10 +198,11 @@ test('fixture PNG is real and its image data and chunk CRCs are valid', () => {
 test('real-HTTP contract chain separates user credentials and cleans only unique fixtures, returning safe metrics', async () => {
   const f = setup(), result = await f.handler(request()), body = await result.json();
   assert.equal(result.status, 200); assert.equal(body.ok, true); assert.ok(Object.values(body.metrics.checks).every(Boolean));
-  assert.equal(body.metrics.authMethod, 'admin-generated-magiclink'); assert.equal(body.metrics.passwordCaptchaTested, false); assert.equal(body.metrics.uploadedObjects, 10);
+  assert.equal(body.metrics.authMethod, 'admin-generated-magiclink'); assert.equal(body.metrics.passwordCaptchaTested, false); assert.equal(body.metrics.uploadedObjects, 12);
   assert.deepEqual(body.cleanup, { complete: true, storage: true, rows: true, sessions: true, remainingFixtureIds: [], errors: [] });
   assert.equal(f.entries.size, 1); assert.equal(f.entries.get(EXISTING).content, 'must remain unchanged'); assert.equal(f.media.size, 0);
   assert.deepEqual([...f.objects.keys()], ['unrelated/existing.png']); assert.equal(f.sessions.size, 0); assert.deepEqual(f.loggedOut.sort(), [0, 1, 2]);
+  assert.ok(Object.values(f.children).every(store => store.size === 0));
   const text = JSON.stringify(body);
   for (const secret of [CAPABILITY, SECRET, PUBLIC, 'never-return-refresh-token', 'memory-verification:', ...IDS.map((_, index) => token(index))]) assert.ok(!text.includes(secret));
   assert.ok(f.calls.every(call => !call.path.includes('/token') && !call.path.includes('/settings')));
@@ -236,7 +263,7 @@ test('lost INSERT response recovers cleanup by exact run marker, author and gene
 test('cleanup failure preserves fixture metadata and IDs rather than claiming success or dropping object registration', async () => {
   const f = setup({ cleanupFails: true }), body = await (await f.handler(request())).json();
   assert.equal(body.ok, false); assert.equal(body.error, 'CLEANUP_INCOMPLETE'); assert.equal(body.cleanup.complete, false); assert.equal(body.cleanup.storage, false);
-  assert.equal(body.cleanup.remainingFixtureIds.length, 1); assert.ok(f.entries.has(body.cleanup.remainingFixtureIds[0])); assert.equal(f.media.size, 10); assert.equal(f.sessions.size, 0);
+  assert.equal(body.cleanup.remainingFixtureIds.length, 2); assert.ok(body.cleanup.remainingFixtureIds.every(id => f.entries.has(id))); assert.equal(f.media.size, 12); assert.equal(f.sessions.size, 0);
   assert.equal(f.entries.get(EXISTING).content, 'must remain unchanged');
 });
 
@@ -264,8 +291,8 @@ test('a closed user RLS guard cannot prevent independently authorized fixture cl
 test('ambiguous info errors or a missing bucket never count as confirmed object deletion', async () => {
   for (const value of [{ code: 'NoSuchBucket', statusCode: '404' }, { code: 'InvalidJWT', statusCode: '404' }, { statusCode: '400', error: 'unknown' }]) {
     const f = setup({ hook(call) { if (call.privileged && call.path.startsWith('/storage/v1/object/info/')) return response(value, 400); } });
-    const body = await (await f.handler(request())).json(); assert.equal(body.cleanup.complete, false); assert.equal(body.cleanup.remainingFixtureIds.length, 1);
-    assert.equal(f.media.size, 10, 'keep registrations when absence is uncertain'); assert.equal(f.sessions.size, 0);
+    const body = await (await f.handler(request())).json(); assert.equal(body.cleanup.complete, false); assert.equal(body.cleanup.remainingFixtureIds.length, 2);
+    assert.equal(f.media.size, 12, 'keep registrations when absence is uncertain'); assert.equal(f.sessions.size, 0);
   }
 });
 
@@ -284,4 +311,89 @@ test('a generated UUID collision never authorizes cleanup of the existing record
   const body = await (await f.handler(request())).json(); assert.equal(body.error, 'FIXTURE_CREATE_FAILED'); assert.equal(body.cleanup.complete, true);
   assert.equal(f.entries.size, 1); assert.equal(f.entries.get(EXISTING).content, 'must remain unchanged');
   assert.ok(!f.calls.some(call => call.privileged && call.method === 'DELETE'));
+});
+
+test('a leaked whisper row or child is detected while exact fixture cleanup still preserves existing data', async () => {
+  for (const table of ['entries', 'comments', 'media']) {
+    const f = setup({ hook(call, state) {
+      if (call.method !== 'GET' || call.privileged || call.headers.get('authorization') !== `Bearer ${token(1)}` || call.path !== `/rest/v1/${table}` || call.headers.has('prefer')) return;
+      const id = call.url.searchParams.get(table === 'entries' ? 'id' : 'entryId')?.slice(3), parent = state.entries.get(id);
+      if (parent?.type === 'whisper' && parent.status === 'published') return response([{ id: table === 'entries' ? id : 'leaked-child', content: 'must never be returned' }]);
+    } });
+    const body = await (await f.handler(request())).json();
+    assert.equal(body.ok, false); assert.equal(body.error, 'WHISPER_ROWS_VISIBLE'); assert.equal(body.cleanup.complete, true);
+    assert.equal(f.entries.size, 1); assert.equal(f.entries.get(EXISTING).content, 'must remain unchanged'); assert.equal(f.objects.size, 1);
+  }
+});
+
+test('a private Storage download leak fails even when every REST row remains hidden', async () => {
+  const f = setup({ hook(call, state) {
+    if (call.method !== 'GET' || call.privileged || call.headers.get('authorization') !== `Bearer ${token(1)}` || !call.path.startsWith('/storage/v1/object/memory-media/')) return;
+    const path = call.path.slice('/storage/v1/object/memory-media/'.length), media = [...state.media.values()].find(row => row.storagePath === path);
+    if (media && state.entries.get(media.entryId)?.type === 'whisper') return new Response(PNG_BYTES, { headers: { 'Content-Type': 'image/png' } });
+  } });
+  const body = await (await f.handler(request())).json();
+  assert.equal(body.error, 'WHISPER_DOWNLOAD_ALLOWED'); assert.equal(body.metrics.checks.whisperNewIsolation, true); assert.equal(body.metrics.checks.whisperMediaIsolation, false);
+  assert.equal(body.cleanup.complete, true); assert.equal(f.objects.size, 1); assert.equal(f.media.size, 0);
+});
+
+test('a partner Storage INSERT into a fresh whisper reservation is detected and its bytes are precisely removed', async () => {
+  const f = setup({ hook(call, state) {
+    if (call.method !== 'POST' || call.privileged || call.headers.get('authorization') !== `Bearer ${token(1)}` || !call.path.startsWith('/storage/v1/object/memory-media/')) return;
+    const path = call.path.slice('/storage/v1/object/memory-media/'.length);
+    state.objects.set(path, call.body); return response({ Key: `memory-media/${path}` });
+  } });
+  const body = await (await f.handler(request())).json();
+  assert.equal(body.error, 'WHISPER_STORAGE_INSERT_ALLOWED'); assert.equal(body.cleanup.complete, true);
+  assert.equal(f.objects.size, 1); assert.equal(f.media.size, 0); assert.equal(f.entries.size, 1);
+});
+
+test('converting a shared note is verified against real formerly-visible partner children and bytes', async () => {
+  const f = setup(); const body = await (await f.handler(request())).json();
+  assert.equal(body.ok, true); assert.equal(body.metrics.checks.convertedWhisperFreshAccessDenied, true); assert.equal(body.metrics.checks.convertedWhisperColdAccessDenied, true);
+  const converted = f.calls.find(call => call.path === '/rest/v1/entries' && call.method === 'PATCH' && call.body.type === 'whisper');
+  const id = converted.url.searchParams.get('id').slice(3);
+  for (const table of ['comments', 'reactions', 'favorites']) assert.ok(f.calls.some(call => call.path === `/rest/v1/${table}` && call.method === 'POST' && call.body.entryId === id && call.headers.get('authorization') === `Bearer ${token(1)}`));
+  assert.ok(Object.values(f.children).every(store => store.size === 0));
+});
+
+test('a warmed shared URL remaining cached is reported separately while fresh-origin and cold-path checks still deny access', async () => {
+  const warmed = new Set();
+  const f = setup({ hook(call, state) {
+    if (call.method !== 'GET' || call.privileged || call.headers.get('authorization') !== `Bearer ${token(1)}` || !call.path.startsWith('/storage/v1/object/memory-media/')) return;
+    const path = call.path.slice('/storage/v1/object/memory-media/'.length), media = [...state.media.values()].find(row => row.storagePath === path), parent = media && state.entries.get(media.entryId);
+    if (parent?.type === 'note') warmed.add(path);
+    if (parent?.type === 'whisper' && warmed.has(path) && !call.url.searchParams.has('cacheNonce')) return new Response(PNG_BYTES, { headers: { 'Content-Type': 'image/png', 'cf-cache-status': 'HIT', Age: '12' } });
+    if (call.url.searchParams.has('cacheNonce')) {
+      assert.match(call.url.searchParams.get('cacheNonce'), /^[0-9a-f-]{36}$/); assert.equal(call.headers.get('cache-control'), 'no-cache'); assert.equal(call.headers.get('pragma'), 'no-cache');
+    }
+  } });
+  const body = await (await f.handler(request())).json();
+  assert.equal(body.ok, true); assert.equal(body.metrics.knownCachedSharedAccess, true);
+  assert.deepEqual(body.metrics.convertedWhisperDownloads.warmSharedUrl, { status: 200, cacheStatus: 'HIT', ageSeconds: 12 });
+  assert.equal(body.metrics.convertedWhisperDownloads.freshCacheNonce.status, 400); assert.equal(body.metrics.convertedWhisperDownloads.previouslyColdPath.status, 400);
+  assert.equal(body.cleanup.complete, true); assert.equal(f.objects.size, 1);
+});
+
+test('fresh cacheNonce access is never excused as a previously cached shared URL', async () => {
+  const f = setup({ hook(call) {
+    if (call.method === 'GET' && call.headers.get('authorization') === `Bearer ${token(1)}` && call.url.searchParams.has('cacheNonce')) return new Response(PNG_BYTES, { headers: { 'Content-Type': 'image/png', 'cf-cache-status': 'MISS' } });
+  } });
+  const body = await (await f.handler(request())).json();
+  assert.equal(body.error, 'CONVERTED_WHISPER_FRESH_DOWNLOAD_ALLOWED'); assert.equal(body.metrics.checks.convertedWhisperFreshAccessDenied, false);
+  assert.equal(body.metrics.convertedWhisperDownloads.freshCacheNonce.status, 200); assert.equal(body.cleanup.complete, true);
+});
+
+test('a never-warmed retained attachment is an independent authorization control after conversion', async () => {
+  let convertedId, warmPath;
+  const f = setup({ hook(call, state) {
+    if (call.path === '/rest/v1/entries' && call.method === 'PATCH' && call.body.type === 'whisper') convertedId = call.url.searchParams.get('id').slice(3);
+    if (!convertedId || call.method !== 'GET' || call.headers.get('authorization') !== `Bearer ${token(1)}` || !call.path.startsWith('/storage/v1/object/memory-media/')) return;
+    const path = call.path.slice('/storage/v1/object/memory-media/'.length), media = [...state.media.values()].find(row => row.storagePath === path);
+    if (!warmPath) warmPath = path;
+    if (media?.entryId === convertedId && path !== warmPath && !call.url.searchParams.has('cacheNonce')) return new Response(PNG_BYTES, { headers: { 'Content-Type': 'image/png' } });
+  } });
+  const body = await (await f.handler(request())).json();
+  assert.equal(body.error, 'CONVERTED_WHISPER_COLD_DOWNLOAD_ALLOWED'); assert.equal(body.metrics.checks.convertedWhisperFreshAccessDenied, true);
+  assert.equal(body.metrics.checks.convertedWhisperColdAccessDenied, false); assert.equal(body.cleanup.complete, true);
 });

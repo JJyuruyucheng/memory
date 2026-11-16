@@ -16,7 +16,7 @@ create temporary table memory_review_actors (label text primary key, id uuid not
 create temporary table memory_review_ids (label text primary key, id uuid not null default gen_random_uuid()) on commit drop;
 create temporary table memory_review_results (label text primary key, detail text not null default 'ok') on commit drop;
 create temporary table memory_review_media (label text primary key,id uuid not null,"storagePath" text not null) on commit drop;
-insert into memory_review_ids(label) values ('entry_a'),('entry_b'),('draft_a'),('limits_a'),('empty_a'),('publish_limit_a');
+insert into memory_review_ids(label) values ('entry_a'),('entry_b'),('draft_a'),('limits_a'),('empty_a'),('publish_limit_a'),('whisper_a'),('whisper_b'),('whisper_draft');
 
 do $$
 declare profile_count integer; run_id uuid := gen_random_uuid();
@@ -307,6 +307,67 @@ select pg_temp.review_ok(memory_private.can_delete_object((select "storagePath" 
 select pg_temp.review_error($q$select public.finalize_media((select id from pg_temp.memory_review_media where label='attached-fixture'))$q$,array['23514'],'retired media cannot be revived by finalization','Retired attachments');
 select public.discard_media((select id from memory_review_media where label='attached-fixture'));
 select pg_temp.review_ok((select count(*)=0 from public.media where id=(select id from memory_review_media where label='attached-fixture')),'retired metadata without a physical object can be discarded');
+
+-- Whisper privacy must hold at SQL/API boundaries, including old child rows
+-- after a formerly shared note changes type. UI filters are not authorization.
+select pg_temp.review_actor('a');
+insert into public.entries(id,type,content,mood) select id,'note','whisper-fixture-private-a','sad' from memory_review_ids where label='whisper_a';
+select public.publish_entry((select id from memory_review_ids where label='whisper_a'),'{}'::uuid[],null);
+insert into public.entries(id,type,content) select id,'whisper','unpublished-whisper-fixture' from memory_review_ids where label='whisper_draft';
+select pg_temp.review_actor('b');
+insert into public.comments("entryId",content) select id,'formerly shared response' from memory_review_ids where label='whisper_a';
+insert into public.reactions("entryId") select id from memory_review_ids where label='whisper_a';
+insert into public.favorites("entryId") select id from memory_review_ids where label='whisper_a';
+insert into public.entries(id,type,content) select id,'whisper','whisper-fixture-private-b' from memory_review_ids where label='whisper_b';
+select public.publish_entry((select id from memory_review_ids where label='whisper_b'),'{}'::uuid[],null);
+select pg_temp.review_actor('a');
+update public.entries set type='whisper' where id=(select id from memory_review_ids where label='whisper_a');
+select pg_temp.review_ok((select count(*)=0 from public.entries where id=(select id from memory_review_ids where label='whisper_b')),'whisper author cannot read partner whisper');
+select pg_temp.review_ok((select count(*)=1 from public.entries where id=(select id from memory_review_ids where label='whisper_a')),'whisper author can read own published whisper');
+insert into memory_review_media(label,id,"storagePath")
+  select 'whisper-pending',(value->>'id')::uuid,value->>'storagePath' from (select public.reserve_media((select id from memory_review_ids where label='whisper_a'),'private.png','image/png',1) as value) reserved;
+reset role;
+-- Metadata-only fixture exercises the exact predicate used by Storage SELECT;
+-- this is not a real upload or evidence of byte-level Storage API verification.
+do $$ declare media_id uuid:=gen_random_uuid(); actor uuid; entry_id uuid; begin
+  select id into actor from memory_review_actors where label='a';
+  select id into entry_id from memory_review_ids where label='whisper_a';
+  insert into public.media(id,"entryId","authorId","uploadedBy",name,"mimeType",size,type,"storagePath",position,status,attached)
+    values (media_id,entry_id,actor,actor,'whisper-attached.png','image/png',1,'image',actor::text || '/' || entry_id::text || '/' || media_id::text,1,'ready',true);
+  insert into memory_review_media(label,id,"storagePath") values ('whisper-attached',media_id,actor::text || '/' || entry_id::text || '/' || media_id::text);
+end; $$;
+set local role authenticated;
+select pg_temp.review_actor('b');
+select pg_temp.review_ok((select count(*)=0 from public.entries where id=(select id from memory_review_ids where label='whisper_a')),'partner cannot select whisper by known UUID');
+select pg_temp.review_ok((select count(*)=0 from public.entries where content like '%whisper-fixture-private-a%'),'partner text search cannot reveal whisper');
+select pg_temp.review_ok((select count(*)=0 from public.entries where mood='sad' and id=(select id from memory_review_ids where label='whisper_a')),'partner statistics exclude whisper');
+select pg_temp.review_ok((select count(*)=0 from public.media where "entryId"=(select id from memory_review_ids where label='whisper_a')),'partner cannot enumerate whisper attachment metadata');
+select pg_temp.review_ok((select count(*)=0 from public.comments where "entryId"=(select id from memory_review_ids where label='whisper_a')),'partner cannot read old whisper comments');
+select pg_temp.review_ok((select count(*)=0 from public.reactions where "entryId"=(select id from memory_review_ids where label='whisper_a')),'partner cannot read old whisper reactions');
+select pg_temp.review_ok((select count(*)=0 from public.favorites where "entryId"=(select id from memory_review_ids where label='whisper_a')),'partner cannot read old whisper favorites');
+select pg_temp.review_ok(not memory_private.entry_is_published((select id from memory_review_ids where label='whisper_a')) and not memory_private.entry_is_active((select id from memory_review_ids where label='whisper_a')),'private helper does not reveal invisible published whisper');
+select pg_temp.review_ok(not memory_private.can_read_object((select "storagePath" from memory_review_media where label='whisper-attached')) and not memory_private.can_read_object((select "storagePath" from memory_review_media where label='whisper-pending')),'partner direct Storage paths deny both whisper attached and staged files');
+select pg_temp.review_rows($q$update public.entries set content='forged' where id=(select id from pg_temp.memory_review_ids where label='whisper_a')$q$,0,'partner cannot update whisper by UUID');
+select pg_temp.review_rows($q$delete from public.reactions where "entryId"=(select id from pg_temp.memory_review_ids where label='whisper_a')$q$,0,'partner cannot blindly delete an old hidden whisper reaction');
+select pg_temp.review_rows($q$delete from public.favorites where "entryId"=(select id from pg_temp.memory_review_ids where label='whisper_a')$q$,0,'partner cannot blindly delete an old hidden whisper favorite');
+select pg_temp.review_error($q$insert into public.comments("entryId",content) select id,'forged' from pg_temp.memory_review_ids where label='whisper_a'$q$,array['42501'],'partner cannot comment on whisper by UUID');
+select pg_temp.review_error($q$insert into public.reactions("entryId") select id from pg_temp.memory_review_ids where label='whisper_a'$q$,array['42501'],'partner cannot react on whisper by UUID');
+select pg_temp.review_error($q$insert into public.favorites("entryId") select id from pg_temp.memory_review_ids where label='whisper_a'$q$,array['42501'],'partner cannot favorite whisper by UUID');
+select pg_temp.review_error($q$select public.reserve_media((select id from pg_temp.memory_review_ids where label='whisper_a'),'forged.png','image/png',1)$q$,array['42501'],'partner cannot upload to whisper');
+select pg_temp.review_error($q$select public.finalize_media((select id from pg_temp.memory_review_media where label='whisper-pending'))$q$,array['42501'],'partner cannot finalize whisper media');
+select pg_temp.review_error($q$select public.publish_entry((select id from pg_temp.memory_review_ids where label='whisper_a'),'{}'::uuid[],null)$q$,array['42501'],'partner cannot publish whisper');
+select pg_temp.review_actor('admin');
+select pg_temp.review_ok((select count(*)=2 from public.entries where id in (select id from memory_review_ids where label in ('whisper_a','whisper_b'))),'administrator sees both published whispers');
+select pg_temp.review_ok((select count(*)=0 from public.entries where id=(select id from memory_review_ids where label='whisper_draft')),'administrator still cannot read unpublished whisper drafts');
+select pg_temp.review_ok((select count(*)=2 from public.media where "entryId"=(select id from memory_review_ids where label='whisper_a')),'administrator can maintain published whisper media');
+select pg_temp.review_ok(memory_private.can_read_object((select "storagePath" from memory_review_media where label='whisper-attached')) and memory_private.can_read_object((select "storagePath" from memory_review_media where label='whisper-pending')),'administrator Storage access includes published whisper staging');
+select pg_temp.review_rows($q$update public.entries set content='administrator maintained whisper' where id=(select id from pg_temp.memory_review_ids where label='whisper_a')$q$,1,'administrator can edit published whisper');
+select pg_temp.review_actor('a');
+select pg_temp.review_ok(memory_private.can_read_object((select "storagePath" from memory_review_media where label='whisper-attached')) and memory_private.can_read_object((select "storagePath" from memory_review_media where label='whisper-pending')),'author Storage access includes own whisper files');
+select pg_temp.review_ok((select count(*)=1 from public.entries where id=(select id from memory_review_ids where label='whisper_draft')),'author can still read own whisper draft');
+update public.entries set "deletedAt"=now() where id=(select id from memory_review_ids where label='whisper_a');
+select pg_temp.review_actor('b');
+select pg_temp.review_ok((select count(*)=0 from public.entries where id=(select id from memory_review_ids where label='whisper_a')),'recycle bin does not expose partner whisper');
 
 reset role;
 select count(*) as passed_assertions,jsonb_agg(jsonb_build_object('test',label,'result',detail) order by label) as checks

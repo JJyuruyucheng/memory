@@ -1,7 +1,7 @@
-import { ALLOWED_FILE_TYPES, dayKey, toUtcIso, validateEntry } from './domain.js';
+import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, toUtcIso, validateEntry } from './domain.js';
 
-// Inject an official supabase-js client created with persistSession:false and
-// detectSessionInUrl:false. This adapter never writes credentials to WebStorage.
+// Inject the official supabase-js client with detectSessionInUrl:false; bounded
+// session persistence belongs to its storage adapter, not this data provider.
 // Database/RPC contract: supabase/migrations; RLS remains the authority.
 const MAX_FILE_BYTES = 50_000_000;
 const PAGE_SIZE = 500;
@@ -50,18 +50,34 @@ export function createSupabaseProvider(config = {}) {
   const state = { mode: 'live', backend: 'supabase', currentUser: null, users: [], entries: [], settings: clone(DEFAULT_SETTINGS) };
   const rawEntries = new Map(), rawMedia = new Map(), mediaCache = new Map(), authTasks = new Set();
   let generation = 0, sessionController = new AbortController(), queue = Promise.resolve();
-  let loginAttempt = null, logoutPromise = null, initAttempt = null, disposed = false, mayRestore = true;
+  let loginAttempt = null, logoutPromise = null, initAttempt = null, disposed = false, mayRestore = true, authIdentity = null;
   const now = () => toUtcIso(config.now?.() ?? new Date());
 
   function requireSession(expected) {
     if (disposed || expected !== generation) throw new SupabaseProviderError('会话已改变，旧操作结果已忽略；重新登录后请刷新核对。', 'AUTH_CANCELLED', 401);
   }
   function clearLocal() {
-    generation++; sessionController.abort(); sessionController = new AbortController(); rawEntries.clear(); rawMedia.clear();
+    generation++; authIdentity = null; sessionController.abort(); sessionController = new AbortController(); rawEntries.clear(); rawMedia.clear();
     for (const cached of mediaCache.values()) urlAPI.revokeObjectURL(cached.url);
     mediaCache.clear(); state.currentUser = null; state.users.splice(0); state.entries.splice(0);
     for (const key of Object.keys(state.settings)) delete state.settings[key];
     Object.assign(state.settings, clone(DEFAULT_SETTINGS));
+  }
+  function changeIdentity(nextId, restore) {
+    clearLocal(); authIdentity = nextId; mayRestore = restore;
+    queueMicrotask(() => config.onSessionChanged?.({ restore }));
+  }
+  function bindIdentity(value, expected) {
+    requireSession(expected); const userId = id(value);
+    if (authIdentity && authIdentity !== userId) {
+      // An earlier snapshot/HTTP result cannot override the newer SDK identity.
+      changeIdentity(authIdentity, true); requireSession(expected);
+    }
+    authIdentity = userId; return userId;
+  }
+  function requireIdentity(expected, userId) {
+    requireSession(expected);
+    if (authIdentity !== userId) throw new SupabaseProviderError('会话身份已改变，请等待重新载入。', 'AUTH_CANCELLED', 401);
   }
   function requireUser(expected) {
     requireSession(expected);
@@ -90,7 +106,7 @@ export function createSupabaseProvider(config = {}) {
   }
   async function authResult(operation, expected) {
     const pending = Promise.resolve(operation); authTasks.add(pending);
-    try { return await result(pending, expected); } finally { authTasks.delete(pending); }
+    try { return await result(pending, expected, { fallback: '账号认证服务连接未完成，请检查网络后重试。' }); } finally { authTasks.delete(pending); }
   }
   function query(builder) { return builder.abortSignal(sessionController.signal); }
   async function list(table, expected, order = ['id']) {
@@ -99,7 +115,7 @@ export function createSupabaseProvider(config = {}) {
       requireSession(expected);
       let builder = client.from(table).select('*');
       for (const field of order) builder = builder.order(field, { ascending: true });
-      const rows = await result(query(builder.range(offset, offset + PAGE_SIZE - 1)), expected);
+      const rows = await result(query(builder.range(offset, offset + PAGE_SIZE - 1)), expected, { fallback: '回忆数据服务连接未完成，请检查网络后重试。' });
       if (!Array.isArray(rows)) throw invalid(); output.push(...rows);
       if (rows.length < PAGE_SIZE) return output;
     }
@@ -127,16 +143,16 @@ export function createSupabaseProvider(config = {}) {
       if (error.code === 'UNAUTHENTICATED') throw error;
       // Preserve the attachment identity for repair/removal. Export must reject
       // missing bytes instead of silently claiming a complete backup.
-      return { id: raw.id, type: raw.type, name: raw.name, size: raw.size, url: '', unavailable: true, error: '附件暂时无法读取，请刷新重试或由作者检查。' };
+      return { id: raw.id, type: raw.type, name: raw.name, size: raw.size, url: '', unavailable: true, error: error.code === 'NETWORK' ? '附件服务连接失败或超时，请检查网络后重试。' : error.code === 'FORBIDDEN' ? '当前账号无法读取此附件，请刷新核对权限。' : '附件暂时无法读取，请重试或由作者检查原文件。' };
     }
     return { id: raw.id, type: raw.type, name: raw.name, size: raw.size, url: cached.url };
   }
   async function loadState(expected, userId) {
-    requireSession(expected); id(userId);
+    requireIdentity(expected, id(userId));
     const tables = ['profiles', 'entries', 'comments', 'reactions', 'favorites', 'settings', 'media'];
     const results = await Promise.allSettled(tables.map(table => list(table, expected, ['reactions', 'favorites'].includes(table) ? ['entryId', 'userId'] : ['id'])));
     const failure = results.find(value => value.status === 'rejected'); if (failure) throw failure.reason;
-    requireSession(expected);
+    requireIdentity(expected, userId);
     const [profiles, rows, comments, reactions, favorites, settingsRows, media] = results.map(value => value.value);
     if (profiles.length !== 3 || new Set(profiles.map(value => value.slot)).size !== profiles.length || new Set(profiles.map(value => value.username)).size !== profiles.length) throw invalid('共同空间的三个身份尚未完整配置。');
     const users = [...profiles].sort((a, b) => a.slot - b.slot).map(profile), knownUsers = new Set(users.map(value => value.id));
@@ -147,13 +163,16 @@ export function createSupabaseProvider(config = {}) {
     const entryIds = new Set(rows.map(value => id(value.id)));
     for (const child of [...comments, ...reactions, ...favorites, ...media]) if (!entryIds.has(id(child.entryId))) throw invalid();
     if (rows.some(raw => !['draft', 'published'].includes(raw.status))) throw invalid('记录的发布状态无效。');
+    // RLS is authoritative. Fail closed before downloading any attachment if a
+    // misconfigured server unexpectedly returns a hidden whisper or draft.
+    if (rows.some(raw => !canReadEntry(raw, currentUser))) throw invalid('服务器返回了当前身份不可见的记录，已停止读取。');
     const hydrated = await mapLimit(rows.filter(raw => raw.status === 'published'), 3, async raw => {
       if (!knownUsers.has(id(raw.authorId))) throw invalid();
       const attachments = media.filter(value => value.entryId === raw.id).map(value => mediaRow(value, raw, knownUsers)).filter(value => value.status === 'ready' && value.attached).sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
       const entry = { id: id(raw.id), authorId: id(raw.authorId), type: raw.type, title: raw.title, content: raw.content, occurredAt: date(raw.occurredAt), mood: raw.mood, tags: raw.tags, createdAt: date(raw.createdAt), updatedAt: date(raw.updatedAt), deletedAt: raw.deletedAt === null ? null : date(raw.deletedAt), media: await mapLimit(attachments, 3, value => hydrateMedia(value, expected)), comments: [], reactionBy: [], favoriteBy: [] };
       // An interrupted file-only upload may leave an empty note placeholder.
       // It must remain readable/deletable; normal saves still use validateEntry.
-      if (!['note', 'event'].includes(entry.type) || typeof entry.title !== 'string' || entry.title.length > 120 || (entry.type === 'event' && !entry.title.trim()) || typeof entry.content !== 'string' || entry.content.length > 20000 || ![null, 'happy', 'neutral', 'sad'].includes(entry.mood) || !Array.isArray(entry.tags) || entry.tags.length > 20 || entry.tags.some(value => typeof value !== 'string' || value.length > 40) || entry.media.filter(value => value.type === 'image').length > 9) throw invalid('记录格式不受当前版本支持，已停止加载，避免覆盖原数据。');
+      if (!['note', 'event', 'whisper'].includes(entry.type) || typeof entry.title !== 'string' || entry.title.length > 120 || (entry.type === 'event' && !entry.title.trim()) || typeof entry.content !== 'string' || entry.content.length > 20000 || ![null, 'happy', 'neutral', 'sad'].includes(entry.mood) || !Array.isArray(entry.tags) || entry.tags.length > 20 || entry.tags.some(value => typeof value !== 'string' || value.length > 40) || entry.media.filter(value => value.type === 'image').length > 9) throw invalid('记录格式不受当前版本支持，已停止加载，避免覆盖原数据。');
       entry.comments = comments.filter(value => value.entryId === entry.id).map(value => {
         if (!knownUsers.has(id(value.authorId)) || typeof value.content !== 'string' || !value.content.trim() || value.content.length > 5000) throw invalid();
         return { id: id(value.id), authorId: value.authorId, content: value.content, createdAt: date(value.createdAt) };
@@ -161,7 +180,7 @@ export function createSupabaseProvider(config = {}) {
       for (const [values, field] of [[reactions, 'reactionBy'], [favorites, 'favoriteBy']]) entry[field] = [...new Set(values.filter(value => value.entryId === entry.id).map(value => { if (!knownUsers.has(id(value.userId))) throw invalid(); return value.userId; }))];
       return entry;
     });
-    requireSession(expected);
+    requireIdentity(expected, userId);
     state.currentUser = currentUser; state.users.splice(0, state.users.length, ...users);
     state.entries.splice(0, state.entries.length, ...hydrated.sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt)));
     Object.assign(state.settings, settings); rawEntries.clear(); rows.forEach(value => rawEntries.set(value.id, value)); rawMedia.clear(); media.forEach(value => rawMedia.set(value.id, value));
@@ -206,6 +225,7 @@ export function createSupabaseProvider(config = {}) {
     if (kept.length + files.length > 10) throw new SupabaseProviderError('每条记录最多保存 10 个附件，其中图片最多 9 张。', 'VALIDATION');
     if (files.some(file => !(file instanceof Blob) || typeof file.arrayBuffer !== 'function')) throw new SupabaseProviderError('无法读取附件，请重新选择文件。', 'VALIDATION');
     const removals = existing?.media.filter(value => !kept.some(item => item.id === value.id)) ?? [];
+    if (existing?.type === 'whisper' && candidate.type !== 'whisper' && (removals.length || files.length)) throw new SupabaseProviderError('请先保留悄悄话类型保存附件改动，再改为共享类型。', 'PRIVATE_MEDIA_CHANGE');
     const patch = { type: candidate.type, title: candidate.title.trim(), content: candidate.content.trim(), occurredAt: toUtcIso(candidate.occurredAt), mood: candidate.mood, tags: [...new Set(candidate.tags.map(value => value.trim()).filter(Boolean))] };
     let publicationAttempted = false; const addedMedia = [];
     try {
@@ -273,24 +293,36 @@ export function createSupabaseProvider(config = {}) {
     return new Blob([JSON.stringify({ format: 'chaoxi-memory', version: 1, mode: 'live', backend: 'supabase', mediaEncoding: 'base64', exportedAt: now(), scope, users: clone(state.users), settings: clone(state.settings), entries }, null, 2)], { type: 'application/json;charset=utf-8' });
   }
 
-  const subscription = client.auth.onAuthStateChange?.(event => { if (event === 'SIGNED_OUT') { mayRestore = false; clearLocal(); } });
+  const subscription = client.auth.onAuthStateChange?.((event, session) => {
+    if (event === 'SIGNED_OUT') {
+      changeIdentity(null, false);
+    }
+    else if (['SIGNED_IN', 'TOKEN_REFRESHED'].includes(event) && UUID.test(session?.user?.id ?? '')) {
+      // A different tab can replace the persisted session. Revoke the old
+      // identity even while login/init is still hydrating and currentUser=null.
+      if (authIdentity && session.user.id !== authIdentity) changeIdentity(session.user.id, true);
+      else authIdentity = session.user.id;
+    }
+    else if (event === 'INITIAL_SESSION' && authIdentity === null && UUID.test(session?.user?.id ?? '')) authIdentity = session.user.id;
+  });
   return {
     async init() {
-      if (loginAttempt || logoutPromise) throw new SupabaseProviderError('账号操作正在进行，请稍候。', 'AUTH_BUSY');
+      if ((loginAttempt && loginAttempt.generation === generation) || logoutPromise) throw new SupabaseProviderError('账号操作正在进行，请稍候。', 'AUTH_BUSY');
       if (state.currentUser) return enqueue(expected => loadState(expected, state.currentUser.id));
       if (!mayRestore) return state;
-      if (initAttempt) return initAttempt;
+      if (initAttempt?.generation === generation) return initAttempt.promise;
       const expected = generation;
       const pending = (async () => {
         const session = await authResult(client.auth.getSession(), expected);
         if (!session.session) return state;
+        bindIdentity(session.session.user?.id, expected);
         const data = await authResult(client.auth.getUser(), expected);
         if (!data.user) throw invalid();
-        return loadState(expected, id(data.user.id));
+        return loadState(expected, bindIdentity(data.user.id, expected));
       })();
-      initAttempt = pending;
+      const attempt = { generation: expected, promise: pending }; initAttempt = attempt;
       try { return await pending; } catch (error) { if (expected === generation) { mayRestore = false; clearLocal(); } throw error; }
-      finally { if (initAttempt === pending) initAttempt = null; }
+      finally { if (initAttempt === attempt) initAttempt = null; }
     },
     async login(username, password, captchaToken) {
       if (loginAttempt || logoutPromise) throw new SupabaseProviderError('登录或退出正在进行，请稍候。', 'AUTH_BUSY');
@@ -304,11 +336,12 @@ export function createSupabaseProvider(config = {}) {
       const identity = config.loginIdentities?.[['xbl', 'll'].includes(loginUsername) ? loginUsername : 'memory-admin'];
       const email = typeof identity === 'string' ? identity : identity?.email;
       if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new SupabaseProviderError('账号、密码或安全验证未通过。', 'LOGIN_FAILED', 401);
+      client.memorySession?.beginSignIn();
       mayRestore = false; clearLocal(); const attempt = { generation }; loginAttempt = attempt;
       try {
         const data = await authResult(client.auth.signInWithPassword({ email, password, options: { captchaToken } }), attempt.generation);
         if (!data.session || !data.user) throw invalid();
-        const userId = id(data.user.id);
+        const userId = bindIdentity(data.user.id, attempt.generation);
         const ownProfile = await result(query(client.from('profiles').select('*').eq('id', userId).maybeSingle()), attempt.generation, { allowNull: true });
         if (!ownProfile || ownProfile.id !== userId || profile(ownProfile).username !== loginUsername) throw new SupabaseProviderError('账号、密码或安全验证未通过。', 'LOGIN_FAILED', 401);
         const loaded = await loadState(attempt.generation, userId);

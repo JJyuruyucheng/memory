@@ -1,0 +1,11 @@
+{
+  "name": "air-datepicker",
+  "version": "3.6.0",
+  "source": "https://github.com/t1m0n/air-datepicker/tree/v3.6.0",
+  "license": "MIT",
+  "files": [
+    {"file": "public/assets/air-datepicker-3.6.0.js", "sha256": "24be9285f8a7b00ec14ca94a954f54383ea6a507067f7d3c3f1c2c2280462185"},
+    {"file": "public/assets/air-datepicker-3.6.0.css", "sha256": "110391f897ba0abc6c563bc8d1e7afa135b26955ae57a5fc0a1228e79c394f73"},
+    {"file": "public/assets/AIR-DATEPICKER-LICENSE.txt", "sha256": "a397e2a7f45f596cced15a89e88185248da9f895febcb87e393ebd14933568ff"}
+  ]
+}

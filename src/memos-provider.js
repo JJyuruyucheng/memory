@@ -325,6 +325,9 @@ export function createMemosProvider(config = {}) {
     requireUser(generation);
     const previous = existing ? decodeEntryContent(existing.content, existing.createTime) : {};
     const candidate = { type: 'note', title: '', content: '', occurredAt: new Date().toISOString(), mood: null, tags: [], ...previous, ...input };
+    // SPACE visibility cannot enforce author + independent-admin isolation.
+    // Refuse before uploads/writes instead of promising client-only privacy.
+    if (candidate.type === 'whisper') throw new MemosError('当前 Memos 后端不支持悄悄话的私密权限，请使用 Supabase 正式版。', 'UNSUPPORTED_PRIVATE_TYPE');
     const currentMedia = state.entries.find(item => item.id === input.id)?.media || [];
     if (candidate.media === undefined) candidate.media = currentMedia;
     const validation = validateEntry(candidate, files, config);

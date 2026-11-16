@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDemoProvider } from '../src/demo-provider.js';
 import { createSampleData } from '../src/sample-data.js';
+import { computeStats, filterEntries } from '../src/domain.js';
 
 // Minimal asynchronous IndexedDB test surface; production always uses browser IndexedDB.
 // Browser QA separately verifies persistence and Blob URLs against a real browser engine.
@@ -150,6 +151,8 @@ test('demo rejects passwords, requires an identity, persists settings and can re
   const { provider, options } = fixture();
   await provider.init();
   await assert.rejects(provider.login('user', 'do-not-store'), /不接收账号密码/);
+  await assert.rejects(provider.saveSettings({ spaceName: '成员不可修改' }), /管理员/);
+  await provider.switchUser('demo-admin');
   await provider.saveSettings({ spaceName: '我们的示例空间', subtitle: '只保存在当前浏览器', startDate: '2025-05-20' });
   await assert.rejects(provider.saveSettings({ startDate: '2026-02-30' }), /开始日期无效/);
   await provider.logout();
@@ -165,6 +168,33 @@ test('demo rejects passwords, requires an identity, persists settings and can re
   assert.equal(state.entries.length, 7);
   assert.equal(state.currentUser.id, 'demo-linjian');
   assert.equal(state.settings.spaceName, '林间与晚晚');
+});
+
+test('switching demo identities hides whispers from state, search, album, statistics and export without deleting them', async () => {
+  const { provider, options } = fixture();
+  const state = await provider.init();
+  const originalCount = state.entries.length;
+  const secret = await provider.saveEntry(draft({ type: 'whisper', content: 'only-my-private-fixture', mood: 'sad' }), [new File(['private-bytes'], 'private.png', { type: 'image/png' })]);
+  const authorUrl = secret.media[0].url;
+  assert.equal(computeStats(state.entries).total, originalCount + 1);
+  await provider.switchUser('demo-wanwan');
+  assert.equal(state.entries.some(entry => entry.id === secret.id), false);
+  assert.equal(filterEntries(state.entries, { query: 'only-my-private-fixture' }).length, 0);
+  assert.equal(state.entries.flatMap(entry => entry.media).some(media => media.id === secret.media[0].id), false);
+  assert.equal(computeStats(state.entries).total, originalCount);
+  assert.ok(!(await (await provider.exportData()).text()).includes('only-my-private-fixture'));
+  for (const operation of [() => provider.addComment(secret.id, 'forged'), () => provider.toggleFavorite(secret.id), () => provider.toggleReaction(secret.id), () => provider.saveEntry({ id: secret.id, type: 'note' }), () => provider.deleteEntry(secret.id)]) await assert.rejects(operation(), /不存在/);
+  await provider.saveEntry(draft({ content: 'partner shared note' }));
+  const reopened = createDemoProvider(options), restored = await reopened.init();
+  assert.equal(restored.entries.some(entry => entry.id === secret.id), false);
+  await reopened.switchUser('demo-admin');
+  const restoredSecret = restored.entries.find(entry => entry.id === secret.id);
+  assert.equal(restoredSecret.content, 'only-my-private-fixture');
+  assert.notEqual(restoredSecret.media[0].url, authorUrl);
+  await reopened.saveEntry({ id: secret.id, content: 'administrator-maintained-private-fixture' });
+  await reopened.switchUser('demo-linjian');
+  assert.equal(restored.entries.find(entry => entry.id === secret.id).content, 'administrator-maintained-private-fixture');
+  assert.equal(restored.entries.length, originalCount + 2, 'hidden records survive partner writes and provider reloads');
 });
 
 test('bundled sample media are fetched once and copied into IndexedDB, not left as volatile URLs', async () => {

@@ -93,7 +93,7 @@ export function validateEntry(entry, files = [], config = {}) {
   if (!entry || typeof entry !== 'object') return { valid: false, errors: ['记录格式无效。'] };
   const media = Array.isArray(entry.media) ? entry.media : [];
   if (!Array.isArray(files)) return { valid: false, errors: ['附件格式无效。'] };
-  if (!['note', 'event'].includes(entry.type)) errors.push('请选择普通记录或事件。');
+  if (!['note', 'event', 'whisper'].includes(entry.type)) errors.push('请选择日常随记、事件或悄悄话。');
   if (entry.mood !== null && entry.mood !== undefined && !MOODS.includes(entry.mood)) errors.push('心情选项无效。');
   if (entry.content !== undefined && typeof entry.content !== 'string') errors.push('正文必须是文字。');
   if (entry.title !== undefined && typeof entry.title !== 'string') errors.push('标题必须是文字。');
@@ -117,6 +117,13 @@ export function validateEntry(entry, files = [], config = {}) {
   if (images > maxImages) errors.push(`每条记录最多保存 ${maxImages} 张图片。`);
   if (entry.tags !== undefined && (!Array.isArray(entry.tags) || entry.tags.length > 20 || entry.tags.some(tag => typeof tag !== 'string' || tag.length > 40))) errors.push('标签格式无效，每条最多 20 个标签，每个最多 40 个字符。');
   return { valid: errors.length === 0, errors: [...new Set(errors)] };
+}
+
+/** Presentation guard; production privacy is enforced by database and Storage RLS. */
+export function canReadEntry(entry, user) {
+  if (!entry || !user?.id) return false;
+  if (entry.status === 'draft') return entry.authorId === user.id;
+  return entry.type !== 'whisper' || entry.authorId === user.id || user.role === 'admin';
 }
 
 export function filterEntries(entries, filters = {}) {

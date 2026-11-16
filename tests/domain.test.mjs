@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { anniversaryInfo, computeStats, dayKey, escapeHtml, filterEntries, relationshipDays, toUtcIso, validateEntry } from '../src/domain.js';
+import { anniversaryInfo, canReadEntry, computeStats, dayKey, escapeHtml, filterEntries, relationshipDays, toUtcIso, validateEntry } from '../src/domain.js';
 import { createSampleData } from '../src/sample-data.js';
 
 const valid = (extra = {}) => ({ type: 'note', title: '', content: '把今天记下来。', occurredAt: '2026-11-01T16:10:00.000Z', mood: null, tags: [], media: [], ...extra });
@@ -65,6 +65,7 @@ test('filters combine Shanghai months, per-person favorites, text, mood and tras
 
 test('validation prevents empty, impossible-date, invalid-mood and unsupported uploads', () => {
   assert.equal(validateEntry(valid()).valid, true);
+  assert.equal(validateEntry(valid({ type: 'whisper' })).valid, true);
   assert.equal(validateEntry(valid({ content: '   ' })).valid, false);
   assert.equal(validateEntry(valid({ content: '', title: ' ' }), [{ name: 'a.jpg', type: 'image/jpeg', size: 12 }]).valid, true);
   assert.equal(validateEntry(valid({ type: 'event', title: '' })).valid, false);
@@ -77,6 +78,18 @@ test('validation prevents empty, impossible-date, invalid-mood and unsupported u
   const files = Array.from({ length: 10 }, () => ({ name: 'a.jpg', type: 'image/jpeg', size: 12 }));
   assert.equal(validateEntry(valid(), files).valid, false);
   assert.equal(validateEntry(valid({ media: [{ id: 'existing', type: 'image', size: 12 }] }), files.slice(0, 9)).valid, false);
+});
+
+test('whispers are author/admin visible while unpublished drafts remain author-only', () => {
+  const author = { id: 'a', role: 'member' }, partner = { id: 'b', role: 'member' }, admin = { id: 'admin', role: 'admin' };
+  const whisper = saved('private', { type: 'whisper', status: 'published' });
+  assert.equal(canReadEntry(whisper, author), true);
+  assert.equal(canReadEntry(whisper, partner), false);
+  assert.equal(canReadEntry(whisper, admin), true);
+  assert.equal(canReadEntry(whisper, null), false);
+  assert.equal(canReadEntry({ ...whisper, status: 'draft' }, admin), false);
+  assert.equal(canReadEntry({ ...whisper, status: 'draft' }, author), true);
+  assert.equal(canReadEntry(saved('shared'), partner), true);
 });
 
 test('plain text can be safely placed in HTML and every sample record is internally valid', () => {

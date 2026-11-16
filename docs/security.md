@@ -4,7 +4,8 @@
 
 ## 模式与发布内容
 
-- `supabase` 是免费托管适配。官方 SDK 禁用令牌持久化及 URL 会话检测；访问与刷新令牌只留内存，退出清理页面与 Blob URL。业务表和私有 Storage 通过受保护 `profiles` 的 UUID/角色授权，所有成员及媒体策略还受数据库默认关闭的 `runtime_guard.authReady` 限制。该开关不能由前端或 service_role 修改；未完成原生 CAPTCHA、关闭注册及权限实测时不能打开。
+- `supabase` 是免费托管适配。官方 SDK 禁用 URL 会话检测，通过专用存储适配器在本设备保留访问与刷新令牌，绝对期限为成功登录起 30 天；刷新不续期，密码不持久化。退出、到期和跨标签身份变化会清理旧页面与 Blob URL。恢复必须先经服务器验证，存储不可用时仅保留当前标签页内存会话。此期限属于客户端保存策略，不能冒充 Free 计划并未提供的服务端 timebox。业务表和私有 Storage 通过受保护 `profiles` 的 UUID/角色授权，所有成员及媒体策略还受数据库默认关闭的 `runtime_guard.authReady` 限制。该开关不能由前端或 service_role 修改；未完成原生 CAPTCHA、关闭注册及权限实测时不能打开。当前生产开关已经在完成相关验证后启用。
+- `whisper` 已在正文、子表、媒体元数据和 Storage 强制作者/管理员可见；他人未发布草稿仍不向管理员开放。新建私密记录通过真实用户令牌与文件字节测试；共享改私密后的既有缓存和有效签发链接不能即时收回，见 [v0.4.0 的实际缓存对照](release-v0.4.0.md)。改变共享类型并增删私密附件不能同时提交，必须先以悄悄话保存附件改动，避免提前公开已移除的原图。
 - Supabase 密码接口的 CAPTCHA 必须在 Auth 原生配置启用；前端 `authReady` 和按钮禁用不构成后端防护。Supabase 使用自己的原生限流，不沿用下文 Memos 网关的 IP/账号计数或 hostname/action 校验声明。Turnstile widget 必须限定正式域名。验证码不保证抵御所有分布式攻击，短初始口令仍有风险。
 - 本次已在 Supabase 控制台保存两项更严格的限额：token endpoint 与 sign-ups/sign-ins 均为每 IP 每五分钟补充 5 次请求额度；token endpoint 包括密码与会话刷新。平台使用令牌桶，仍可允许短时突发，因此不能称为“输错五次锁号”或严格固定窗口计数；尚未通过压测验证 429。IP Address Forwarding 保持关闭。[官方限流语义](https://supabase.com/docs/guides/auth/rate-limits)
 - Turnstile Managed 根据风险决定是否交互，自动通过仍须由原生 Auth 服务端校验。官方说明 token 重用检测存在分布式传播窗口，近同时验证可能重复成功；此免费模式未增加跨实例原子 token 占用表，不承诺绝对防重放。真实 token 过期与重放专项尚未验证。[服务端校验及传播限制](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)

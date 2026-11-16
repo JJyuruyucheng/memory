@@ -46,7 +46,7 @@ Supabase 控制台已开启并保存原生 Turnstile；使用公共 key 的原�
 2. 在 Supabase Auth 开启原生 Turnstile 保护，并将 Secret 只保存到认证配置。前端使用官方 `signInWithPassword` 的 `captchaToken`；直接访问原生密码接口也必须经过服务端验证码验证。[官方 CAPTCHA 配置](https://supabase.com/docs/guides/auth/auth-captcha)
 3. 启用所有业务表的 RLS，按三个预建身份的 UUID 限制读取；普通成员仅修改本人记录，管理员按受保护角色授权。不能信任用户自行修改的 `user_metadata` 来授予管理员权限。统计查询也须遵守同一边界。[RLS](https://supabase.com/docs/guides/database/postgres/row-level-security)
 4. 照片和视频保存在 **private bucket**，下载也执行 RLS；继续采用鉴权下载后生成 Blob URL，不使用公开桶或可转发的长期签名链接。退出时清理页面、令牌和 Blob URL。[私有存储权限](https://supabase.com/docs/guides/storage/buckets/fundamentals)
-5. 浏览器仅允许公共 publishable key，绝不放入 `service_role`、数据库密码或验证码 Secret。纯静态前端无法沿用 Memos 同源 HttpOnly Cookie；初版建议关闭 SDK 默认持久化、令牌只留内存，刷新后重新登录。如要保留刷新会话，须另行设计并审查服务端会话层。[前端数据安全](https://supabase.com/docs/guides/database/secure-data)、[Auth 客户端](https://supabase.com/docs/reference/javascript/auth)
+5. 浏览器仅允许公共 publishable key，绝不放入 `service_role`、数据库密码或验证码 Secret。纯静态前端无法沿用 Memos 同源 HttpOnly Cookie；v0.4.0 根据使用需求改为本设备保留官方 Auth 会话 30 天，专用适配器限制绝对期限、跨标签身份与令牌轮换，恢复仍须服务器验证。密码不存储；这不是服务端强制 timebox，详见 [实际会话边界](release-v0.4.0.md)。[前端数据安全](https://supabase.com/docs/guides/database/secure-data)、[Auth 客户端](https://supabase.com/docs/reference/javascript/auth)
 
 本轮已在 Supabase Rate Limits 控制台把 token refresh 从 150/5min、signups/signins 从 30/5min 均改为 5/5min；保存后重新读取页面，两项值均为 5、两个 Save 按钮均禁用，IP forwarding 关闭。仅确认配置保存，尚未进行 HTTP 429 压测。官方 token endpoint 限流覆盖 password、refresh、ID token、PKCE，使用 token bucket 并允许最高 30 次突发，因此配置值不代表“严格五分钟五次”或“五次失败锁号”，也不能保证阻止分布式攻击。短初始口令的风险不会被验证码消除。[Auth 限流](https://supabase.com/docs/guides/auth/rate-limits)
 

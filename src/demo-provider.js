@@ -1,4 +1,4 @@
-import { ALLOWED_FILE_TYPES, dayKey, toUtcIso, validateEntry } from './domain.js';
+import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, toUtcIso, validateEntry } from './domain.js';
 import { createSampleData } from './sample-data.js';
 
 const STORE = 'workspace';
@@ -57,6 +57,7 @@ export function createDemoProvider(options = {}) {
   const now = () => toUtcIso(options.now?.() ?? new Date());
   const state = { mode: 'demo', currentUser: null, users: [], entries: [], settings: {} };
   let database;
+  let workspaceEntries = [];
   let mediaBlobs = new Map();
   const objectUrls = new Map();
   let initialized;
@@ -75,13 +76,17 @@ export function createDemoProvider(options = {}) {
   }
 
   function publish(next, blobs) {
+    const user = next.users.find(item => item.id === (next.currentUser?.id ?? next.currentUserId)) ?? null;
+    workspaceEntries = next.entries;
+    const visible = next.entries.filter(entry => canReadEntry(entry, user));
+    const visibleMedia = new Set(visible.flatMap(entry => entry.media.map(media => media.id)));
     for (const [id, url] of objectUrls) {
-      if (!blobs.has(id) || mediaBlobs.get(id) !== blobs.get(id)) {
+      if (!visibleMedia.has(id) || !blobs.has(id) || mediaBlobs.get(id) !== blobs.get(id)) {
         globalThis.URL?.revokeObjectURL?.(url);
         objectUrls.delete(id);
       }
     }
-    for (const entry of next.entries) {
+    for (const entry of visible) {
       for (const media of entry.media) {
         const blob = blobs.get(media.id);
         if (blob) {
@@ -93,7 +98,7 @@ export function createDemoProvider(options = {}) {
     }
     state.mode = 'demo';
     state.users.splice(0, state.users.length, ...next.users);
-    state.entries.splice(0, state.entries.length, ...next.entries);
+    state.entries.splice(0, state.entries.length, ...visible);
     state.settings = next.settings;
     state.currentUser = state.users.find(user => user.id === (next.currentUser?.id ?? next.currentUserId)) ?? null;
     mediaBlobs = blobs;
@@ -149,6 +154,10 @@ export function createDemoProvider(options = {}) {
     publish(next, blobs);
   }
 
+  // Keep the complete demo workspace private to the provider so switching an
+  // identity cannot expose whispers through album/search/statistics/export.
+  function nextState() { return { ...clone(state), entries: clone(workspaceEntries) }; }
+
   function currentUser() {
     if (!state.currentUser) throw new Error('请先选择一个演示身份。');
     return state.currentUser;
@@ -157,7 +166,7 @@ export function createDemoProvider(options = {}) {
   function findEntry(next, id, { mutation = false, allowDeleted = false } = {}) {
     const user = currentUser();
     const entry = next.entries.find(item => item.id === id);
-    if (!entry || (entry.deletedAt && !allowDeleted)) throw new Error('这条记录不存在，或已放入回收站。');
+    if (!entry || !canReadEntry(entry, user) || (entry.deletedAt && !allowDeleted)) throw new Error('这条记录不存在，或已放入回收站。');
     if (mutation && entry.authorId !== user.id && user.role !== 'admin') throw new Error('只有作者或管理员可以修改、删除及恢复这条记录。');
     return entry;
   }
@@ -167,7 +176,7 @@ export function createDemoProvider(options = {}) {
     saveEntry(input, files = []) {
       return enqueue(async () => {
         const user = currentUser();
-        const next = clone(state);
+        const next = nextState();
         if (!input || typeof input !== 'object') throw new Error('记录格式无效。');
         const existing = input.id ? findEntry(next, input.id, { mutation: true }) : null;
         let keptMedia = existing?.media ?? [];
@@ -209,7 +218,7 @@ export function createDemoProvider(options = {}) {
     },
     deleteEntry(id) {
       return enqueue(async () => {
-        const next = clone(state);
+        const next = nextState();
         const entry = findEntry(next, id, { mutation: true });
         entry.deletedAt = now(); entry.updatedAt = entry.deletedAt;
         await commit(next);
@@ -217,7 +226,7 @@ export function createDemoProvider(options = {}) {
     },
     restoreEntry(id) {
       return enqueue(async () => {
-        const next = clone(state);
+        const next = nextState();
         const entry = findEntry(next, id, { mutation: true, allowDeleted: true });
         entry.deletedAt = null; entry.updatedAt = now();
         await commit(next);
@@ -230,7 +239,7 @@ export function createDemoProvider(options = {}) {
         const user = currentUser();
         const content = typeof text === 'string' ? text.trim() : '';
         if (!content || content.length > 5000) throw new Error('回应不能为空，且最多 5000 个字符。');
-        const next = clone(state);
+        const next = nextState();
         const entry = findEntry(next, id);
         const comment = { id: uid('comment'), authorId: user.id, content, createdAt: now() };
         entry.comments.push(comment);
@@ -240,7 +249,7 @@ export function createDemoProvider(options = {}) {
     },
     saveSettings(settings) {
       return enqueue(async () => {
-        currentUser();
+        if (currentUser().role !== 'admin') throw new Error('共同设置由管理员账号维护，日常账号可查看。');
         if (!settings || typeof settings !== 'object') throw new Error('设置格式无效。');
         const value = { ...state.settings, ...settings };
         if (typeof value.spaceName !== 'string' || !value.spaceName.trim() || value.spaceName.trim().length > 60) throw new Error('空间名称为 1 至 60 个字符。');
@@ -252,7 +261,7 @@ export function createDemoProvider(options = {}) {
           return { id: item.id || uid('anniversary'), title: item.title.trim(), date: item.date, yearly: item.yearly };
         });
         value.spaceName = value.spaceName.trim();
-        const next = clone(state); next.settings = value;
+        const next = nextState(); next.settings = value;
         await commit(next);
         return state.settings;
       });
@@ -285,13 +294,13 @@ export function createDemoProvider(options = {}) {
     },
     login() { return Promise.reject(new Error('演示模式不接收账号密码，请直接切换示例身份。')); },
     logout() {
-      return enqueue(async () => { const next = clone(state); next.currentUser = null; await commit(next); });
+      return enqueue(async () => { const next = nextState(); next.currentUser = null; await commit(next); });
     },
     switchUser(id) {
       return enqueue(async () => {
         const user = state.users.find(item => item.id === id);
         if (!user) throw new Error('示例身份不存在。');
-        const next = clone(state); next.currentUser = clone(user);
+        const next = nextState(); next.currentUser = clone(user);
         await commit(next);
         return state.currentUser;
       });
@@ -308,7 +317,7 @@ export function createDemoProvider(options = {}) {
   function toggleUserList(id, field) {
     return enqueue(async () => {
       const user = currentUser();
-      const next = clone(state);
+      const next = nextState();
       const entry = findEntry(next, id);
       const list = entry[field];
       entry[field] = list.includes(user.id) ? list.filter(item => item !== user.id) : [...list, user.id];

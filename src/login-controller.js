@@ -2,6 +2,20 @@
 // decides whether login is allowed. No credential or CAPTCHA answer lives here.
 let scriptPromise;
 
+function verificationErrorMessage(value) {
+  // Turnstile error codes are diagnostic identifiers, never HTML or token data.
+  const candidate = typeof value === 'string' ? value : typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : '';
+  const code = /^[A-Za-z0-9]{1,16}$/.test(candidate) ? candidate : '';
+  let message = '安全验证未通过，请重新加载后重试。';
+  if (code === '200500') message = '安全验证连接失败，请检查网络后重新加载。';
+  else if (code === '110600') message = '安全验证用时过长，请检查设备时间后重新加载。';
+  else if (code === '110620') message = '验证操作已超时，请重新加载后完成验证。';
+  else if (code === '200100') message = '设备时间或验证缓存异常，请校准时间并刷新页面。';
+  else if (['110100', '110110', '110200', '400020', '400021', '400070'].includes(code)) message = '安全验证配置异常，请联系管理员检查。';
+  else if (/^(300|600)/.test(code)) message = '安全验证未通过，请重新加载，或换用最新版本的浏览器。';
+  return code ? `${message}（错误码：${code}）` : message;
+}
+
 function loadTurnstile() {
   if (globalThis.turnstile) return Promise.resolve(globalThis.turnstile);
   if (!scriptPromise) scriptPromise = new Promise((resolve, reject) => {
@@ -49,14 +63,14 @@ export function mountLoginVerification(root, { isBusy = () => false, getConfig }
       api = await loadTurnstile();
       if (destroyed) return;
       if (widget !== undefined) api.remove(widget);
+      message('请完成下方安全验证。');
       widget = api.render(root.querySelector('#login-captcha'), {
         sitekey: config.siteKey, action: 'login', theme: 'light', size: 'flexible', language: 'zh-cn',
         callback(value) { if (destroyed) return; token = value; submit.disabled = isBusy(); message(isBusy() ? '正在登录，请稍候…' : '安全验证已完成。'); },
         'expired-callback'() { invalidate('验证已过期，请重新完成验证。', true); },
-        'error-callback'() { invalidate('验证暂时不可用，请重新加载。', true); },
-        'timeout-callback'() { invalidate('验证超时，请重新加载。', true); },
+        'error-callback'(code) { invalidate(verificationErrorMessage(code), true); },
+        'timeout-callback'() { invalidate('验证操作已超时，请重新加载后完成验证。', true); },
       });
-      if (!token) message('请完成下方安全验证。');
     } catch (error) {
       if (!destroyed) invalidate(error.name === 'AbortError' || error.name === 'TimeoutError' ? '连接超时，请重新加载验证。' : error.message, true);
     } finally { loading = false; }

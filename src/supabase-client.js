@@ -1,5 +1,7 @@
 // The official, locally vendored UMD bundle is pinned and verified by the build.
 // Passwords, refresh tokens and privileged keys never enter application config.
+import { createRememberedSessionStorage } from './session-storage.js';
+import { createServiceFetch } from './service-fetch.js';
 let loading;
 
 export async function createBrowserSupabaseClient(config) {
@@ -17,8 +19,23 @@ export async function createBrowserSupabaseClient(config) {
     document.head.append(script);
   });
   const sdk = await loading;
-  return sdk.createClient(config.supabaseUrl, config.supabasePublishableKey, {
-    auth: { persistSession: false, detectSessionInUrl: false, autoRefreshToken: true },
-    global: { headers: { 'X-Client-Info': 'chaoxi-memory/0.2' } },
+  const storageKey = `chaoxi-${new URL(config.supabaseUrl).hostname.split('.')[0]}-auth`;
+  let browserStorage;
+  try { browserStorage = globalThis.localStorage; } catch { /* Session remains available in this tab. */ }
+  let client, ending = false;
+  const reopen = () => {
+    if (ending) return; ending = true;
+    client?.auth.stopAutoRefresh();
+    // Do not sign out here: another tab may already have written a new session.
+    globalThis.dispatchEvent(new Event('memory:session-ended'));
+    globalThis.location.reload();
+  };
+  const storage = createRememberedSessionStorage({ storage: browserStorage, key: storageKey, onExpired: reopen, onExternalChange: reopen });
+  client = sdk.createClient(config.supabaseUrl, config.supabasePublishableKey, {
+    auth: { storage, storageKey, persistSession: true, detectSessionInUrl: false, autoRefreshToken: true },
+    global: { fetch: createServiceFetch(config.supabaseUrl), headers: { 'X-Client-Info': 'chaoxi-memory/0.4' } },
   });
+  Object.defineProperty(client, 'memorySession', { value: { beginSignIn: () => storage.beginSignIn() } });
+  storage.watch();
+  return client;
 }

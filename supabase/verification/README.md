@@ -2,6 +2,10 @@
 
 仓库保留默认关闭的审阅模板，固定目标仅为 `ijtrfjehqtoptsmsotin` 项目。**2026-11-16 已短期部署并完成真实 HTTP 权限验收，随后退役为 410。** 这次使用管理员生成的 magiclink 会话，不代表密码登录或真实 widget 验证码已经通过。
 
+本次源码新增悄悄话专项后曾以16项版本执行云验收：前14项（含新建悄悄话的正文、子表、真实文件读写隔离）通过，但原本共享且已被对方访问的同一鉴权下载 URL 在改私密后仍返回200，验收因此失败。该轮151次请求、12个真实 PNG 的 Storage/业务行/会话清理均完成，探针已退役为410。不能把这次失败删去或宣称全面撤回旧访问。
+
+现17项版本单独记录已预热共享 URL 的 HTTP 状态、cf-cache-status、Age 和 `knownCachedSharedAccess`；旧 URL 仍返回正确原字节时明确标为已知缓存访问，并非新的 RLS 授权成功。另用官方 `cacheNonce` 参数强制回源检查，以及从未被对方预热的第二张保留图片作独立冷路径对照。两项新的权限检查必须拒绝访问才通过，新增悄悄话的核心拒绝断言仍保持严格。此17项诊断版本的真实执行结果须由根任务另行记录。
+
 ## 本轮实际结果
 
 真实调用返回 HTTP 200、`ok=true`，11 项检查全部为 true，实际完成 94 次请求并上传 10 个真实微型 PNG。检查包括身份与 profiles 一致、草稿隔离、PNG 流程、成员下载、匿名拒绝、跨作者修改拒绝、attached 删除拒绝、upsert 拒绝、九图限制、原子替换和管理员维护已发布记录。结果明确为 `authMethod=admin-generated-magiclink`、`passwordCaptchaTested=false`。
@@ -24,6 +28,9 @@ Storage、业务行和会话清理均为 true。根任务 finally 关闭数据�
 - 预留、上传真实微型 PNG、确认、发布九图；三位成员鉴权下载并核对原字节，匿名和公开桶 URL 访问被拒。
 - attached 原图直接删除及以另一张有效 PNG upsert 被拒，随后重新下载核对原字节。
 - 第十图不能直接发布；通过原子选图将九图之一替换成功。
+- 新建 whisper 经正常媒体流程发布后，作者与管理员能读；对方以已知 UUID 查询正文、附件 metadata、comments、reactions、favorites 以及 count=exact 仍为空，不能 PATCH、写回应/爱心/收藏或执行附件 RPC。
+- 对方不能下载已知悄悄话文件路径，也不能向尚未存在的合法 pending 路径上传；后者不会将“已有文件重复错误”误判为权限隔离。作者随后在该路径上传成功并 finalize，对方仍不能下载/删除，管理员可读取发布帖的临时文件。
+- 将本次原本共享的记录改成 whisper：本人已经写入的回应、爱心和收藏在后续 REST 查询中隐藏，盲删爱心/收藏也不生效；图片必须在新的回源鉴权及冷路径请求中拒绝对方访问。此前已下载、缓存或已签发链接无法承诺收回；探针保留同 URL 已预热访问的实际结果。管理员仍可维护已发布悄悄话。
 
 没有增加 settings 写入、未知用户创建、口令重置、系统表 SQL 或额外完整矩阵。数据库和 Storage 的最终权限仍以目标项目真实执行结果为准。
 
@@ -35,7 +42,7 @@ Storage、业务行和会话清理均为 true。根任务 finally 关闭数据�
 
 部署使用 `index.ts` / `core.mjs` 两文件和 `verify_jwt=false`，由探针核验独立能力。受信任客户端经固定项目 HTTPS 端点发 `POST`，body只有 `{"run":true}`，Authorization 为短期能力 Bearer；不得把能力放 URL、argv、命令历史、仓库文件或普通日志。拒绝浏览器 Origin、查询参数、其他 body 字段和错误能力。内部代理可提供 http Request URL；外部客户端和所有上游仍须固定 HTTPS。
 
-请求体最多1024字节，上游 JSON 最多65536字节、下载最多1024字节；每次请求及读取有8秒上限，主体工作85秒、含清理总预算120秒。不会跟随重定向，所有上游限定同一个项目。一次验收最多创建两个随机 UUID 记录与十个68字节 PNG 对象。短期能力并非跨实例原子单次令牌；应只调用一次，完成后立即退役。
+请求体最多1024字节，上游 JSON 最多65536字节、下载最多1024字节；每次请求及读取有8秒上限，主体工作85秒、含清理总预算120秒。不会跟随重定向，所有上游限定同一个项目。一次验收最多创建三个随机 UUID 记录与十二个68字节 PNG 对象，并只在这些记录下创建回应、爱心和收藏。短期能力并非跨实例原子单次令牌；应只调用一次，完成后立即退役。
 
 ## 清理和退役
 
@@ -54,3 +61,4 @@ finally 清理仅限本次预生成 UUID，并先用 UUID、作者和精确 run 
 - [generateLink](https://supabase.com/docs/reference/javascript/auth-admin-generatelink)、[原生 SDK 管理员请求及平铺响应转换](https://github.com/supabase/supabase-js/blob/master/packages/core/auth-js/src/GoTrueAdminApi.ts)、[verifyOtp](https://supabase.com/docs/reference/javascript/auth-verifyotp)。
 - [Storage 原生上传、下载、删除及 info/exists](https://github.com/supabase/supabase-js/blob/master/packages/core/storage-js/src/packages/StorageFileApi.ts)：当前 exists 使用有界 metadata info，避免 HEAD 省略错误正文后混淆缺失与鉴权失败。
 - [Storage 错误](https://supabase.com/docs/guides/storage/debugging/error-codes)、[scope=local及JWT撤销限制](https://supabase.com/docs/reference/javascript/auth-signout)。
+- [Smart CDN 的 Bypassing cache/cacheNonce](https://supabase.com/docs/guides/storage/cdn/smart-cdn)：新查询值强制回源，并不撤销既有缓存或下载副本。

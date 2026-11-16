@@ -1,0 +1,37 @@
+# 网络连接排查
+
+核查日期：2026-11-16。本说明区分项目现状、官方限制与尚未验证的原因。
+
+## 已核实的连接链路
+
+| 用途 | 浏览器请求的域名 | 判断方式 |
+| --- | --- | --- |
+| 页面、脚本与样式 | `memory-awv.pages.dev` | 能看到登录页只说明这一段基本可用 |
+| Turnstile 安全验证 | `challenges.cloudflare.com` | 查看安全验证是否成功，以及界面显示的错误码 |
+| 登录、记录数据、私有附件 | `ijtrfjehqtoptsmsotin.supabase.co` | 分别查看 Auth、REST、Storage 请求是否连接成功 |
+
+私有图片通过登录身份访问 Supabase Storage，然后生成本地 Blob URL 显示。页面源码、CSS 或相册排版正常，不代表私有附件链路正常。不要为了排查将存储桶改为公开，也不要关闭后端验证码或 RLS。
+
+用户报告是“关闭 VPN 后页面可以打开，但登录或图片加载失败”。目前尚未在用户关闭 VPN 的实际网络中复现，**不能确认是运营商线路、DNS、验证码、Supabase 连接，还是浏览器扩展等原因**，也不能确定某个域名被封锁。
+
+一次本机只读探测使用 `HttpClientHandler.UseProxy=false`，获得页面 200、Turnstile 脚本 200、Supabase Auth 健康接口 401（未传 API key）、Storage 状态接口 200。这只说明当时本机能够收到这些 HTTP 响应；它不会绕过系统 VPN 或 TUN，不能证明关闭 VPN 后的实际线路可用，也不能证明登录和私有附件权限正确。
+
+## 官方资料与适用边界
+
+- Cloudflare 当前 [China Network FAQ](https://developers.cloudflare.com/china-network/faq/#is-turnstile-available-in-mainland-china) 仍说明 Turnstile 不支持中国大陆，全球区域站点的大陆访客也可能遇到问题。这是官方支持范围，不代表所有大陆网络每次都会失败。
+- [2026-10-28 公告](https://developers.cloudflare.com/changelog/post/2026-10-28-china-native-challenge-pages/) 的大陆托管组件改善明确适用于 China Network 区域的 Challenge Pages，全球网络继续使用全球挑战体验，不能推定本项目的免费 Pages 独立验证组件已自动获得大陆线路保障。
+- [Turnstile 错误码说明](https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/)：`200500` 是验证 iframe 加载失败，应检查验证域名的连接；`110600` 是挑战超时，`110620` 是交互超时，`200100` 涉及设备时间或缓存；`300*`、`600*` 是通用挑战失败，不能统称网络故障。界面保留经过校验的错误编号，错误、超时和过期均会清除验证码 token 并禁用登录。
+- Supabase 的[官方自定义域名功能](https://supabase.com/docs/guides/platform/custom-domains)是付费计划上的付费附加项。购买或更换页面域名不能单独解决认证、存储或验证码的连接，也不能保证中国大陆稳定访问。
+
+## 关闭 VPN 后的复测步骤
+
+1. 使用最新版本浏览器，关闭 VPN 后刷新正式网站。记录测试时间、Wi-Fi 或移动网络，以及能否出现登录页。不要分享密码、请求正文、Authorization、Cookie、验证码 token 或完整 HAR 文件。
+2. 单独观察安全验证。未成功时记录界面的错误码，点击“重新加载验证”；若是 `200500`，重点排查验证服务连接。若验证已经成功，继续下一步，不能因为其他页面请求出现 401 就断定验证失败：Turnstile 内部可能有正常的 401 请求。
+3. 安全验证成功后正常登录一次。若失败，在浏览器开发者工具的“网络”中只记录 `/auth/v1/token`、`/rest/v1/` 或 `/storage/v1/` 请求的域名、阶段、HTTP 状态或浏览器错误名称。连接超时、DNS/TLS 错误、401/403 权限错误、429 限流代表不同问题；不要反复快速提交密码。
+4. 登录成功但附件失败时，记录是否全部附件都失败、对应 Storage 请求状态，并用重新加载功能重试。与另一条网络（例如手机热点）对照一次，以判断是否只影响某个网络。不要通过公开附件链接绕过权限。
+
+## 免费优先的处理顺序
+
+先依靠分阶段提示、验证码错误码与附件重试定位链路，再根据真实复测结果决定调整。登录状态保留可以减少重复登录，但会话刷新和图片仍然需要后端连接，不能替代网络修复。
+
+同域服务端转发可作为后续实验，但依旧涉及跨境连接，不能保证稳定，也无法代替浏览器访问验证组件。若实施，必须固定可信上游和允许的路径、保留用户身份与 RLS、禁止缓存私密响应，并重新评估限流。当前没有验证过能保证大陆稳定且保持全部现有服务不变的免费方案。
