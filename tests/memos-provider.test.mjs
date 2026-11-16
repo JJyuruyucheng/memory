@@ -53,6 +53,13 @@ test('Memos refuses a whisper before uploading or writing because SPACE cannot e
   assert.ok(!calls.slice(start).some(call => call.method !== 'GET'));
 });
 
+test('Memos rejects forged upload order before any attachment upload or mutation', async () => {
+  const { provider, calls } = fixture(); await provider.init();
+  const start = calls.length;
+  await assert.rejects(provider.saveEntry({ ...input(), id: 'memos/record-1', mediaOrder: [{ fileIndex: 1 }] }, [new File(['image'], 'sample.png', { type: 'image/png' })]), error => error.code === 'INVALID_MEDIA');
+  assert.ok(!calls.slice(start).some(call => call.method !== 'GET'));
+});
+
 function deferred() {
   let resolve;
   const promise = new Promise(done => { resolve = done; });

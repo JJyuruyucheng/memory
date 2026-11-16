@@ -48,6 +48,12 @@
 
 Provider 禁止在同一次保存中把 whisper 改成共享类型并移除旧附件或新增文件，且必须在任何写入前拒绝；先保留悄悄话类型保存最终附件集合，再单独切换为日常随记/事件。这样可避免 type 先公开而旧私密附件尚未解除 attached 的时间窗口。保留相同附件集合时，用户仍可明确将整条记录改为共享。
 
+### 附件显示顺序
+
+`saveEntry(input, files)` 的可选 `input.mediaOrder` 是精确排列：`[{id: "已保留附件ID"}, {fileIndex: 0}, ...]`；`fileIndex` 是本次 `files` 数组的零起始序号。必须各出现一次、覆盖 `input.media` 保留的全部旧文件和全部新文件，不能重复、遗漏、越界或引用其他记录。未传时兼容原行为：保留旧文件顺序，再追加新文件。所有 Provider 在任何上传/写入前验证排列，再用可信附件对象及真实上传结果解析，调用者不能伪造 URL、身份或数据库 position。同一集合仅调顺序仍可明确把悄悄话改为共享。
+
+排序迁移为 `supabase/migrations/20261116112257_attachment_order.sql`（文件名与云端实际迁移版本一致）。`publish_entry` 的 `p_media_ids` 从集合升级为有序集合；保留原授权、并发检查、真实对象与数量校验，在同一事务内按该顺序分配连续 `position=0..n-1`。未选中的暂存/retired 附件排在其后。为兼容立即唯一约束，持锁后先整体移到未使用的正序号范围，再压缩；序号溢出会拒绝并回滚，不放开客户端直接写 position。已在生产应用并完成真实文件顺序验证，详见 `docs/release-v0.5.0.md`。
+
 评论 POST comments 的 `entryId,content`；authorId 默认当前用户，不能冒充他人。爱心/收藏 POST `entryId`，DELETE 时按 entryId 与当前 userId 定位。仅 published 且未删除的记录可新增回应、爱心、收藏；移除自己的爱心/收藏仍允许。settings PATCH 仅管理员通过 RLS 生效。
 
 ### 媒体与原子选图协议

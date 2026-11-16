@@ -81,7 +81,7 @@ function setup({ config = {}, env: extraEnv = {}, users = IDS.map((_, index) => 
           assert.equal(parent.updatedAt, body.p_expected_updated_at);
           const selected = body.p_media_ids.map(id => media.get(id)); assert.ok(selected.every(value => value?.entryId === parent.id && value.status === 'ready'));
           for (const raw of media.values()) if (raw.entryId === parent.id) {
-            if (body.p_media_ids.includes(raw.id)) raw.attached = true;
+            if (body.p_media_ids.includes(raw.id)) { raw.attached = true; raw.position = body.p_media_ids.indexOf(raw.id); }
             else if (raw.attached) { raw.attached = false; raw.status = 'retired'; }
           }
           parent.status = 'published'; parent.updatedAt = new Date(NOW + ++ticks * 1000).toISOString(); result = response(parent);
@@ -97,6 +97,7 @@ function setup({ config = {}, env: extraEnv = {}, users = IDS.map((_, index) => 
       const store = child ? table === 'media' ? media : children[table] : entries;
       let rows = [...store.values()];
       rows = filtered(rows, url.searchParams);
+      if (url.searchParams.get('order') === 'position.asc') rows.sort((a, b) => a.position - b.position);
       if (!privileged && index < 0) result = response({ code: '42501' }, 403);
       else if (call.method === 'GET') {
         const selected = rows.filter(row => privileged || (child ? table === 'media' ? row.authorId === actor || published(entries.get(row.entryId), index) && (row.attached && row.status === 'ready' || index === 2) : published(entries.get(row.entryId), index) : visible(row, index)));
@@ -212,6 +213,21 @@ test('missing or unexpected Auth users stop before generateLink can create any a
   for (const users of [IDS.slice(1).map((_, index) => user(index + 1)), [...IDS.map((_, index) => user(index)), { ...user(0), id: EXISTING, email: 'outsider@memory.invalid' }]]) {
     const f = setup({ users }), body = await (await f.handler(request())).json(); assert.equal(body.ok, false); assert.equal(body.error, 'UNEXPECTED_AUTH_STATE');
     assert.ok(!f.calls.some(call => call.path.endsWith('/generate_link'))); assert.equal(f.entries.size, 1);
+  }
+});
+
+test('server ignoring ordered publication or returning duplicate positions fails verification and still cleans fixtures', async () => {
+  for (const breakOrder of ['swapped', 'duplicate']) {
+    const f = setup({ hook(call, state) {
+      if (call.path !== '/rest/v1/media' || call.method !== 'GET' || call.url.searchParams.get('order') !== 'position.asc') return;
+      const entryId = call.url.searchParams.get('entryId').slice(3);
+      const rows = [...state.media.values()].filter(value => value.entryId === entryId && value.attached).sort((a, b) => a.position - b.position);
+      if (breakOrder === 'swapped') rows.reverse(); else rows[0].position = 1;
+      return response(rows);
+    } });
+    const body = await (await f.handler(request())).json();
+    assert.equal(body.error, 'ATTACHMENT_REORDER_FAILED'); assert.equal(body.metrics.checks.attachmentReorder, false);
+    assert.equal(body.cleanup.complete, true); assert.equal(f.media.size, 0); assert.equal(f.sessions.size, 0);
   }
 });
 

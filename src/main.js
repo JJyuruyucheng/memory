@@ -4,6 +4,7 @@ import { mountLoginVerification } from './login-controller.js';
 import { renderEntryMedia } from './entry-media.js';
 import { releaseHistory } from './releases.js';
 import { mountDatePickers, destroyDatePickers } from './date-pickers.js';
+import { mountAttachmentSorter, destroyAttachmentSorter } from './attachment-sorter.js';
 import { escapeHtml as esc, filterEntries, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
 
 const app = document.querySelector('#app');
@@ -13,8 +14,9 @@ const moodNames = { happy: '微笑', neutral: '一般', sad: '难受', unset: '�
 const moodIcons = { happy: 'smile', neutral: 'neutral', sad: 'sad' };
 const filters = { query: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all', favoritesOnly: false, trash: false };
 let state = { currentUser: null, users: [], entries: [], settings: {} }, loginPending = false, bootPending = true;
+let reconnectPending = false, reconnectError = null, reconnectAttempt, recoveryEpoch = 0;
 let searchTimer, toastTimer, dialogReturnFocus, draftTimer;
-let editorFiles = [], editorMedia = [], editorId = null, previewUrls = [];
+let editorAttachments = [], editorId = null, previewUrls = [];
 let calendarCursor = dayKey(new Date()).slice(0, 7), selectedDay = '';
 const route = () => location.hash.slice(1).split('?')[0] || 'timeline';
 const user = id => state.users.find(u => u.id === id) || { id, name: '已离开的作者', color: 'sage' };
@@ -43,6 +45,7 @@ const navItems = [['timeline', 'book', '时光线'], ['album', 'photo', '我们�
 function navLink(item) { const [id, symbol, label] = item; return `<a href="#${id}" class="nav-link ${route() === id ? 'active' : ''}" ${route() === id ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${label}</span></a>`; }
 
 function render() {
+  if (!state?.currentUser && (reconnectPending || reconnectError)) return renderReconnect(reconnectError);
   document.body.classList.toggle('is-login', !state?.currentUser && CONFIG.mode !== 'demo');
   if (!state?.currentUser) return renderLogin();
   loginVerification?.destroy(); loginVerification = null;
@@ -60,9 +63,9 @@ function render() {
     </aside>
     <div class="workspace">
       <header class="mobile-header"><a href="#timeline"><img src="./assets/mark.svg" alt="" width="30" height="30" /><strong>朝夕</strong></a><span>${esc(state.settings.spaceName)}</span>${CONFIG.mode === 'demo' ? `<label class="mobile-account">${avatar(current, true)}${icon('down')}<span class="sr-only">切换示例视角</span><select id="mobile-user-switch">${state.users.map(u => `<option value="${esc(u.id)}" ${u.id === current.id ? 'selected' : ''}>${esc(u.name)}${u.role === 'admin' ? '（管理员）' : ''}</option>`).join('')}</select></label>` : `<button class="icon-button" data-action="logout" aria-label="退出登录">${icon('logout')}</button>`}</header>
-      <div class="mode-note">${icon(CONFIG.mode === 'demo' ? 'info' : 'lock')}<span>${CONFIG.mode === 'demo' ? '演示空间 · 示例内容与试写仅保存在当前浏览器' : '两个人的共同空间 · 仅登录后可见'}</span><button data-action="about-mode">${CONFIG.mode === 'demo' ? '了解演示' : '权限说明'}</button></div>
+      ${CONFIG.mode === 'demo' ? `<div class="mode-note">${icon('info')}<span>演示空间 · 示例内容与试写仅保存在当前浏览器</span><button data-action="about-mode">了解演示</button></div>` : ''}
       <main id="main-content" class="canvas" tabindex="-1">${renderView(stats)}</main>
-      <footer class="page-footer"><span>朝夕之间，都是我们。</span><button class="text-button" data-action="updates">系统更新信息 <span>${esc(releaseHistory[0]?.version || '')}</span></button><span>${CONFIG.mode === 'demo' ? '演示内容为虚构，勿上传私密资料' : '记录属于作者，回忆属于我们'}</span></footer>
+      <footer class="page-footer"><button class="text-button" data-action="updates">系统更新信息 <span>${esc(releaseHistory[0]?.version || '')}</span></button>${CONFIG.mode === 'demo' ? '<span>演示内容为虚构，勿上传私密资料</span>' : '<button class="text-button" data-action="about-mode">可见范围</button>'}</footer>
     </div>
     <nav class="mobile-nav" aria-label="手机导航">${[['timeline', 'book', '时光'], ['album', 'photo', '相册']].map(navLink).join('')}<button class="mobile-compose" data-action="new" aria-label="记录这一刻">${icon('plus')}</button>${[['stats', 'chart', '统计'], ['us', 'settings', '我们']].map(navLink).join('')}</nav>`;
   if (active) { const el = document.getElementById(active); if (el) { el.focus({ preventScroll: true }); if (typeof selection === 'number' && el.setSelectionRange) el.setSelectionRange(selection, selection); } }
@@ -86,7 +89,7 @@ function renderView(stats) {
         <div class="home-grid"><section class="feed-column" aria-label="我们的时光线">
         <button class="quick-compose" data-action="new">${avatar(state.currentUser, true)}<span>今天，有什么想和 TA 一起记住？</span>${icon('edit')}</button>
         ${renderFilters()}<div class="feed-summary"><span>${selectedDay ? `${esc(selectedDay)} · ` : ''}共 ${filtered().length} 条${view === 'favorites' ? '收藏' : '回忆'}</span>${selectedDay || filters.query || filters.mood !== 'all' || filters.authorId !== 'all' || filters.type !== 'all' || filters.month ? '<button class="text-button" data-action="clear-filters">清除筛选</button>' : '<span>按发生时间排列</span>'}</div>
-        ${renderFeed(filtered())}</section><aside class="right-rail">${renderTogether(stats)}${renderCalendar()}${renderUpcoming()}<p class="rail-note">${icon('leaf')} 不必特别，和你有关就好。</p></aside></div>`;
+        ${renderFeed(filtered())}</section><aside class="right-rail">${renderTogether(stats)}${renderCalendar()}${renderUpcoming()}</aside></div>`;
     }
   }
 }
@@ -107,8 +110,8 @@ function renderEntry(entry, trash = false) {
     <div class="memory-meta">${avatar(author, true)}<div><strong>${esc(author.name)}</strong><time datetime="${esc(entry.occurredAt)}">${dateLabel(entry.occurredAt)}${entry.createdAt && dayKey(entry.createdAt) !== dayKey(entry.occurredAt) ? ' · 补记' : ''}</time></div><span class="entry-kind" ${entry.type === 'whisper' ? 'title="仅作者和管理员可见"' : ''}>${entry.type === 'event' ? `${icon('calendar')}事件` : entry.type === 'whisper' ? `${icon('lock')}悄悄话` : '随记'}</span>${canEdit(entry) && !trash ? `<button class="icon-button" data-action="edit" data-id="${esc(entry.id)}" aria-label="编辑${esc(entry.title || '这条回忆')}">${icon('edit')}</button>` : ''}</div>
     ${entry.title ? `<h2>${esc(entry.title)}</h2>` : ''}<p class="memory-text">${esc(entry.content)}</p>
     ${renderEntryMedia(entry, safeUrl)}
-    <div class="entry-tags">${entry.mood ? `<span class="mood-tag ${entry.mood}">${icon(moodIcons[entry.mood])}${moodNames[entry.mood] || '未填写'}</span>` : ''}${(entry.tags || []).map(tag => `<button class="tag" data-action="search-tag" data-value="${esc(tag)}"># ${esc(tag)}</button>`).join('')}</div>
-    <div class="memory-actions">${trash ? `${canEdit(entry) ? `<button class="text-button" data-action="restore" data-id="${esc(entry.id)}">${icon('restore')}恢复这条回忆</button>` : '<span class="muted">由作者恢复</span>'}` : `<button class="reaction-button ${liked ? 'selected' : ''}" data-action="reaction" data-id="${esc(entry.id)}" aria-pressed="${Boolean(liked)}" aria-label="${liked ? '收回回应' : '回应这条回忆'}">${icon('heart')}<span>${entry.reactionBy?.length || '喜欢'}</span></button><button class="reaction-button" data-action="detail" data-id="${esc(entry.id)}">${icon('comment')}<span>${entry.comments?.length || '说两句'}</span></button><button class="bookmark-button ${saved ? 'selected' : ''}" data-action="favorite" data-id="${esc(entry.id)}" aria-label="${saved ? '取消收藏' : '收藏这条回忆'}" aria-pressed="${Boolean(saved)}">${icon('bookmark')}</button>`}</div>
+    ${entry.mood || entry.tags?.length ? `<div class="entry-tags">${entry.mood ? `<span class="mood-tag ${entry.mood}">${icon(moodIcons[entry.mood])}${moodNames[entry.mood] || '未填写'}</span>` : ''}${(entry.tags || []).map(tag => `<button class="tag" data-action="search-tag" data-value="${esc(tag)}"># ${esc(tag)}</button>`).join('')}</div>` : ''}
+    <div class="memory-actions">${trash ? `${canEdit(entry) ? `<button class="text-button" data-action="restore" data-id="${esc(entry.id)}">${icon('restore')}恢复这条回忆</button>` : '<span class="muted">由作者恢复</span>'}` : `<button class="reaction-button ${liked ? 'selected' : ''}" data-action="reaction" data-id="${esc(entry.id)}" aria-pressed="${Boolean(liked)}" aria-label="${liked ? '取消喜欢' : '喜欢这条回忆'}">${icon('heart')}<span>${liked ? '已喜欢' : '喜欢'}</span>${entry.reactionBy?.length ? `<span class="action-count num">${entry.reactionBy.length}</span>` : ''}</button><button class="reaction-button comment-button" data-action="detail" data-id="${esc(entry.id)}">${icon('comment')}<span>留言</span>${entry.comments?.length ? `<span class="action-count num">${entry.comments.length}</span>` : ''}</button><button class="bookmark-button ${saved ? 'selected' : ''}" data-action="favorite" data-id="${esc(entry.id)}" aria-label="${saved ? '取消收藏' : '收藏这条回忆'}" aria-pressed="${Boolean(saved)}">${icon('bookmark')}<span>${saved ? '已收藏' : '收藏'}</span></button>`}</div>
   </article>`;
 }
 function renderTogether(stats) {
@@ -173,33 +176,55 @@ function openDialog(content, cls = '') {
 function closeModal(saveDraft = true) {
   if (saveDraft) persistDraft();
   destroyDatePickers(modalRoot);
+  destroyAttachmentSorter(modalRoot);
   clearTimeout(draftTimer); modalRoot.querySelector('dialog')?.close(); modalRoot.innerHTML = '';
   previewUrls.forEach(url => URL.revokeObjectURL(url)); previewUrls = [];
   if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus({ preventScroll: true });
 }
 function openEditor(entry) {
-  editorId = entry?.id || null; editorFiles = []; editorMedia = entry?.media ? [...entry.media] : [];
+  editorId = entry?.id || null;
   let draft = {};
   if (!entry) { try { draft = JSON.parse(sessionStorage.getItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`) || '{}'); } catch {} }
   const data = entry || { ...draft, occurredAt: draft.occurredAt || new Date().toISOString() };
   const author = entry ? user(entry.authorId) : state.currentUser;
-  openDialog(`<form id="entry-form" data-original-type="${esc(entry?.type || '')}"><header class="editor-header"><div><h2>${entry ? '再添一点细节' : '今天，也值得记住'}</h2><p class="dialog-description">${entry ? '留住文字，也留住当时的感受。' : '一句话，一张照片，就很好。'}</p></div><div class="editor-who">${avatar(author, true)}<div><span>${esc(author.name)}</span><span id="entry-visibility">${icon('lock')}${visibilityLabel(data.type)}</span></div></div></header>
+  openDialog(`<form id="entry-form" data-original-type="${esc(entry?.type || '')}"><header class="editor-header"><div><h2>${entry ? '再添一点细节' : '今天，也值得记住'}</h2></div><div class="editor-who">${avatar(author, true)}<div><span>${esc(author.name)}</span><span id="entry-visibility">${icon('lock')}${visibilityLabel(data.type)}</span></div></div></header>
     <div class="editor-layout"><div class="editor-story"><label>给这段回忆起个名字 <span class="optional">随记可不填</span><input name="title" value="${esc(data.title || '')}" placeholder="例如：下班路上，一起看了晚霞" maxlength="120" /></label>
     <p id="whisper-warning" class="privacy-warning" hidden>${icon('info')}改为悄悄话后，对方将不能再查看；此前的副本、缓存和已签发链接无法即时收回。</p>
     <label class="editor-content">想记住的事<textarea name="content" rows="9" placeholder="慢慢写，这里没有字数任务。" maxlength="20000">${esc(data.content || '')}</textarea></label></div>
     <div class="editor-side"><div class="form-two"><label>记录类型<select name="type"><option value="note" ${!['event', 'whisper'].includes(data.type) ? 'selected' : ''}>日常随记</option><option value="event" ${data.type === 'event' ? 'selected' : ''}>重要事件</option><option value="whisper" ${data.type === 'whisper' ? 'selected' : ''}>悄悄话</option></select></label><label>发生在<input name="occurredAt" type="datetime-local" value="${dateTimeInput(data.occurredAt)}" required /></label></div>
-    <fieldset class="mood-options"><legend>写下它时的心情 <span class="optional">可以不选</span></legend>${['happy', 'neutral', 'sad'].map(m => `<label class="mood-option mood-${m}"><input type="radio" name="mood" value="${m}" ${data.mood === m ? 'checked' : ''} />${icon(moodIcons[m])}<span>${moodNames[m]}</span>${icon('check', 'mood-check')}</label>`).join('')}<label class="mood-option no-mood"><input type="radio" name="mood" value="" ${!data.mood ? 'checked' : ''} /><span>未填写</span>${icon('check', 'mood-check')}</label></fieldset>
+    <fieldset class="mood-options"><legend>心情</legend>${['happy', 'neutral', 'sad'].map(m => `<label class="mood-option mood-${m}"><input type="radio" name="mood" value="${m}" ${data.mood === m ? 'checked' : ''} />${icon(moodIcons[m])}<span>${moodNames[m]}</span>${icon('check', 'mood-check')}</label>`).join('')}<label class="mood-option no-mood"><input type="radio" name="mood" value="" ${!data.mood ? 'checked' : ''} /><span>未填写</span>${icon('check', 'mood-check')}</label></fieldset>
     <label>小标签 <span class="optional">用逗号隔开</span><input name="tags" value="${esc((data.tags || []).join('，'))}" placeholder="日常，旅行，一起做饭" maxlength="180" /></label>
     <section class="editor-attachments" aria-label="照片与视频"><div class="upload-row"><label class="upload-control">${icon('photo')}<span>添加照片或短视频</span><input id="media-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif,video/mp4,video/webm,video/quicktime" multiple /></label></div><small class="upload-hint">最多 9 张图片 · 最多 10 个附件 · 单个 ${CONFIG.mode === 'supabase' ? '50 MB' : '50 MiB'}</small><div id="editor-previews" class="editor-previews"></div></section></div></div>
-    <p id="form-error" class="form-error" role="alert"></p><div class="dialog-footer"><div>${entry && canEdit(entry) ? `<button type="button" class="text-button danger delete-entry" data-action="delete" data-id="${esc(entry.id)}">移到回收站</button>` : ''}<span id="draft-status">${entry ? '作者与发布时间会保留' : draft.content || draft.title ? '已找回当前会话的草稿' : '文字草稿会保留在当前会话'}</span></div><button type="submit" class="primary">${icon('check')}${entry ? '保存修改' : '收好这一刻'}</button></div></form>`, 'editor-dialog');
+    <p id="form-error" class="form-error" role="alert"></p><div class="dialog-footer"><div>${entry && canEdit(entry) ? `<button type="button" class="text-button danger delete-entry" data-action="delete" data-id="${esc(entry.id)}">移到回收站</button>` : ''}<span id="draft-status" role="status">${!entry && (draft.content || draft.title) ? '已恢复草稿' : ''}</span></div><button type="submit" class="primary">${icon('check')}${entry ? '保存修改' : '收好这一刻'}</button></div></form>`, 'editor-dialog');
+  editorAttachments = (entry?.media || []).map(media => ({ key: crypto.randomUUID(), kind: 'media', media }));
   renderEditorPreviews();
 }
 function renderEditorPreviews() {
   const target = document.querySelector('#editor-previews'); if (!target) return;
+  destroyAttachmentSorter(modalRoot);
   previewUrls.forEach(url => URL.revokeObjectURL(url)); previewUrls = [];
-  const files = [...editorMedia, ...editorFiles.map(f => { const url = URL.createObjectURL(f); previewUrls.push(url); return { url, type: f.type.startsWith('video/') ? 'video' : 'image', name: f.name }; })];
-  target.innerHTML = files.map((file, i) => `<div>${file.type === 'video' ? `<video src="${safeUrl(file.url)}" preload="metadata"></video>` : `<img src="${safeUrl(file.url)}" alt="${esc(file.name)}" />`}<button type="button" class="preview-remove" data-action="remove-media" data-index="${i}" aria-label="移除${esc(file.name)}">${icon('close')}</button></div>`).join('');
+  target.innerHTML = editorAttachments.map((item, i) => {
+    let file = item.media;
+    if (item.kind === 'file') { const url = URL.createObjectURL(item.file); previewUrls.push(url); file = { url, type: item.file.type.startsWith('video/') ? 'video' : 'image', name: item.file.name }; }
+    return `<div class="attachment-preview" data-key="${esc(item.key)}">${file.type === 'video' ? `<video src="${safeUrl(file.url)}" preload="metadata" playsinline></video>` : `<img src="${safeUrl(file.url)}" alt="${esc(file.name || '附件')}" draggable="false" />`}<button type="button" class="preview-handle" aria-label="第 ${i + 1} 个附件，拖动排序或按方向键移动" data-key="${esc(item.key)}">${icon('grip')}<span class="num">${i + 1}</span></button><button type="button" class="preview-remove" data-action="remove-media" data-index="${i}" aria-label="移除第 ${i + 1} 个附件">${icon('close')}</button></div>`;
+  }).join('');
+  mountAttachmentSorter(target, keys => {
+    const items = new Map(editorAttachments.map(item => [item.key, item]));
+    editorAttachments = keys.map(key => items.get(key));
+    queueMicrotask(renderEditorPreviews);
+  }, error => toast(error.message, true));
 }
+document.addEventListener('keydown', event => {
+  const handle = event.target.closest('.preview-handle');
+  if (!handle || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const from = editorAttachments.findIndex(item => item.key === handle.dataset.key);
+  const to = event.key === 'Home' ? 0 : event.key === 'End' ? editorAttachments.length - 1 : from + (['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1);
+  if (from < 0 || to < 0 || to >= editorAttachments.length || from === to) return;
+  const [item] = editorAttachments.splice(from, 1); editorAttachments.splice(to, 0, item);
+  renderEditorPreviews();
+  document.querySelector(`.preview-handle[data-key="${item.key}"]`)?.focus({ preventScroll: true });
+});
 function showDetail(id) {
   const entry = visibleEntries().find(e => e.id === id); if (!entry) return;
   openDialog(`<h2>${esc(entry.title || (entry.type === 'whisper' ? '给自己的一页' : '日常的一页'))}</h2><p class="dialog-description">${esc(user(entry.authorId).name)} · ${dateLabel(entry.occurredAt, true)}${entry.type === 'whisper' ? ' · 仅作者和管理员可见' : ''}</p><p class="detail-body">${esc(entry.content)}</p><section class="comments"><h3>${entry.type === 'whisper' ? '留在这一页的话' : '在这段回忆里说两句'}</h3>${entry.comments?.map(c => `<div class="comment-row">${avatar(user(c.authorId), true)}<div><strong>${esc(user(c.authorId).name)}</strong><p>${esc(c.content)}</p><time>${dateLabel(c.createdAt)}</time></div></div>`).join('') || '<p class="muted">还没有留言，写下你的感受吧。</p>'}</section><form id="comment-form" data-id="${esc(id)}"><label>${entry.type === 'whisper' ? '想留在这里的话' : '想对 TA 说'}<textarea name="content" rows="2" maxlength="2000" required placeholder="看到这段回忆，想起了什么？"></textarea></label><button class="primary" type="submit">留在这一页</button><p class="form-error" role="alert"></p></form>`, 'detail-dialog');
@@ -212,7 +237,9 @@ function showMedia(id, index = 0) {
 function info(title, text) { openDialog(`<h2>${title}</h2><div class="prose">${text}</div>`, 'info-dialog'); }
 function showUpdates() {
   const releases = [...releaseHistory].sort((a, b) => b.number - a.number);
-  openDialog(`<h2>系统更新信息</h2><p class="dialog-description">每一次打磨，都留一笔。</p><ol class="release-timeline">${releases.map(release => `<li><div class="release-marker num" aria-label="第 ${release.number} 次更新">${release.number}</div><article><div class="release-meta"><time datetime="${esc(release.date)}">${esc(release.date)}</time><span>${esc(release.version)}</span></div><h3>${esc(release.title)}</h3><ul>${release.changes.map(change => `<li>${esc(change)}</li>`).join('')}</ul></article></li>`).join('')}</ol><p class="release-footer">完整修改日志同步维护在 <a href="https://github.com/JJyuruyucheng/memory/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer">GitHub 仓库${icon('arrow')}</a></p>`, 'updates-dialog');
+  openDialog(`<h2 tabindex="-1">系统更新信息</h2><ol class="release-timeline">${releases.map((release, index) => `<li><div class="release-marker num" aria-label="第 ${release.number} 次更新">${release.number}</div><details class="release-details" ${index === 0 ? 'open' : ''}><summary><span class="release-meta"><time datetime="${esc(release.date)}">${esc(release.date)}</time><span>${esc(release.version)}</span>${index === 0 ? '<b>最新</b>' : ''}</span><span class="release-title">${esc(release.title)}</span>${icon('down', 'release-chevron')}</summary><ul>${release.changes.map(change => `<li>${esc(change)}</li>`).join('')}</ul></details></li>`).join('')}</ol><p class="release-footer"><a href="https://github.com/JJyuruyucheng/memory/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer">GitHub 完整修改日志${icon('arrow')}</a></p>`, 'updates-dialog');
+  const dialog = modalRoot.querySelector('dialog');
+  dialog.querySelector('h2').focus({ preventScroll: true }); dialog.scrollTop = 0;
 }
 async function exportData(scope) {
   toast('正在打包文字和媒体，请稍等…');
@@ -244,7 +271,7 @@ document.addEventListener('click', async event => {
       }
       case 'delete': await provider.deleteEntry(id); closeModal(); render(); toast('已移到回收站，可以恢复。'); break;
       case 'restore': await provider.restoreEntry(id); render(); toast('这段回忆已经回来了。'); break;
-      case 'remove-media': { const i = Number(index); i < editorMedia.length ? editorMedia.splice(i, 1) : editorFiles.splice(i - editorMedia.length, 1); renderEditorPreviews(); break; }
+      case 'remove-media': editorAttachments.splice(Number(index), 1); renderEditorPreviews(); break;
       case 'calendar-day': selectedDay = selectedDay === value ? '' : value; render(); break;
       case 'calendar-prev': case 'calendar-next': { const [y, m] = calendarCursor.split('-').map(Number), d = new Date(Date.UTC(y, m - 1 + (action === 'calendar-next' ? 1 : -1), 1)); calendarCursor = d.toISOString().slice(0, 7); render(); break; }
       case 'add-anniversary': document.querySelector('#anniversary-fields').insertAdjacentHTML('beforeend', anniversaryFields()); mountDatePickers(app); break;
@@ -265,6 +292,7 @@ document.addEventListener('click', async event => {
       case 'about-mode': info(CONFIG.mode === 'demo' ? '现在是演示空间' : '共同空间的可见范围', CONFIG.mode === 'demo' ? '<p>你看到的称呼、日期和回忆都是示例。可以切换示例视角、试写、添加照片、留言、收藏和导出。</p><p>这些操作只保存在当前浏览器，不会同步到另一台设备。此公开演示不接收真实密码，请使用非私密的测试素材。</p>' : '<p>日常随记和重要事件在共同空间内共享；悄悄话仅作者和管理员可见，对方无法查看。</p><p>管理员可读取和维护全部已发布内容。将共享记录改为悄悄话，无法即时收回此前的副本、缓存和已签发链接。</p><p>文字草稿留在当前会话，退出时清除。</p>'); break;
       case 'backup-help': info('把回忆妥善留住', '<p>内容导出包含文字和媒体，方便离线阅读；它不是服务器的完整备份。</p><p>正式部署还需备份 Memos 数据库、附件卷与配置，保存一份加密异地副本，并实际验证恢复。详细步骤见仓库 docs/deployment.md。</p>'); break;
       case 'credits': { const credits = await fetch('./assets/credits.json').then(r => r.json()); info('关于朝夕', `<p>朝夕，收藏两个人的日常与重要时刻。演示人物与故事均为虚构。</p><p>私密后端基于 <a href="https://github.com/usememos/memos" target="_blank" rel="noopener noreferrer">Memos（MIT）</a>；组件参考和许可记录见仓库文档。</p><h3>演示照片</h3>${credits.map(c => `<p><a href="${esc(c.source)}" target="_blank" rel="noopener noreferrer">${esc(c.title.replace('File:', ''))}</a><br>${esc(c.author)} · ${esc(c.license)}<br><small>${esc(c.changes)}</small></p>`).join('')}`); break; }
+      case 'reconnect': await reconnect(); break;
       case 'retry': location.reload(); break;
     }
   } catch (error) { button.disabled = false; if (!state.currentUser) { clearDrafts(); closeModal(false); render(); } toast(error.message || '暂时没能完成，请重试。', true); }
@@ -280,7 +308,7 @@ function persistDraft() {
     data.tags = (data.tags || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
     sessionStorage.setItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`, JSON.stringify(data));
     const status = document.querySelector('#draft-status');
-    if (status) status.textContent = '文字草稿已保留在当前会话';
+    if (status) status.textContent = '草稿已保存';
   } catch {}
 }
 
@@ -303,7 +331,7 @@ document.addEventListener('change', async event => {
     if (event.target.id === 'filter-author') { filters.authorId = event.target.value; render(); }
     if (event.target.id === 'filter-mood') { filters.mood = event.target.value; render(); }
     if (event.target.id === 'filter-month') { filters.month = event.target.value; render(); }
-    if (event.target.id === 'media-input') { editorFiles.push(...event.target.files); event.target.value = ''; renderEditorPreviews(); }
+    if (event.target.id === 'media-input') { editorAttachments.push(...[...event.target.files].map(file => ({ key: crypto.randomUUID(), kind: 'file', file }))); event.target.value = ''; renderEditorPreviews(); }
   } catch (error) { toast(error.message, true); }
 });
 document.addEventListener('submit', async event => {
@@ -315,7 +343,9 @@ document.addEventListener('submit', async event => {
     const data = Object.fromEntries(new FormData(form));
     if (form.id === 'entry-form') {
       const previous = editorId ? state.entries.find(e => e.id === editorId) : {};
-      const saved = await provider.saveEntry({ ...previous, title: data.title.trim(), content: data.content.trim(), type: data.type, occurredAt: `${data.occurredAt}:00+08:00`, mood: data.mood || null, tags: (data.tags || '').split(/[,，]/).map(s => s.trim()).filter(Boolean), media: editorMedia }, editorFiles);
+      let fileIndex = 0;
+      const mediaOrder = editorAttachments.map(item => item.kind === 'media' ? { id: item.media.id } : { fileIndex: fileIndex++ });
+      const saved = await provider.saveEntry({ ...previous, title: data.title.trim(), content: data.content.trim(), type: data.type, occurredAt: `${data.occurredAt}:00+08:00`, mood: data.mood || null, tags: (data.tags || '').split(/[,，]/).map(s => s.trim()).filter(Boolean), media: editorAttachments.filter(item => item.kind === 'media').map(item => item.media), mediaOrder }, editorAttachments.filter(item => item.kind === 'file').map(item => item.file));
       sessionStorage.removeItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`); closeModal(false); render(); toast(saved?.cleanupWarning || (editorId ? '细节已经好好收好了。' : '这一刻，已经留住了。'));
     } else if (form.id === 'settings-form') {
       if (state.currentUser.role !== 'admin') throw new Error('共同设置仅管理员可以修改。');
@@ -342,6 +372,7 @@ document.addEventListener('submit', async event => {
 });
 window.addEventListener('hashchange', () => { if (bootPending || (!provider && CONFIG.mode !== 'preview')) return; selectedDay = ''; filters.query = ''; filters.type = route() === 'events' ? 'event' : 'all'; render(); window.scrollTo({ top: 0 }); });
 window.addEventListener('memory:session-ended', () => {
+  recoveryEpoch++; reconnectAttempt = null; reconnectError = null; reconnectPending = false; bootPending = true;
   provider?.dispose?.(); state.currentUser = null; clearDrafts(); closeModal(false);
   app.innerHTML = '<main class="boot"><h1>登录状态已更新</h1><p>正在重新打开我们的空间…</p></main>';
 });
@@ -366,6 +397,29 @@ function renderLogin() {
   }
 }
 
+function renderReconnect(error = null) {
+  loginVerification?.destroy(); loginVerification = null;
+  app.innerHTML = `<main class="boot"><img src="./assets/mark.svg" alt="" width="48" height="48" /><h1>${error ? '暂时未能连接' : '正在恢复登录…'}</h1><p>${error ? esc(error.message || '请检查网络后重新连接。') : '正在确认本设备的登录状态。'}</p>${error ? `<button class="secondary" data-action="${provider ? 'reconnect' : 'retry'}">重新连接</button>` : ''}</main>`;
+}
+async function reconnect() {
+  if (reconnectAttempt) return reconnectAttempt;
+  const epoch = recoveryEpoch;
+  reconnectError = null; reconnectPending = true; renderReconnect();
+  const attempt = (async () => {
+    try { const restored = await provider.init(); if (epoch !== recoveryEpoch) return; state = restored; reconnectPending = false; render(); }
+    catch (error) { if (epoch === recoveryEpoch) showRestoreFailure(error); }
+    finally { if (reconnectAttempt === attempt) reconnectAttempt = null; }
+  })();
+  reconnectAttempt = attempt; return attempt;
+}
+function showRestoreFailure(error) {
+  reconnectPending = false;
+  if (['UNAUTHENTICATED', 'AUTH_CANCELLED'].includes(error.code) || error.status === 401) {
+    reconnectError = null; render();
+  } else { reconnectError = error; renderReconnect(error); }
+}
+
+const bootEpoch = recoveryEpoch;
 try {
   if (CONFIG.mode === 'preview') state = { mode: 'preview', currentUser: null, users: [], entries: [], settings: {} };
   else {
@@ -373,15 +427,16 @@ try {
     else if (CONFIG.mode === 'supabase') {
       const client = await (await import('./supabase-client.js')).createBrowserSupabaseClient(CONFIG);
       provider = (await import('./supabase-provider.js')).createSupabaseProvider({ ...CONFIG, client, onSessionChanged: ({ restore = true } = {}) => {
-        clearDrafts(); closeModal(false); render();
+        recoveryEpoch++; reconnectAttempt = null;
+        clearDrafts(); closeModal(false); reconnectError = null; reconnectPending = restore;
         // Restore only after Auth verifies the new identity. Never keep the old
         // account's rendered text or media while another tab changes accounts.
-        if (restore) setTimeout(async () => { try { state = await provider.init(); render(); } catch (error) { render(); toast(error.message, true); } }, 0);
+        if (restore) { const eventEpoch = recoveryEpoch; renderReconnect(); setTimeout(() => { if (eventEpoch === recoveryEpoch) reconnect(); }, 0); } else render();
       } });
     } else provider = (await import('./demo-provider.js')).createDemoProvider();
-    state = await provider.init();
+    const restored = await provider.init(); if (bootEpoch === recoveryEpoch) state = restored;
   }
-  render();
+  if (bootEpoch === recoveryEpoch) render();
 }
-catch (error) { app.innerHTML = `<main class="boot"><img src="./assets/mark.svg" alt="" width="48" height="48" /><h1>这页暂时没能打开</h1><p>${esc(error.message || '请检查网络或浏览器存储设置。')}</p><button class="secondary" data-action="retry">再试一次</button></main>`; }
+catch (error) { if (bootEpoch === recoveryEpoch) showRestoreFailure(error); }
 finally { bootPending = false; }

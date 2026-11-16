@@ -1,5 +1,6 @@
 import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, toUtcIso, validateEntry } from './domain.js';
 import { createSampleData } from './sample-data.js';
+import { planAttachmentOrder, resolveAttachmentOrder } from './attachment-order.js';
 
 const STORE = 'workspace';
 const KEY = 'snapshot';
@@ -177,7 +178,7 @@ export function createDemoProvider(options = {}) {
       return enqueue(async () => {
         const user = currentUser();
         const next = nextState();
-        if (!input || typeof input !== 'object') throw new Error('记录格式无效。');
+        if (!input || typeof input !== 'object' || !Array.isArray(files)) throw new Error('记录或附件格式无效。');
         const existing = input.id ? findEntry(next, input.id, { mutation: true }) : null;
         let keptMedia = existing?.media ?? [];
         if (input.media !== undefined) {
@@ -195,14 +196,17 @@ export function createDemoProvider(options = {}) {
         };
         const validation = validateEntry(candidate, files, options.config);
         if (!validation.valid) throw new Error(validation.errors.join('\n'));
+        const order = planAttachmentOrder(keptMedia, files.length, input.mediaOrder);
         const blobs = new Map(mediaBlobs);
+        const addedMedia = [];
         for (const file of files) {
           if (typeof file.arrayBuffer !== 'function') throw new Error('无法读取这个附件，请重新选择文件。');
           const id = uid('media');
           const blob = file instanceof Blob ? file : new Blob([await file.arrayBuffer()], { type: file.type });
           blobs.set(id, blob);
-          candidate.media.push({ id, type: ALLOWED_FILE_TYPES[file.type], url: '', name: String(file.name ?? '未命名附件'), size: blob.size });
+          addedMedia.push({ id, type: ALLOWED_FILE_TYPES[file.type], url: '', name: String(file.name ?? '未命名附件'), size: blob.size });
         }
+        candidate.media = resolveAttachmentOrder(order, keptMedia, addedMedia);
         Object.assign(candidate, {
           id: existing?.id ?? uid('entry'), authorId: existing?.authorId ?? user.id,
           title: candidate.title.trim(), content: candidate.content.trim(), occurredAt: toUtcIso(candidate.occurredAt),

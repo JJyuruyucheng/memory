@@ -91,7 +91,7 @@ export async function startServer({ port = 5173, source = false } = {}) {
         && SOURCE_EXTENSIONS.has(path.extname(decoded).toLowerCase())) {
         boundary = path.join(base, 'src');
         file = path.join(boundary, ...segments.slice(1));
-      } else if (['/assets/credits.json', '/assets/air-datepicker-3.6.0.js', '/assets/air-datepicker-3.6.0.css', '/assets/AIR-DATEPICKER-LICENSE.txt'].includes(decoded) || (supabaseOrigin && ['/assets/supabase-client-2.119.0.js', '/assets/SUPABASE-LICENSE.txt'].includes(decoded))) {
+      } else if (['/assets/credits.json', '/assets/air-datepicker-3.6.0.js', '/assets/air-datepicker-3.6.0.css', '/assets/AIR-DATEPICKER-LICENSE.txt', '/assets/sortable-1.15.7.js', '/assets/SORTABLE-LICENSE.txt'].includes(decoded) || (supabaseOrigin && ['/assets/supabase-client-2.119.0.js', '/assets/SUPABASE-LICENSE.txt'].includes(decoded))) {
         boundary = built ? path.join(base, 'assets') : path.join(ROOT, 'public', 'assets');
         file = path.join(boundary, segments.at(-1));
       } else if (segments[0] === 'assets' && segments.length > 1
@@ -103,7 +103,7 @@ export async function startServer({ port = 5173, source = false } = {}) {
       }
       if (!(await isRegularUnlinkedFile(file, boundary))) { fail(response, 404); return; }
       const info = await lstat(file);
-      const headers = { ...headersForBuild, 'Content-Type': MIME[path.extname(file).toLowerCase()], 'Accept-Ranges': 'bytes' };
+      const headers = { ...headersForBuild, 'Cache-Control': securityHeaders(supabaseOrigin, decoded)['Cache-Control'], 'Content-Type': MIME[path.extname(file).toLowerCase()], 'Accept-Ranges': 'bytes' };
       let start = 0;
       let end = info.size - 1;
       let status = 200;

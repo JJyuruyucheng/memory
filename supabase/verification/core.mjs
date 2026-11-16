@@ -18,7 +18,7 @@ const DIFFERENT_PNG = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQA
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HEX = /^[0-9a-f]{64}$/;
 const JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
-const CHECKS = ['identitiesAndProfiles', 'draftIsolation', 'crossAuthorUpdateDenied', 'pngPipeline', 'memberDownloads', 'anonymousDenied', 'attachedDeleteDenied', 'upsertDenied', 'nineImageLimit', 'atomicReplacement', 'adminPublishedUpdate', 'whisperNewIsolation', 'whisperChildIsolation', 'whisperMediaIsolation', 'convertedWhisperFreshAccessDenied', 'convertedWhisperColdAccessDenied', 'whisperAdminMaintain'];
+const CHECKS = ['identitiesAndProfiles', 'draftIsolation', 'crossAuthorUpdateDenied', 'pngPipeline', 'memberDownloads', 'anonymousDenied', 'attachedDeleteDenied', 'upsertDenied', 'nineImageLimit', 'atomicReplacement', 'attachmentReorder', 'mixedAttachmentOrder', 'adminPublishedUpdate', 'whisperNewIsolation', 'whisperChildIsolation', 'whisperMediaIsolation', 'convertedWhisperFreshAccessDenied', 'convertedWhisperColdAccessDenied', 'whisperAdminMaintain'];
 const CACHE_STATUSES = new Set(['HIT','MISS','DYNAMIC','EXPIRED','REVALIDATED','UPDATING','BYPASS','STALE','NONE']);
 function downloadObservation(value) {
   const status = value.headers.get('cf-cache-status')?.toUpperCase() ?? null;
@@ -361,15 +361,22 @@ export function createVerificationHandler(policy, dependencies = {}) {
       const upsert = await api(storagePath(original[0].path), { username: 'xbl', method: 'POST', binary: true, body: DIFFERENT_PNG, extra: { 'x-upsert': 'true' } });
       check(!upsert.ok && [400, 401, 403, 409].includes(upsert.status), 'ATTACHED_UPSERT_ALLOWED');
       await assertPng(original[0].path, 'xbl'); metrics.checks.upsertDenied = true;
+      const reversed = original.map(value => value.id).reverse();
+      await publish(a, reversed);
+      const reordered = await data(query('media', { entryId: `eq.${a.id}`, attached: 'eq.true', select: 'id,position', order: 'position.asc' }), { username: 'll' }, 'ATTACHMENT_REORDER_FAILED');
+      check(Array.isArray(reordered) && reordered.length === reversed.length && reordered.every((value, index) => value.id === reversed[index] && value.position === index), 'ATTACHMENT_REORDER_FAILED'); metrics.checks.attachmentReorder = true;
       const replacement = await upload(a), current = await entry(a, 'xbl');
       const tooMany = await api('/rest/v1/rpc/publish_entry', { username: 'xbl', method: 'POST', body: { p_entry_id: a.id, p_media_ids: [...original.map(value => value.id), replacement.id], p_expected_updated_at: current.updatedAt } });
       check(!tooMany.ok && [400, 409, 422].includes(tooMany.status), 'TENTH_IMAGE_ALLOWED');
       const beforeReplacement = await data(query('media', { entryId: `eq.${a.id}`, attached: 'eq.true', select: 'id' }), { username: 'xbl' }, 'NINE_IMAGE_CHECK_FAILED');
       check(Array.isArray(beforeReplacement) && beforeReplacement.length === 9 && original.every(value => beforeReplacement.some(item => item.id === value.id)), 'NINE_IMAGE_CHECK_FAILED'); metrics.checks.nineImageLimit = true;
-      await publish(a, [...original.slice(1).map(value => value.id), replacement.id]);
+      const mixedOrder = [...original.slice(1, 5).map(value => value.id).reverse(), replacement.id, ...original.slice(5).map(value => value.id).reverse()];
+      await publish(a, mixedOrder);
       const afterReplacement = await data(query('media', { entryId: `eq.${a.id}`, attached: 'eq.true', select: 'id' }), { username: 'll' }, 'REPLACEMENT_FAILED');
       check(Array.isArray(afterReplacement) && afterReplacement.length === 9 && afterReplacement.some(value => value.id === replacement.id) && !afterReplacement.some(value => value.id === original[0].id), 'REPLACEMENT_FAILED');
       await assertPng(replacement.path, 'll'); metrics.checks.atomicReplacement = true;
+      const mixedRows = await data(query('media', { entryId: `eq.${a.id}`, attached: 'eq.true', select: 'id,position', order: 'position.asc' }), { username: 'memory-admin' }, 'MIXED_ATTACHMENT_ORDER_FAILED');
+      check(Array.isArray(mixedRows) && mixedRows.length === mixedOrder.length && mixedRows.every((value, index) => value.id === mixedOrder[index] && value.position === index), 'MIXED_ATTACHMENT_ORDER_FAILED'); metrics.checks.mixedAttachmentOrder = true;
       const adminUpdate = one(await data(query('entries', { id: `eq.${a.id}` }), { username: 'memory-admin', method: 'PATCH', extra: { Prefer: 'return=representation' }, body: { title: `${marker}:admin` } }, 'ADMIN_UPDATE_FAILED'), 'ADMIN_UPDATE_FAILED');
       check(adminUpdate.id === a.id && adminUpdate.authorId === a.authorId && adminUpdate.title === `${marker}:admin` && (await entry(a, 'll')).title === `${marker}:admin`, 'ADMIN_UPDATE_FAILED'); metrics.checks.adminPublishedUpdate = true;
 

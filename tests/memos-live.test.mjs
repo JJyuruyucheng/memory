@@ -77,6 +77,10 @@ test('official Memos 26.11.1: accounts, SPACE, media, comments, reactions, expor
     const entry = await first.saveEntry({ type: 'event', title: '真实 API 测试', content: '<script>untrusted text</script>\n今天很开心。', occurredAt: '2026-11-15T03:00:00Z', mood: 'happy', tags: ['测试'] }, [png]);
     assert.equal(state.entries, entriesReference); assert.equal(state.entries[0].id, entry.id);
     assert.equal(entry.media.length, 1); assert.ok(entry.media[0].url.startsWith('blob:'));
+    const mixed = await first.saveEntry({ id: entry.id, mediaOrder: [{ fileIndex: 1 }, { id: entry.media[0].id }, { fileIndex: 0 }] }, [new File([png], '新附件一.png', { type: png.type }), new File([png], '新附件二.png', { type: png.type })]);
+    assert.deepEqual(mixed.media.map(value => value.name), ['新附件二.png', '微小图片.png', '新附件一.png']);
+    await first.init();
+    assert.deepEqual(state.entries[0].media.map(value => value.id), mixed.media.map(value => value.id), 'real API preserves ordered attachments on a fresh load');
     const second = makeProvider(); const secondState = await second.login(members[1].username, members[1].password, captcha());
     assert.equal(secondState.entries[0].content, '<script>untrusted text</script>\n今天很开心。');
     await assert.rejects(second.saveEntry({ ...secondState.entries[0], content: '试图改对方记录' }), error => error.status === 403);

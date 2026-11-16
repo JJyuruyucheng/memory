@@ -55,6 +55,25 @@ function fixture(extra = {}) {
 
 const draft = (extra = {}) => ({ type: 'note', title: '', content: '新增记录', occurredAt: '2026-11-16', mood: null, tags: [], ...extra });
 
+test('mixed attachment order and exact bytes survive reopening; invalid plans never commit', async () => {
+  const { provider, options } = fixture(); await provider.init();
+  const image = (name, body) => new File([body], name, { type: 'image/png' });
+  const original = await provider.saveEntry(draft(), [image('a.png', 'a'), image('b.png', 'b')]);
+  const [a, b] = original.media;
+  const saved = await provider.saveEntry({ id: original.id, mediaOrder: [{ fileIndex: 1 }, { id: b.id }, { fileIndex: 0 }, { id: a.id }] }, [image('c.png', 'c'), image('d.png', 'd')]);
+  assert.deepEqual(saved.media.map(value => value.name), ['d.png', 'b.png', 'c.png', 'a.png']);
+  const reordered = await provider.saveEntry({ id: original.id, mediaOrder: saved.media.map(value => ({ id: value.id })).reverse() });
+  assert.deepEqual(reordered.media.map(value => value.name), ['a.png', 'c.png', 'b.png', 'd.png']);
+  for (const mediaOrder of [[{ id: 'stolen' }], [{ id: a.id }, { id: a.id }, { id: b.id }, { fileIndex: 0 }]]) {
+    await assert.rejects(provider.saveEntry({ id: original.id, content: 'must not persist', mediaOrder }), /附件顺序无效/);
+  }
+  const reopened = createDemoProvider(options), state = await reopened.init();
+  assert.deepEqual(state.entries.find(value => value.id === saved.id).media.map(value => value.name), ['a.png', 'c.png', 'b.png', 'd.png']);
+  const exported = JSON.parse(await (await reopened.exportData()).text()).entries.find(value => value.id === saved.id);
+  assert.equal(exported.content, '新增记录');
+  assert.deepEqual(exported.media.map(value => atob(value.data)), ['a', 'c', 'b', 'd']);
+});
+
 test('text and real Blob attachments survive opening a fresh provider; export embeds exact bytes', async () => {
   const { provider, options } = fixture();
   const state = await provider.init();

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { securityHeaders } from './security-headers.mjs';
+import { cloudflareHeaders } from './security-headers.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const checkProcess = promisify(execFile);
@@ -14,7 +14,7 @@ const ASSET_EXTENSIONS = new Set([
   '.mp4', '.webm', '.mov', '.woff', '.woff2', '.ttf', '.otf', '.mp3', '.ogg', '.wav',
 ]);
 const REQUIRED_FILES = [
-  'index.html', 'src/main.js', 'src/config.js', 'src/demo-provider.js',
+  'index.html', 'src/boot.js', 'src/main.js', 'src/config.js', 'src/demo-provider.js',
   'src/memos-provider.js', 'src/domain.js', 'src/icons.js', 'src/sample-data.js',
   'src/style.css', 'src/components.css', 'public/assets/credits.json', 'public/assets/mark.svg',
 ];
@@ -179,6 +179,15 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
     if (createHash('sha256').update(bytes).digest('hex') !== item.sha256) throw new Error('日期组件完整性检查失败。');
     pickerAssets.push({ file: item.file, bytes });
   }
+  const sorterLock = JSON.parse(await readFile(new URL('../vendor/sortable.lock.json', import.meta.url), 'utf8'));
+  if (sorterLock.name !== 'sortablejs' || sorterLock.version !== '1.15.7' || sorterLock.files.length !== 2) throw new Error('附件排序组件锁定清单不匹配。');
+  const sorterAssets = [];
+  for (const item of sorterLock.files) {
+    if (!/^public\/assets\/(sortable-1\.15\.7\.js|SORTABLE-LICENSE\.txt)$/.test(item.file)) throw new Error('附件排序组件路径不在白名单。');
+    const bytes = await readFile(await requireFile(root, item.file));
+    if (createHash('sha256').update(bytes).digest('hex') !== item.sha256) throw new Error('附件排序组件完整性检查失败。');
+    sorterAssets.push({ file: item.file, bytes });
+  }
 
   // Validate before touching a previous build, so failed source checks preserve it.
   await preflight(root, excluded);
@@ -210,11 +219,11 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
   // This one attribution manifest is the only JSON allowed into the static site.
   await writeFile(path.join(dist, 'assets', 'credits.json'), await readFile(path.join(root, 'public', 'assets', 'credits.json')));
   for (const item of pickerAssets) await writeFile(path.join(dist, 'assets', path.basename(item.file)), item.bytes);
+  for (const item of sorterAssets) await writeFile(path.join(dist, 'assets', path.basename(item.file)), item.bytes);
   if (sdk) {
     await writeFile(path.join(dist, 'assets', 'supabase-client-2.119.0.js'), sdk);
     await writeFile(path.join(dist, 'assets', 'SUPABASE-LICENSE.txt'), await readFile(path.join(root, 'vendor', 'SUPABASE-LICENSE')));
-    const headers = securityHeaders(supabase.supabaseUrl);
-    await writeFile(path.join(dist, '_headers'), `/*\n${Object.entries(headers).map(([key, value]) => `  ${key}: ${value}`).join('\n')}\n`);
+    await writeFile(path.join(dist, '_headers'), cloudflareHeaders(supabase.supabaseUrl));
   }
 
   // Explicit values prevent build-time secrets or an arbitrary API URL entering the bundle.

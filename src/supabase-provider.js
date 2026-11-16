@@ -1,4 +1,5 @@
 import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, toUtcIso, validateEntry } from './domain.js';
+import { planAttachmentOrder, resolveAttachmentOrder } from './attachment-order.js';
 
 // Inject the official supabase-js client with detectSessionInUrl:false; bounded
 // session persistence belongs to its storage adapter, not this data provider.
@@ -86,8 +87,9 @@ export function createSupabaseProvider(config = {}) {
   }
   function sdkError(error, fallback = '云端请求未完成，请检查网络后刷新核对。') {
     const status = Number(error?.status || error?.statusCode || 0), code = String(error?.code || '');
+    if (error?.name === 'AuthRetryableFetchError' || status === 408 || status >= 500) return new SupabaseProviderError(fallback, 'NETWORK', status);
     if (status === 401 || ['PGRST301', 'PGRST302', 'bad_jwt', 'session_not_found', 'refresh_token_not_found'].includes(code)) {
-      mayRestore = false; clearLocal(); return new SupabaseProviderError('登录已失效，请重新登录。', 'UNAUTHENTICATED', 401);
+      changeIdentity(null, false); return new SupabaseProviderError('登录已失效，请重新登录。', 'UNAUTHENTICATED', 401);
     }
     if (status === 403 || code === '42501') return new SupabaseProviderError('当前账号没有执行此操作的权限。', 'FORBIDDEN', 403);
     if (status === 429) return new SupabaseProviderError('请求过于频繁，请稍后再试。', 'RATE_LIMITED', 429);
@@ -224,6 +226,9 @@ export function createSupabaseProvider(config = {}) {
     if (!validation.valid) throw new SupabaseProviderError(validation.errors.join('\n'), 'VALIDATION');
     if (kept.length + files.length > 10) throw new SupabaseProviderError('每条记录最多保存 10 个附件，其中图片最多 9 张。', 'VALIDATION');
     if (files.some(file => !(file instanceof Blob) || typeof file.arrayBuffer !== 'function')) throw new SupabaseProviderError('无法读取附件，请重新选择文件。', 'VALIDATION');
+    let order;
+    try { order = planAttachmentOrder(kept, files.length, input.mediaOrder); }
+    catch (error) { throw new SupabaseProviderError(error.message, 'VALIDATION'); }
     const removals = existing?.media.filter(value => !kept.some(item => item.id === value.id)) ?? [];
     if (existing?.type === 'whisper' && candidate.type !== 'whisper' && (removals.length || files.length)) throw new SupabaseProviderError('请先保留悄悄话类型保存附件改动，再改为共享类型。', 'PRIVATE_MEDIA_CHANGE');
     const patch = { type: candidate.type, title: candidate.title.trim(), content: candidate.content.trim(), occurredAt: toUtcIso(candidate.occurredAt), mood: candidate.mood, tags: [...new Set(candidate.tags.map(value => value.trim()).filter(Boolean))] };
@@ -246,7 +251,8 @@ export function createSupabaseProvider(config = {}) {
     // the complete selection atomically, so replacing the ninth image never
     // destroys an old original just to make room for a pending upload.
     publicationAttempted = true;
-    const published = await result(query(client.rpc('publish_entry', { p_entry_id: entryId, p_media_ids: [...kept.map(value => value.id), ...addedMedia.map(value => value.id)], p_expected_updated_at: row.updatedAt })), expected);
+    const ordered = resolveAttachmentOrder(order, kept, addedMedia);
+    const published = await result(query(client.rpc('publish_entry', { p_entry_id: entryId, p_media_ids: ordered.map(value => value.id), p_expected_updated_at: row.updatedAt })), expected);
     if (published?.id !== entryId || published.status !== 'published') throw invalid();
     let cleanupPending = false;
     for (const old of removals) {
@@ -321,7 +327,16 @@ export function createSupabaseProvider(config = {}) {
         return loadState(expected, bindIdentity(data.user.id, expected));
       })();
       const attempt = { generation: expected, promise: pending }; initAttempt = attempt;
-      try { return await pending; } catch (error) { if (expected === generation) { mayRestore = false; clearLocal(); } throw error; }
+      try { return await pending; } catch (error) {
+        if (expected === generation) {
+          // A phone returning from the background may still be reconnecting.
+          // Keep its valid lease available for retry, while discarding every
+          // partially hydrated row/Blob until the server verifies it again.
+          const retryable = ['NETWORK', 'RATE_LIMITED'].includes(error.code);
+          clearLocal(); mayRestore = retryable;
+        }
+        throw error;
+      }
       finally { if (initAttempt === attempt) initAttempt = null; }
     },
     async login(username, password, captchaToken) {
@@ -345,7 +360,8 @@ export function createSupabaseProvider(config = {}) {
         const ownProfile = await result(query(client.from('profiles').select('*').eq('id', userId).maybeSingle()), attempt.generation, { allowNull: true });
         if (!ownProfile || ownProfile.id !== userId || profile(ownProfile).username !== loginUsername) throw new SupabaseProviderError('账号、密码或安全验证未通过。', 'LOGIN_FAILED', 401);
         const loaded = await loadState(attempt.generation, userId);
-        client.auth.startAutoRefresh?.(); return loaded;
+        if (client.memorySession?.resume) await client.memorySession.resume(); else client.auth.startAutoRefresh?.();
+        return loaded;
       } catch (error) {
         if (attempt.generation === generation) {
           clearLocal();
@@ -357,7 +373,8 @@ export function createSupabaseProvider(config = {}) {
     },
     logout() {
       if (logoutPromise) return logoutPromise;
-      mayRestore = false; const pendingAuth = [...authTasks]; clearLocal(); client.auth.stopAutoRefresh?.();
+      mayRestore = false; const pendingAuth = [...authTasks]; clearLocal();
+      if (client.memorySession?.pause) client.memorySession.pause(); else client.auth.stopAutoRefresh?.();
       const pending = (async () => {
         // GoTrue owns an in-memory session too. Wait for unabortable sign-in or
         // refresh calls, then sign out, so their late responses cannot retain it.
@@ -387,6 +404,6 @@ export function createSupabaseProvider(config = {}) {
     }),
     exportData: (scope = 'all') => enqueue(expected => exportData(scope, expected)),
     refresh: () => enqueue(expected => loadState(expected, state.currentUser.id)),
-    dispose() { disposed = true; mayRestore = false; clearLocal(); client.auth.stopAutoRefresh?.(); subscription?.data?.subscription?.unsubscribe(); },
+    dispose() { disposed = true; mayRestore = false; clearLocal(); if (client.memorySession?.dispose) client.memorySession.dispose(); else client.auth.stopAutoRefresh?.(); subscription?.data?.subscription?.unsubscribe(); },
   };
 }

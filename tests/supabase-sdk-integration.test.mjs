@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createContext, runInContext } from 'node:vm';
 import { createRememberedSessionStorage, REMEMBER_FOR_MS } from '../src/session-storage.js';
 import { createServiceFetch } from '../src/service-fetch.js';
+import { createBrowserAuthLifecycle } from '../src/auth-lifecycle.js';
 
 // Exercise the exact locally shipped SDK, rather than another SDK-shaped mock.
 // Every transport is local and synthetic; this test never contacts Supabase.
@@ -99,4 +100,61 @@ test('shipped SDK restores a fresh client, refreshes within the original lease, 
   } finally {
     for (const client of clients) await client.auth.stopAutoRefresh();
   }
+});
+
+test('the shipped SDK refreshes an expired token after a suspended tab returns, surviving a transient Auth 503 without extending its lease', async () => {
+  let clock = Date.now(), refreshRequests = 0;
+  const values = new Map(), browser = new EventTarget(), document = new EventTarget(), navigator = { onLine: true };
+  document.visibilityState = 'hidden';
+  const browserStorage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
+  const storage = createRememberedSessionStorage({ storage: browserStorage, key: KEY, now: () => clock });
+  const user = { id: USER_ID, aud: 'authenticated', role: 'authenticated', email: 'synthetic@memory.invalid' };
+  const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const session = serial => {
+    const expires_at = Math.floor(clock / 1000) + 3600;
+    return { access_token: `${encode({ alg: 'HS256' })}.${encode({ sub: USER_ID, exp: expires_at, serial })}.synthetic`, refresh_token: `synthetic-idle-refresh-${serial}`, token_type: 'bearer', expires_at, expires_in: 3600, user };
+  };
+  storage.beginSignIn(); storage.setItem(KEY, JSON.stringify(session(1)));
+  const deadline = JSON.parse(values.get(KEY)).expiresAt;
+  const localFetch = async (input, init = {}) => {
+    const url = new URL(input instanceof Request ? input.url : input);
+    assert.equal(url.origin, ORIGIN);
+    if (url.pathname === '/auth/v1/token') {
+      refreshRequests++;
+      assert.equal(new URLSearchParams(url.search).get('grant_type'), 'refresh_token');
+      assert.equal(JSON.parse(init.body).refresh_token, 'synthetic-idle-refresh-1');
+      if (refreshRequests === 1) return Response.json({ message: 'synthetic brief outage' }, { status: 503 });
+      return Response.json(session(2));
+    }
+    if (url.pathname === '/auth/v1/user') return Response.json(user);
+    throw Error(`Unexpected local SDK request: ${url.pathname}`);
+  };
+  class DeviceDate extends Date { constructor(...args) { super(...(args.length ? args : [clock])); } static now() { return clock; } }
+  class NoNetworkWebSocket { constructor() { throw Error('No external sockets permitted'); } }
+  // Browser-shaped globals exercise the real SDK's visibility integration.
+  const context = createContext({
+    console: { ...console, error() {}, warn() {} }, Date: DeviceDate,
+    URL, URLSearchParams, Request, Response, Headers, Blob, AbortController, AbortSignal, DOMException,
+    TextEncoder, TextDecoder, crypto, atob, btoa, setTimeout, clearTimeout, setInterval, clearInterval,
+    queueMicrotask, WebSocket: NoNetworkWebSocket, fetch: localFetch,
+    window: browser, document, navigator,
+  });
+  runInContext(SDK_SOURCE, context, { filename: 'shipped-supabase-sdk.js' });
+  const client = context.supabase.createClient(ORIGIN, 'sb_publishable_synthetic', {
+    auth: { storage, storageKey: KEY, persistSession: true, detectSessionInUrl: false, autoRefreshToken: true },
+    global: { fetch: createServiceFetch(ORIGIN, { fetchImpl: localFetch }) },
+  });
+  const lifecycle = createBrowserAuthLifecycle(client.auth, { windowTarget: browser, documentTarget: document, navigatorTarget: navigator });
+  try {
+    assert.equal((await client.auth.getSession()).data.session.user.id, USER_ID);
+    await lifecycle.pause();
+    clock += 2 * 3600_000; // The browser slept beyond the access JWT's lifetime.
+    document.visibilityState = 'visible'; await lifecycle.resume();
+    const restored = await client.auth.getSession();
+    assert.equal(restored.error, null); assert.equal(restored.data.session.refresh_token, 'synthetic-idle-refresh-2');
+    assert.equal(refreshRequests, 2, 'the official SDK retries a transient Auth failure');
+    assert.equal((await client.auth.getUser()).data.user.id, USER_ID);
+    assert.equal(JSON.parse(values.get(KEY)).expiresAt, deadline);
+    assert.equal(JSON.parse(JSON.parse(values.get(KEY)).session).refresh_token, 'synthetic-idle-refresh-2');
+  } finally { await lifecycle.dispose(); await client.auth.dispose(); }
 });

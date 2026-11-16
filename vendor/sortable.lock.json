@@ -1,0 +1,16 @@
+{
+  "license": "MIT",
+  "version": "1.15.7",
+  "name": "sortablejs",
+  "files": [
+    {
+      "sha256": "bf4241bc73fef7f11c59a283a69fe8051cdd31c6d8ff5a2b9ba219e7831fcf76",
+      "file": "public/assets/sortable-1.15.7.js"
+    },
+    {
+      "sha256": "199071e94a4d6ba6f634acd6020842efc55161b9fb639a432c50da687781219d",
+      "file": "public/assets/SORTABLE-LICENSE.txt"
+    }
+  ],
+  "source": "https://github.com/SortableJS/Sortable/tree/1.15.7"
+}

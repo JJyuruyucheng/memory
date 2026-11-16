@@ -150,6 +150,36 @@ test('missing client fails closed; anonymous init loads no private tables', asyn
   assert.deepEqual(f.calls.map(value => value.action), ['getSession']);
 });
 
+test('transient session/profile/data failures keep restoration retryable without a password login', async () => {
+  for (const stage of ['getSession', 'getUser', 'tables']) {
+    let disconnected = true;
+    const f = fixture({ initialSessionUserId: U1, before: async call => {
+      if (disconnected && (stage === 'tables' ? call.kind === 'table' && call.table === 'entries' : call.action === stage)) throw Error('synthetic offline connection');
+    } });
+    await assert.rejects(f.provider.init(), error => error.code === 'NETWORK');
+    assert.equal(f.session().user.id, U1, 'temporary transport errors do not sign out the official SDK');
+    disconnected = false;
+    const restored = await f.provider.init();
+    assert.equal(restored.currentUser.id, U1); assert.equal(restored.entries.length, 1);
+    assert.ok(!f.calls.some(call => ['login', 'logout'].includes(call.action)), `${stage} recovers by server verification rather than a password/CAPTCHA round trip`);
+  }
+});
+
+test('retryable native Auth/server outages can recover, but a confirmed rejected session stays closed', async () => {
+  for (const error of [{ name: 'AuthRetryableFetchError', status: 0 }, { name: 'AuthRetryableFetchError', status: 503 }, { status: 502 }, { status: 429 }]) {
+    const f = fixture({ initialSessionUserId: U1 }), original = f.client.auth.getUser;
+    f.client.auth.getUser = async () => ({ data: null, error });
+    await assert.rejects(f.provider.init(), failure => ['NETWORK', 'RATE_LIMITED'].includes(failure.code));
+    f.client.auth.getUser = original;
+    assert.equal((await f.provider.init()).currentUser.id, U1);
+  }
+  const changes = [], rejected = fixture({ initialSessionUserId: U1, onSessionChanged: change => changes.push(change) });
+  rejected.client.auth.getUser = async () => ({ data: null, error: { status: 401, code: 'session_not_found' } });
+  await assert.rejects(rejected.provider.init(), error => error.code === 'UNAUTHENTICATED');
+  assert.deepEqual(changes, [{ restore: false }], 'a confirmed server rejection immediately removes the previous recovery UI');
+  assert.equal((await rejected.provider.init()).currentUser, null, 'a genuine authentication rejection never retries into private state');
+});
+
 test('login uses native captchaToken and fixed email mapping, ignores user_metadata roles, and preserves mutable state', async () => {
   const f = fixture(); const state = await f.provider.init(), users = state.users, entries = state.entries, settings = state.settings;
   assert.equal(await f.signIn(), state);
@@ -403,6 +433,31 @@ test('nine images plus one video are accepted at the ten-attachment boundary', a
   const saved = await f.provider.saveEntry(input(), [...Array.from({ length: 9 }, (_, index) => file(`${index}.png`, `image-${index}`)), file('clip.mp4', 'video', 'video/mp4')]);
   assert.equal(saved.media.length, 10); assert.equal(saved.media.filter(value => value.type === 'image').length, 9);
   assert.equal(state.entries.find(value => value.id === saved.id), saved);
+});
+
+test('saved and new files publish in a validated mixed order that survives reloading', async () => {
+  const f = fixture({ initialMedia: true }); await f.signIn();
+  const saved = await f.provider.saveEntry({ id: ENTRY, mediaOrder: [{ fileIndex: 1 }, { id: MEDIA }, { fileIndex: 0 }] }, [file('first.png', 'one'), file('second.png', 'two')]);
+  assert.deepEqual(saved.media.map(value => value.name), ['second.png', 'photo.png', 'first.png']);
+  assert.deepEqual(f.calls.filter(value => value.name === 'publish_entry').at(-1).args.p_media_ids, saved.media.map(value => value.id));
+  await f.provider.init();
+  const state = await f.provider.init();
+  assert.deepEqual(state.entries[0].media.map(value => value.name), ['second.png', 'photo.png', 'first.png']);
+  const reordered = await f.provider.saveEntry({ id: ENTRY, mediaOrder: saved.media.map(value => ({ id: value.id })).reverse() });
+  assert.deepEqual(reordered.media.map(value => value.name), ['first.png', 'photo.png', 'second.png']);
+});
+
+test('invalid media order rejects before writes and same-set whisper reordering may be explicitly shared', async () => {
+  const f = fixture({ initialMedia: true }); f.tables.entries[0].type = 'whisper'; await f.signIn();
+  const privateEntry = await f.provider.saveEntry({ id: ENTRY }, [file('second-private.png')]);
+  const start = f.calls.length;
+  for (const mediaOrder of [[{ id: MEDIA }, { id: MEDIA }], [{ id: MEDIA }, { id: '20000000-0000-4000-8000-000000000099' }], [{ id: MEDIA }, { fileIndex: 0 }]]) {
+    await assert.rejects(f.provider.saveEntry({ id: ENTRY, type: 'note', content: 'must not write', mediaOrder }), error => error.code === 'VALIDATION');
+  }
+  assert.equal(f.calls.length, start);
+  assert.equal(f.tables.entries[0].type, 'whisper');
+  const shared = await f.provider.saveEntry({ id: ENTRY, type: 'note', mediaOrder: privateEntry.media.map(value => ({ id: value.id })).reverse() });
+  assert.equal(shared.type, 'note'); assert.equal(shared.media[1].id, MEDIA);
 });
 
 test('member ownership is enforced before mutation; admin settings and soft delete preserve row identity', async () => {

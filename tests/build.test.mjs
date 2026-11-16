@@ -30,6 +30,9 @@ test('Supabase 构建仅发送公共配置，验证 SDK 完整性，默认关闭
     assert.ok(!config.includes('must-not-ship'));
     const files = await readdir(output, { recursive: true });
     assert.ok(files.includes(path.join('assets', 'supabase-client-2.119.0.js')));
+    assert.ok(files.includes(path.join('assets', 'sortable-1.15.7.js')));
+    assert.ok(files.includes(path.join('assets', 'SORTABLE-LICENSE.txt')));
+    assert.ok(files.includes(path.join('src', 'boot.js')));
     assert.ok(!files.includes(path.join('assets', 'photo-coffee.jpg')));
     assert.ok(!files.includes(path.join('src', 'sample-data.js')));
     const headers = await readFile(path.join(output, '_headers'), 'utf8');
@@ -40,6 +43,12 @@ test('Supabase 构建仅发送公共配置，验证 SDK 完整性，默认关闭
     await assert.rejects(build({ rootDir: fixture, env: { ...env, MEMORY_AUTH_READY: 'true', MEMORY_TURNSTILE_SITE_KEY: '1x00000000000000000000AA' }, quiet: true }), /不能使用测试密钥/);
     await mkdir(path.join(fixture, 'dist'));
     await writeFile(path.join(fixture, 'dist', 'keep.txt'), 'last-good-build');
+    const sortableFile = path.join(fixture, 'public', 'assets', 'sortable-1.15.7.js');
+    const sortableBytes = await readFile(sortableFile);
+    await writeFile(sortableFile, 'tampered');
+    await assert.rejects(build({ rootDir: fixture, env, quiet: true }), /排序组件完整性检查失败/);
+    assert.equal(await readFile(path.join(fixture, 'dist', 'keep.txt'), 'utf8'), 'last-good-build');
+    await writeFile(sortableFile, sortableBytes);
     await writeFile(path.join(fixture, 'public', 'assets', 'supabase-client-2.119.0.js'), 'tampered');
     await assert.rejects(build({ rootDir: fixture, env, quiet: true }), /完整性检查失败/);
     assert.equal(await readFile(path.join(fixture, 'dist', 'keep.txt'), 'utf8'), 'last-good-build');
@@ -88,7 +97,7 @@ test('构建保留素材授权、限制 JSON，并在坏入口覆盖旧产物前
     await assert.rejects(build({ rootDir: fixture, env: DEMO, quiet: true }), /JavaScript 语法检查失败.*unreferenced\.js/);
     await rm(optional);
 
-    for (const required of ['src/main.js', 'src/demo-provider.js', 'src/memos-provider.js', 'src/components.css', 'public/assets/credits.json']) {
+    for (const required of ['src/boot.js', 'src/main.js', 'src/demo-provider.js', 'src/memos-provider.js', 'src/components.css', 'public/assets/credits.json']) {
       const file = path.join(fixture, required);
       const content = await readFile(file);
       await rm(file);

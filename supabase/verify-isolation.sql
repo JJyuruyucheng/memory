@@ -16,7 +16,7 @@ create temporary table memory_review_actors (label text primary key, id uuid not
 create temporary table memory_review_ids (label text primary key, id uuid not null default gen_random_uuid()) on commit drop;
 create temporary table memory_review_results (label text primary key, detail text not null default 'ok') on commit drop;
 create temporary table memory_review_media (label text primary key,id uuid not null,"storagePath" text not null) on commit drop;
-insert into memory_review_ids(label) values ('entry_a'),('entry_b'),('draft_a'),('limits_a'),('empty_a'),('publish_limit_a'),('whisper_a'),('whisper_b'),('whisper_draft');
+insert into memory_review_ids(label) values ('entry_a'),('entry_b'),('draft_a'),('limits_a'),('empty_a'),('publish_limit_a'),('whisper_a'),('whisper_b'),('whisper_draft'),('order_a');
 
 do $$
 declare profile_count integer; run_id uuid := gen_random_uuid();
@@ -224,6 +224,7 @@ select pg_temp.review_ok(memory_private.can_upload_object((select "storagePath" 
 select pg_temp.review_ok(memory_private.can_read_object((select "storagePath" from memory_review_media where label='image-1')),'author may inspect own staged object');
 select pg_temp.review_ok(not memory_private.can_upload_object((select "storagePath" || '/extra' from memory_review_media where label='image-1')),'unreserved object path denied');
 select pg_temp.review_error($q$update public.media set attached=true where id=(select id from pg_temp.memory_review_media where label='image-1')$q$,array['42501'],'client cannot attach media by direct table update');
+select pg_temp.review_error($q$update public.media set position=99 where id=(select id from pg_temp.memory_review_media where label='image-1')$q$,array['42501'],'client cannot forge media position by direct table update');
 select pg_temp.review_error($q$delete from public.media where id=(select id from pg_temp.memory_review_media where label='image-1')$q$,array['42501'],'client cannot discard media by direct table delete');
 select pg_temp.review_error($q$select public.reserve_media((select id from pg_temp.memory_review_ids where label='draft_a'),'bad.svg','image/svg+xml',1)$q$,array['22023'],'SVG MIME type rejected');
 select pg_temp.review_error($q$select public.reserve_media((select id from pg_temp.memory_review_ids where label='draft_a'),'zero.jpg','image/jpeg',0)$q$,array['22023'],'zero byte file rejected');
@@ -368,6 +369,24 @@ select pg_temp.review_ok((select count(*)=1 from public.entries where id=(select
 update public.entries set "deletedAt"=now() where id=(select id from memory_review_ids where label='whisper_a');
 select pg_temp.review_actor('b');
 select pg_temp.review_ok((select count(*)=0 from public.entries where id=(select id from memory_review_ids where label='whisper_a')),'recycle bin does not expose partner whisper');
+
+-- Verify the real publish function can compact a sparse staging range while
+-- respecting immediate UNIQUE(entryId,position). No Storage metadata is written
+-- and no fixture claims to be an uploaded file. Actual selected-file ordering
+-- additionally requires the bounded real-HTTP Storage verification probe.
+select pg_temp.review_actor('a');
+insert into public.entries(id,content) select id,'attachment-order-rollback-fixture' from memory_review_ids where label='order_a';
+do $$ declare reservation jsonb; item_number integer; begin
+  for item_number in 1..3 loop
+    reservation := public.reserve_media((select id from pg_temp.memory_review_ids where label='order_a'),'order-' || item_number || '.png','image/png',1);
+    insert into pg_temp.memory_review_media(label,id,"storagePath") values ('order-' || item_number,(reservation->>'id')::uuid,reservation->>'storagePath');
+  end loop;
+end; $$;
+select public.discard_media((select id from memory_review_media where label='order-1'));
+select pg_temp.review_ok((select array_agg(position order by position)=array[1,2] from public.media where "entryId"=(select id from memory_review_ids where label='order_a')),'ordering fixture contains a sparse positive range');
+select public.publish_entry((select id from memory_review_ids where label='order_a'),'{}'::uuid[],null);
+select pg_temp.review_ok((select array_agg(position order by position)=array[0,1] from public.media where "entryId"=(select id from memory_review_ids where label='order_a')),'publish compacts staging positions without immediate unique collision');
+select pg_temp.review_ok((select count(*)=2 and bool_and(status='pending' and not attached) from public.media where "entryId"=(select id from memory_review_ids where label='order_a')),'reordering does not publish staging attachments');
 
 reset role;
 select count(*) as passed_assertions,jsonb_agg(jsonb_build_object('test',label,'result',detail) order by label) as checks

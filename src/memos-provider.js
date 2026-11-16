@@ -1,4 +1,5 @@
 import { dayKey, toUtcIso, validateEntry } from './domain.js';
+import { planAttachmentOrder, resolveAttachmentOrder } from './attachment-order.js';
 
 // Memos 26.11.1 REST schema: https://github.com/usememos/memos/tree/26.11.1/proto/api
 // Tokens deliberately live only in this closure. The browser owns the HttpOnly refresh cookie.
@@ -320,7 +321,7 @@ export function createMemosProvider(config = {}) {
 
   async function saveEntry(input, files = [], generation) {
     requireUser(generation);
-    if (!input || typeof input !== 'object') throw new MemosError('记录格式无效。', 'VALIDATION');
+    if (!input || typeof input !== 'object' || !Array.isArray(files)) throw new MemosError('记录或附件格式无效。', 'VALIDATION');
     const existing = input.id ? await editable(input.id, generation) : null;
     requireUser(generation);
     const previous = existing ? decodeEntryContent(existing.content, existing.createTime) : {};
@@ -340,9 +341,13 @@ export function createMemosProvider(config = {}) {
       if (!attachment) throw new MemosError('附件不属于这条记录，请刷新后重试。', 'INVALID_MEDIA');
       return { name: attachment.name };
     }) : [];
+    let order;
+    try { order = planAttachmentOrder(candidate.media, files.length, input.mediaOrder); }
+    catch (error) { throw new MemosError(error.message, 'INVALID_MEDIA'); }
     if (previous.deletedAt) throw new MemosError('请先恢复回收站中的记录再编辑。', 'DELETED');
     const uploaded = []; for (const file of files) uploaded.push(await upload(file, generation));
-    const body = { content: encodeEntryContent({ ...candidate, title: candidate.title.trim(), content: candidate.content.trim(), occurredAt: toUtcIso(candidate.occurredAt), tags: [...new Set(candidate.tags.map(tag => tag.trim()).filter(Boolean))], deletedAt: null }), space: spaceName, visibility: 'SPACE', attachments: [...kept, ...uploaded.map(value => ({ name: value.name }))] };
+    const attachments = resolveAttachmentOrder(order, kept.map(value => ({ ...value, id: value.name })), uploaded.map(value => ({ name: value.name })));
+    const body = { content: encodeEntryContent({ ...candidate, title: candidate.title.trim(), content: candidate.content.trim(), occurredAt: toUtcIso(candidate.occurredAt), tags: [...new Set(candidate.tags.map(tag => tag.trim()).filter(Boolean))], deletedAt: null }), space: spaceName, visibility: 'SPACE', attachments: attachments.map(value => ({ name: value.name })) };
     const raw = existing
       ? await request(`${apiResource(existing.name, 'memos')}?updateMask=content,space,visibility,attachments`, { method: 'PATCH', body }, generation)
       : await request('/api/memos', { method: 'POST', body }, generation);
