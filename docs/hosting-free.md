@@ -44,7 +44,9 @@
 
 ## 实施顺序与验收
 
-Supabase 已连接，专用项目、迁移和 provider 已准备。Cloudflare 构建使用 [公开环境变量模板](../deploy/cloudflare.env.example)：构建命令 `node scripts/build.mjs`、产物目录 `dist`、Node 24。先以 `MEMORY_AUTH_READY=false` 发布空登录壳取得正式域名，再限定 Turnstile hostname，配置 Supabase Auth 原生 CAPTCHA，关闭公开注册/匿名及无关认证方式。官方连接目前不提供 Auth 配置更新接口，这些配置需要已登录的控制台完成；不提取连接的 OAuth/PAT 绕过。
+Supabase 已连接，专用项目、迁移和 provider 已准备。Cloudflare 当前构建命令为 `node scripts/build-cloudflare.mjs`，产物目录 `dist`，`.node-version` 固定 Node 24。它只读取 [明确的公共配置](../deploy/cloudflare.public.json)：项目地址、publishable key、Turnstile Site Key 和布尔 authReady；不接收环境里的后台密钥。这些值会进入浏览器，不是秘密。先以 authReady=false 发布空登录壳取得正式域名，再限定 Turnstile hostname，配置 Supabase Auth 原生 CAPTCHA，关闭公开注册/匿名及无关认证方式。官方连接目前不提供 Auth 配置更新接口，这些配置需要已登录的控制台完成；不提取连接的 OAuth/PAT 绕过。
+
+若独立使用 `node scripts/build.mjs`，仍可采用 [公开环境变量模板](../deploy/cloudflare.env.example)；不能混淆两个入口的配置来源。
 
 之后按 [数据库契约和初始化顺序](supabase-database-contract.md) 用官方 Auth Admin / Storage API 初始化固定三身份及私有桶，写入真实 UUID 白名单；真实验证码与权限实测完成后才打开数据库门及前端登录。需要的 Secret 仅进入可信服务端或平台配置，不发送到聊天或公开仓库。
 

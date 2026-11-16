@@ -32,3 +32,5 @@ jobs:
           MEMORY_MODE: preview
           MEMORY_SPACE: ''
           MEMORY_TARGET: pages
+      - name: Verify Cloudflare public deployment configuration
+        run: node scripts/build-cloudflare.mjs
