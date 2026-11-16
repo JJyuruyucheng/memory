@@ -14,6 +14,8 @@ Storage、业务行和会话清理均为 true。根任务 finally 关闭数据�
 
 先通过官方管理员 Auth API 确认仅存在三个已确认、非匿名的固定邮箱身份，并核对每个真实用户 JWT 读到的 `profiles` UUID、slot、username、role。缺少或多出身份立即停止，避免 `generateLink` 为不存在的 magic-link 用户自动建号。生成链接返回的 UUID 还会再次核对；验收窗口内不得并行修改 Auth 账号。
 
+`memory-admin` 是探针内部的管理员标识，Auth 邮箱别名保持 `memory-admin@memory.invalid`；当前网页登录名由受保护的 `profiles` 第 3 槽保存，不写入公开仓库。该槽必须匹配原 Auth UUID、保持 `role=admin`，用户名符合数据库格式且不同于 `xbl`、`ll`；前两槽的用户名与角色仍固定。
+
 使用管理员 `generate_link` →公开 `verify` → `GET /auth/v1/user` 得到官方签发的真实会话。**这是一条可信管理员测试通道，不是密码或 CAPTCHA 验收**；结果固定标注 `authMethod: admin-generated-magiclink`、`passwordCaptchaTested: false`。不请求邮件发送接口，不访问或转发 action link，不处理密码。
 
 业务 REST、RPC 和真实 Storage 断言都单独重建 `apikey: publishable key` 加对应用户 Bearer：

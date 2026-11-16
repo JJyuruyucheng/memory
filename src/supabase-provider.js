@@ -6,6 +6,7 @@ import { ALLOWED_FILE_TYPES, dayKey, toUtcIso, validateEntry } from './domain.js
 const MAX_FILE_BYTES = 50_000_000;
 const PAGE_SIZE = 500;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const USERNAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
 const DEFAULT_SETTINGS = { spaceName: '朝夕', subtitle: '把我们的日子，一页页留下来。', startDate: '', anniversaries: [] };
 const clone = value => structuredClone(value);
 
@@ -104,7 +105,7 @@ export function createSupabaseProvider(config = {}) {
     }
   }
   function profile(raw) {
-    if (!raw || ![1, 2, 3].includes(raw.slot) || !['member', 'admin'].includes(raw.role) || (raw.slot === 3) !== (raw.role === 'admin') || typeof raw.username !== 'string' || !Object.hasOwn(config.loginIdentities || {}, raw.username) || typeof raw.name !== 'string') throw invalid();
+    if (!raw || ![1, 2, 3].includes(raw.slot) || !['member', 'admin'].includes(raw.role) || (raw.slot === 3) !== (raw.role === 'admin') || typeof raw.username !== 'string' || !USERNAME.test(raw.username) || (raw.slot === 1 && raw.username !== 'xbl') || (raw.slot === 2 && raw.username !== 'll') || (raw.slot === 3 && ['xbl', 'll'].includes(raw.username)) || typeof raw.name !== 'string') throw invalid();
     return { id: id(raw.id), username: raw.username, name: raw.name, role: raw.role, color: String(raw.color || (raw.slot === 2 ? 'rose' : raw.slot === 3 ? 'stone' : 'sage')) };
   }
   function mediaRow(raw, entry, knownUsers) {
@@ -138,8 +139,7 @@ export function createSupabaseProvider(config = {}) {
     requireSession(expected);
     const [profiles, rows, comments, reactions, favorites, settingsRows, media] = results.map(value => value.value);
     if (profiles.length !== 3 || new Set(profiles.map(value => value.slot)).size !== profiles.length || new Set(profiles.map(value => value.username)).size !== profiles.length) throw invalid('共同空间的三个身份尚未完整配置。');
-    const identityOrder = Object.keys(config.loginIdentities || {});
-    const users = profiles.map(profile).sort((a, b) => identityOrder.indexOf(a.username) - identityOrder.indexOf(b.username)), knownUsers = new Set(users.map(value => value.id));
+    const users = [...profiles].sort((a, b) => a.slot - b.slot).map(profile), knownUsers = new Set(users.map(value => value.id));
     const currentUser = users.find(value => value.id === userId);
     if (!currentUser) throw new SupabaseProviderError('这个账号未获共同空间授权。', 'FORBIDDEN', 403);
     if (settingsRows.length !== 1 || settingsRows[0].id !== 1) throw invalid('共同空间尚未完成初始化。');
@@ -297,14 +297,21 @@ export function createSupabaseProvider(config = {}) {
       if (disposed) throw new SupabaseProviderError('记录服务已关闭，请重新打开页面。', 'AUTH_CANCELLED', 401);
       if (typeof username !== 'string' || !username.trim() || typeof password !== 'string' || !password) throw new SupabaseProviderError('请填写账号和密码。', 'VALIDATION');
       if (typeof captchaToken !== 'string' || !captchaToken) throw new SupabaseProviderError('请先完成安全验证。', 'CAPTCHA_REQUIRED');
-      const identity = config.loginIdentities?.[username.trim()];
+      const loginUsername = username.trim();
+      if (!USERNAME.test(loginUsername)) throw new SupabaseProviderError('账号、密码或安全验证未通过。', 'LOGIN_FAILED', 401);
+      // The administrator's private login name lives in its protected profile,
+      // not in the public build. GoTrue still uses the stable internal email.
+      const identity = config.loginIdentities?.[['xbl', 'll'].includes(loginUsername) ? loginUsername : 'memory-admin'];
       const email = typeof identity === 'string' ? identity : identity?.email;
       if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new SupabaseProviderError('账号、密码或安全验证未通过。', 'LOGIN_FAILED', 401);
       mayRestore = false; clearLocal(); const attempt = { generation }; loginAttempt = attempt;
       try {
         const data = await authResult(client.auth.signInWithPassword({ email, password, options: { captchaToken } }), attempt.generation);
         if (!data.session || !data.user) throw invalid();
-        const loaded = await loadState(attempt.generation, id(data.user.id));
+        const userId = id(data.user.id);
+        const ownProfile = await result(query(client.from('profiles').select('*').eq('id', userId).maybeSingle()), attempt.generation, { allowNull: true });
+        if (!ownProfile || ownProfile.id !== userId || profile(ownProfile).username !== loginUsername) throw new SupabaseProviderError('账号、密码或安全验证未通过。', 'LOGIN_FAILED', 401);
+        const loaded = await loadState(attempt.generation, userId);
         client.auth.startAutoRefresh?.(); return loaded;
       } catch (error) {
         if (attempt.generation === generation) {

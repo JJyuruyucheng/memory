@@ -19,7 +19,7 @@ const request = ({ method = 'POST', headers = {}, body = { run: true }, url = 'h
 
 // The mock verifies credential separation and cleanup scope at actual HTTP
 // boundaries. It is not evidence that hosted RLS or password CAPTCHA passed.
-function setup({ config = {}, env: extraEnv = {}, users = IDS.map((_, index) => user(index)), hook, after, profileMismatch = false, cleanupFails = false, randomUUID } = {}) {
+function setup({ config = {}, env: extraEnv = {}, users = IDS.map((_, index) => user(index)), hook, after, profileMismatch = false, profileOverrides = {}, cleanupFails = false, randomUUID } = {}) {
   const calls = [], entries = new Map([[EXISTING, { id: EXISTING, authorId: IDS[0], status: 'published', title: 'pre-existing', content: 'must remain unchanged', updatedAt: '2026-01-01T00:00:00Z' }]]), media = new Map(), objects = new Map([['unrelated/existing.png', PNG_BYTES]]), sessions = new Set(), loggedOut = [];
   let serial = 100, ticks = 0;
   const uuid = () => `10000000-0000-4000-8000-${String(++serial).padStart(12, '0')}`;
@@ -56,7 +56,7 @@ function setup({ config = {}, env: extraEnv = {}, users = IDS.map((_, index) => 
       sessions.delete(token(index)); loggedOut.push(index); result = new Response(null, { status: 204 });
     } else if (call.path === '/rest/v1/profiles') {
       assert.equal(privileged, false); assert.ok(index >= 0);
-      result = response(IDENTITIES.map((identity, i) => ({ id: profileMismatch && i === 0 ? EXISTING : IDS[i], slot: identity.slot, username: identity.username, role: identity.role })));
+      result = response(IDENTITIES.map((identity, i) => ({ id: profileMismatch && i === 0 ? EXISTING : IDS[i], slot: identity.slot, username: identity.username, role: identity.role, ...profileOverrides[i] })));
     } else if (call.path.startsWith('/rest/v1/rpc/')) {
       assert.equal(privileged, false, 'all RPC assertions must use a real user JWT'); assert.equal(headers.get('apikey'), PUBLIC); assert.ok(index >= 0);
       if (call.path.endsWith('/reserve_media')) {
@@ -192,6 +192,31 @@ test('profile UUID mismatch signs out all issued sessions before any fixture wri
   const f = setup({ profileMismatch: true }), result = await f.handler(request()), body = await result.json();
   assert.equal(body.error, 'PROFILE_IDENTITY_MISMATCH'); assert.equal(body.cleanup.complete, true);
   assert.equal(f.entries.size, 1); assert.equal(f.sessions.size, 0); assert.equal(f.loggedOut.length, 3);
+});
+
+test('a private renamed admin profile preserves the complete Auth UUID and RLS verification chain', async () => {
+  const f = setup({ profileOverrides: { 2: { username: 'private-admin-fixture' } } });
+  const result = await f.handler(request()), body = await result.json();
+  assert.equal(result.status, 200); assert.equal(body.ok, true);
+  assert.ok(Object.values(body.metrics.checks).every(Boolean)); assert.equal(body.cleanup.complete, true);
+  assert.equal(f.entries.size, 1); assert.equal(f.sessions.size, 0);
+  assert.ok(!JSON.stringify(body).includes('private-admin-fixture'));
+});
+
+test('renamed admin validation still rejects invalid profiles and changes to fixed member usernames', async () => {
+  for (const profileOverrides of [
+    { 2: { username: 'xbl' } }, { 2: { username: 'll' } }, { 2: { username: '' } },
+    { 2: { username: 'invalid admin' } }, { 2: { username: 'a'.repeat(41) } },
+    { 2: { username: 'private-admin-fixture', id: EXISTING } },
+    { 2: { username: 'private-admin-fixture', role: 'member' } },
+    { 2: { username: 'private-admin-fixture', slot: 2 } },
+    { 0: { username: 'renamed-member' } }, { 1: { username: 'renamed-member' } },
+  ]) {
+    const f = setup({ profileOverrides }), result = await f.handler(request()), body = await result.json();
+    assert.equal(body.error, 'PROFILE_IDENTITY_MISMATCH'); assert.equal(body.cleanup.complete, true);
+    assert.equal(f.entries.size, 1); assert.equal(f.sessions.size, 0); assert.equal(f.loggedOut.length, 3);
+    assert.ok(!f.calls.some(call => call.path === '/rest/v1/entries' && call.method === 'POST'));
+  }
 });
 
 test('failed binary upload still cleans pending reservations and any uploaded object through scoped admin cleanup', async () => {

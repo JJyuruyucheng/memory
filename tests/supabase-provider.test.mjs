@@ -85,7 +85,7 @@ function fixture({ before = async () => {}, author = U1, initialMedia = false, p
         const call = { kind: 'auth', action: 'login', credentials }; calls.push(call); await before(call);
         const username = Object.keys(identities).find(key => identities[key] === credentials.email);
         if (!username || credentials.password !== 'test-password' || !credentials.options?.captchaToken) return { data: null, error: { status: 400, code: 'invalid_credentials' } };
-        const profile = tables.profiles.find(value => value.username === username);
+        const profile = tables.profiles.find(value => value.slot === ({ xbl: 1, ll: 2, 'memory-admin': 3 })[username]);
         session = { access_token: 'never-export-this-jwt', refresh_token: 'never-export-this-refresh', user: { id: profile.id, user_metadata: { role: 'admin' } } };
         listeners.forEach(listener => listener('SIGNED_IN', session)); return ok({ user: session.user, session });
       },
@@ -162,13 +162,64 @@ test('login uses native captchaToken and fixed email mapping, ignores user_metad
   assert.deepEqual(f.calls.find(value => value.action === 'logout').options, { scope: 'local' });
 });
 
-test('missing captcha, unknown usernames and failed native passwords cannot load private data', async () => {
+test('missing captcha, unmatched login names and failed native passwords cannot load private records', async () => {
   const f = fixture(); await f.provider.init();
   await assert.rejects(f.provider.login('xbl', 'test-password'), error => error.code === 'CAPTCHA_REQUIRED');
-  await assert.rejects(f.provider.login('stranger', 'test-password', 'captcha'), error => error.code === 'LOGIN_FAILED');
   assert.ok(!f.calls.some(value => value.action === 'login'));
+  await assert.rejects(f.provider.login('stranger', 'test-password', 'captcha'), error => error.code === 'LOGIN_FAILED');
+  assert.equal(f.calls.find(value => value.action === 'login').credentials.email, identities['memory-admin']);
+  assert.ok(f.calls.filter(value => value.kind === 'table').every(value => value.table === 'profiles' && value.filters.length === 1 && value.filters[0][0] === 'id' && value.filters[0][1] === ADMIN));
+  assert.equal(f.session(), null, 'an authenticated password with the wrong login name must leave no SDK session');
   await assert.rejects(f.provider.login('xbl', 'wrong-password', 'captcha'), error => error.code === 'LOGIN_FAILED');
-  assert.ok(!f.calls.some(value => value.kind === 'table'));
+  assert.ok(!f.calls.some(value => value.kind === 'table' && value.table !== 'profiles'));
+});
+
+test('a renamed administrator uses its protected profile while both member accounts still hydrate the space', async () => {
+  const f = fixture(); f.tables.profiles[0].username = 'private-admin-42';
+  let state = await f.signIn('private-admin-42');
+  assert.equal(state.currentUser.id, ADMIN); assert.equal(state.currentUser.role, 'admin');
+  assert.deepEqual(state.users.map(value => value.username), ['xbl', 'll', 'private-admin-42']);
+  assert.equal(f.calls.find(value => value.action === 'login').credentials.email, identities['memory-admin']);
+  const ownLookup = f.calls.find(value => value.kind === 'table');
+  assert.equal(ownLookup.table, 'profiles'); assert.deepEqual(ownLookup.filters, [['id', ADMIN]]);
+  for (const member of ['xbl', 'll']) {
+    await f.provider.logout(); state = await f.signIn(member);
+    assert.equal(state.currentUser.username, member); assert.equal(state.currentUser.role, 'member');
+    assert.deepEqual(state.users.map(value => value.username), ['xbl', 'll', 'private-admin-42']);
+  }
+});
+
+test('old administrator and other aliases cannot hydrate records even with the valid administrator password', async () => {
+  for (const username of ['memory-admin', 'another-admin', 'PRIVATE-ADMIN-42']) {
+    const f = fixture(); f.tables.profiles[0].username = 'private-admin-42';
+    const state = await f.provider.init();
+    await assert.rejects(f.signIn(username), error => error.code === 'LOGIN_FAILED');
+    assert.equal(state.currentUser, null); assert.deepEqual(state.entries, []); assert.equal(f.session(), null);
+    assert.ok(f.calls.some(value => value.action === 'logout'));
+    assert.ok(f.calls.filter(value => value.kind === 'table').every(value => value.table === 'profiles' && value.filters[0]?.[1] === ADMIN));
+    assert.ok(!f.calls.some(value => value.kind === 'storage' || value.kind === 'rpc'));
+    assert.equal((await f.provider.init()).currentUser, null, 'a rejected alias cannot restore its authenticated session');
+  }
+});
+
+test('invalid login name syntax is rejected before native authentication', async () => {
+  const f = fixture();
+  for (const username of ['admin@example.invalid', '_admin', 'admin name', 'a'.repeat(41)]) {
+    await assert.rejects(f.signIn(username), error => error.code === 'LOGIN_FAILED');
+  }
+  assert.ok(!f.calls.some(value => value.action === 'login' || value.kind === 'table'));
+});
+
+test('logout during the protected login-name check cannot start private hydration', async () => {
+  const entered = deferred(), release = deferred();
+  const f = fixture({ before: async call => {
+    if (call.kind === 'table' && call.table === 'profiles' && call.filters.length) { entered.resolve(); await release.promise; }
+  } });
+  const state = await f.provider.init(), pending = f.signIn();
+  const rejected = assert.rejects(pending, error => error.code === 'AUTH_CANCELLED');
+  await entered.promise; await f.provider.logout(); release.resolve(); await rejected;
+  assert.equal(state.currentUser, null); assert.equal(f.session(), null); assert.deepEqual(state.entries, []);
+  assert.ok(f.calls.filter(value => value.kind === 'table').every(value => value.table === 'profiles' && value.filters.length === 1));
 });
 
 test('private downloads create Blob URLs; logout revokes them and export has original bytes without credentials', async () => {
@@ -268,8 +319,8 @@ test('late hydration and queued mutations cannot revive state or URLs after logo
   assert.equal(f.calls.filter(value => value.table === 'entries' && value.action === 'update').length, 1);
 });
 
-test('unknown profiles fail closed and an empty interrupted-upload note remains readable and deletable', async () => {
-  const f = fixture(); f.tables.profiles[0].username = 'unapproved-admin';
+test('invalid fixed member profiles fail closed and an empty interrupted-upload note remains readable and deletable', async () => {
+  const f = fixture(); f.tables.profiles.find(value => value.slot === 2).username = 'unapproved-member';
   await assert.rejects(f.signIn(), error => error.code === 'INVALID_RESPONSE');
   const empty = fixture(); empty.tables.entries[0].content = '';
   const state = await empty.signIn(); assert.equal(state.entries[0].content, '');

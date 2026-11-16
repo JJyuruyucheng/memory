@@ -6,6 +6,8 @@
 
 业务只认可 `public.profiles` 中的真实 Auth UUID，不根据前端用户名、JWT `user_metadata` 或“任何已登录用户”授权。`slot` 唯一且只允许 1、2、3：1 为 xbl/member，2 为 ll/member，3 为不同用户名的独立 admin，因此最多三个业务身份。空 profiles 会拒绝所有业务访问；客户端不能插入、修改或删除 profiles。
 
+管理员的 `memory-admin` 仅为内部标识与默认名称，固定 Auth 邮箱别名是 `memory-admin@memory.invalid`。当前网页登录名保存在受保护的 `profiles.username`，可由可信维护者修改而保持第 3 槽、原 Auth UUID 和 admin 角色；真实私密登录名及密码不进入公开代码、文档或构建配置。
+
 账号通过 Supabase 官方 Admin API 创建，密码不写入 SQL、仓库、日志或浏览器构建产物；不能通过手写 `auth.users` 密码字段完成长期初始化。可信初始化得到三个 UUID 后再写 profiles。业务 admin 账号的用户 JWT 不等于项目 secret/service-role key；后者不得进入浏览器。
 
 `memory_private.runtime_guard` 只有 id=1 一行，`authReady` 默认 false，anon/authenticated/service_role 均没有表权限。所有业务 RLS、附件 RPC 和 Storage 策略最终都检查这个门。项目拥有者完成原生 Auth Turnstile、关闭公开注册与匿名登录、限制其他登录方式，并实际验证直连接口缺验证码失败之后，才能通过可信数据库通道开启。只打开网页验证码不满足条件。

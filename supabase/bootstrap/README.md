@@ -14,6 +14,8 @@
 | ll | ll@memory.invalid |
 | memory-admin | memory-admin@memory.invalid |
 
+`memory-admin` 是初始化内部标识与默认名称，并非要求长期使用的网页登录名。管理员当前登录名由受保护的 `profiles` 第 3 槽维护；修改登录名不改变固定 Auth 邮箱或 UUID，实际私密登录名与密码不得写入公开仓库。
+
 三者均以 `email_confirm:true` 创建；`.invalid` 无法收邮件，因此不能依赖邮箱自助找回。Auth role/aud 必须保持普通 authenticated，独立管理员的业务角色由后续受信任 profiles 白名单配置决定，绝不创建 service_role/admin Auth 用户。已有用户只验证并返回 UUID，不 UPDATE、不重置口令、不改角色；专用项目出现未知用户、重复 ID/邮箱、匿名/未确认/高权限用户会停止，交项目拥有者核查。
 
 固定私有桶 `memory-media`，50,000,000 bytes，上限八种 MIME 与现有数据库契约一致；先读取现有桶，配置不符拒绝、不自动修复或覆盖。新建之后重新读取校验。端点不创建/写入 profiles，不改 Auth CAPTCHA 配置，不打开 runtime_guard，也不操作 SQL。

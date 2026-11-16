@@ -9,6 +9,9 @@ export const IDENTITIES = Object.freeze([
   Object.freeze({ username: 'll', email: 'll@memory.invalid', slot: 2, role: 'member' }),
   Object.freeze({ username: 'memory-admin', email: 'memory-admin@memory.invalid', slot: 3, role: 'admin' }),
 ]);
+// The admin key/email is an internal identity, not its current login name.
+// Match the protected profiles contract without publishing private usernames.
+const PROFILE_USERNAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
 // Valid 1x1 grayscale/alpha PNG, including PNG chunk CRCs. No external asset fetch.
 export const PNG_BYTES = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='), value => value.charCodeAt(0));
 const DIFFERENT_PNG = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGP8/x8AAwMCAHwG0LwAAAAASUVORK5CYII='), value => value.charCodeAt(0));
@@ -287,7 +290,11 @@ export function createVerificationHandler(policy, dependencies = {}) {
       }
       for (const identity of IDENTITIES) {
         const profiles = await data('/rest/v1/profiles?select=id,slot,username,role&order=slot', { username: identity.username }, 'PROFILE_PREFLIGHT_FAILED');
-        check(Array.isArray(profiles) && profiles.length === 3 && IDENTITIES.every(item => profiles.filter(value => value.id === expected.get(item.username) && value.slot === item.slot && value.username === item.username && value.role === item.role).length === 1), 'PROFILE_IDENTITY_MISMATCH');
+        check(Array.isArray(profiles) && profiles.length === 3 && IDENTITIES.every(item => profiles.filter(value => value.id === expected.get(item.username)
+          && value.slot === item.slot && value.role === item.role
+          && (item.slot === 3
+            ? typeof value.username === 'string' && PROFILE_USERNAME.test(value.username) && !['xbl', 'll'].includes(value.username)
+            : value.username === item.username)).length === 1), 'PROFILE_IDENTITY_MISMATCH');
       }
       metrics.checks.identitiesAndProfiles = true;
       runId = randomUUID(); check(UUID.test(runId), 'INVALID_FIXTURE_ID'); marker = `memory-verification:${runId}`;
