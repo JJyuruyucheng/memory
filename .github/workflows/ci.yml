@@ -26,3 +26,9 @@ jobs:
         env:
           MEMORY_MODE: demo
           MEMORY_SPACE: ''
+      - name: Verify Pages login-preview build
+        run: node scripts/build.mjs
+        env:
+          MEMORY_MODE: preview
+          MEMORY_SPACE: ''
+          MEMORY_TARGET: pages

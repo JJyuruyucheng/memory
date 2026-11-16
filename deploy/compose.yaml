@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       MEMOS_PORT: "5230"
-      MEMOS_INSTANCE_URL: ${MEMORY_SITE_URL:?Set MEMORY_SITE_URL to your public HTTPS origin}
+      MEMOS_INSTANCE_URL: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN to your public HTTPS origin}
       MEMOS_TRUSTED_PROXIES: private
       TZ: Asia/Shanghai
     volumes:
@@ -17,14 +17,25 @@ services:
   web:
     build:
       context: ..
-      dockerfile: deploy/Dockerfile
+      dockerfile: deploy/render.Dockerfile
       args:
         MEMORY_SPACE: ${MEMORY_SPACE:-spaces/together}
     restart: unless-stopped
+    user: "1000:1000"
+    command: ["node", "deploy/auth-gateway.mjs"]
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+      STATIC_DIR: /app/dist
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN}
+      MEMOS_UPSTREAM: http://memos:5230
+      AUTH_ALLOWED_USERS: ${MEMORY_MEMBER_ONE_USERNAME:-xbl},${MEMORY_MEMBER_TWO_USERNAME:-ll},${MEMORY_ADMIN_USERNAME:-memory-admin}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
     depends_on:
       - memos
     ports:
-      - "${MEMORY_LISTEN:-127.0.0.1}:8080:80"
+      - "${MEMORY_LISTEN:-127.0.0.1}:8080:8080"
     networks:
       - backend
 networks:

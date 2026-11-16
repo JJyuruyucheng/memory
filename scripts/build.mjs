@@ -16,13 +16,19 @@ const REQUIRED_FILES = [
   'src/memos-provider.js', 'src/domain.js', 'src/icons.js', 'src/sample-data.js',
   'src/style.css', 'src/components.css', 'public/assets/credits.json', 'public/assets/mark.svg',
 ];
+const DEMO_ONLY_FILES = new Set([
+  'src/demo-provider.js', 'src/sample-data.js',
+  'public/assets/photo-city.jpg', 'public/assets/photo-coffee.jpg',
+  'public/assets/photo-dinner.jpg', 'public/assets/photo-sea.jpg',
+]);
+const relativeKey = (root, file) => path.relative(root, file).split(path.sep).join('/');
 
 function isSafeName(name) {
   return !name.startsWith('.') && !/(?:^|[._-])(?:secret|credentials|private)(?:[._-]|$)/i.test(name)
     && !/^(?:config\.local|env)(?:[._-]|$)/i.test(name);
 }
 
-async function copyWhitelistedDirectory(source, destination, extensions, root) {
+async function copyWhitelistedDirectory(source, destination, extensions, root, excluded) {
   const directory = await lstat(source);
   if (directory.isSymbolicLink() || !directory.isDirectory()) {
     throw new Error('构建源目录必须为真实目录，不能使用符号链接。');
@@ -32,9 +38,10 @@ async function copyWhitelistedDirectory(source, destination, extensions, root) {
     if (!isSafeName(entry.name)) continue;
     const from = path.join(source, entry.name);
     const to = path.join(destination, entry.name);
+    if (excluded.has(relativeKey(root, from))) continue;
     if (entry.isSymbolicLink()) throw new Error(`构建拒绝符号链接：${path.relative(root, from)}`);
     if (entry.isDirectory()) {
-      await copyWhitelistedDirectory(from, to, extensions, root);
+      await copyWhitelistedDirectory(from, to, extensions, root, excluded);
     } else if (entry.isFile() && extensions.has(path.extname(entry.name).toLowerCase())) {
       await writeFile(to, await readFile(from));
     }
@@ -71,7 +78,7 @@ async function sourceFiles(root, directory = path.join(root, 'src')) {
   return result;
 }
 
-async function preflight(root) {
+async function preflight(root, excluded) {
   for (const relative of REQUIRED_FILES) await requireFile(root, relative);
   const files = await sourceFiles(root);
   for (const file of files.filter((name) => name.endsWith('.js'))) {
@@ -81,8 +88,11 @@ async function preflight(root) {
       throw new Error(`JavaScript 语法检查失败：${path.relative(root, file)}\n${error.stderr?.trim() || error.message}`);
     }
     const content = await readFile(file, 'utf8');
-    const imports = content.matchAll(/\b(?:import|export)\s+(?:[^;]*?\s+from\s*)?["']([^"']+)["']/g);
-    for (const [, reference] of imports) {
+    const imports = [
+      ...Array.from(content.matchAll(/\b(?:import|export)\s+(?:[^;]*?\s+from\s*)?["']([^"']+)["']/g), ([, reference]) => ({ reference, dynamic: false })),
+      ...Array.from(content.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g), ([, reference]) => ({ reference, dynamic: true })),
+    ];
+    for (const { reference, dynamic } of imports) {
       if (!reference.startsWith('.')) throw new Error(`浏览器模块只允许本地依赖：${reference}`);
       const imported = path.resolve(path.dirname(file), reference);
       const relative = path.relative(root, imported);
@@ -90,6 +100,9 @@ async function preflight(root) {
         throw new Error(`模块依赖不在源码白名单中：${reference}`);
       }
       await requireFile(root, relative);
+      if (!dynamic && !excluded.has(relativeKey(root, file)) && excluded.has(relativeKey(root, imported))) {
+        throw new Error(`非 demo 构建不能静态依赖演示模块：${reference}；请仅在 demo 分支动态导入。`);
+      }
     }
   }
   for (const file of files.filter((name) => name.endsWith('.css'))) {
@@ -124,17 +137,18 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
   const dist = path.resolve(outDir ?? path.join(root, 'dist'));
   const defaultOutput = path.join(root, 'dist');
   const mode = env.MEMORY_MODE ?? 'demo';
-  if (!['demo', 'live'].includes(mode)) throw new Error('MEMORY_MODE 只能为 demo 或 live。');
+  if (!['demo', 'preview', 'live'].includes(mode)) throw new Error('MEMORY_MODE 只能为 demo、preview 或 live。');
   const space = mode === 'live' ? (env.MEMORY_SPACE ?? '').trim() : '';
   if (mode === 'live' && !/^spaces\/[A-Za-z0-9_-]+$/.test(space)) {
     throw new Error('live 构建必须指定 MEMORY_SPACE=spaces/<id>，例如 spaces/our-story。');
   }
-  if (env.MEMORY_TARGET === 'pages' && mode !== 'demo') {
-    throw new Error('GitHub Pages 只允许发布 demo 模式。');
+  if (env.MEMORY_TARGET === 'pages' && mode !== 'preview') {
+    throw new Error('GitHub Pages 只允许发布 preview 登录预览模式。');
   }
+  const excluded = mode === 'demo' ? new Set() : DEMO_ONLY_FILES;
 
   // Validate before touching a previous build, so failed source checks preserve it.
-  await preflight(root);
+  await preflight(root, excluded);
   const resolvedRoot = await realpath(root);
   const resolvedParent = await realpath(path.dirname(dist));
   const canonicalOutput = path.join(resolvedParent, path.basename(dist));
@@ -158,8 +172,8 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
   if (previous) await rm(dist, { recursive: true });
   await mkdir(dist);
   await writeFile(path.join(dist, 'index.html'), await readFile(path.join(root, 'index.html')));
-  await copyWhitelistedDirectory(path.join(root, 'src'), path.join(dist, 'src'), SOURCE_EXTENSIONS, root);
-  await copyWhitelistedDirectory(path.join(root, 'public', 'assets'), path.join(dist, 'assets'), ASSET_EXTENSIONS, root);
+  await copyWhitelistedDirectory(path.join(root, 'src'), path.join(dist, 'src'), SOURCE_EXTENSIONS, root, excluded);
+  await copyWhitelistedDirectory(path.join(root, 'public', 'assets'), path.join(dist, 'assets'), ASSET_EXTENSIONS, root, excluded);
   // This one attribution manifest is the only JSON allowed into the static site.
   await writeFile(path.join(dist, 'assets', 'credits.json'), await readFile(path.join(root, 'public', 'assets', 'credits.json')));
 
@@ -174,7 +188,7 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
   };
   await writeFile(path.join(dist, 'src', 'config.js'),
     `export const CONFIG = Object.freeze(${JSON.stringify(config, null, 2)});\n`);
-  if (!quiet) console.log(`已构建 ${path.relative(root, dist)}：${mode} 模式${space ? `，空间 ${space}` : '，仅含演示数据'}。`);
+  if (!quiet) console.log(`已构建 ${path.relative(root, dist)}：${mode} 模式${space ? `，空间 ${space}` : mode === 'preview' ? '，仅登录预览，不连接记录服务' : '，仅含演示数据'}。`);
   return { outDir: dist, mode, space };
 }
 

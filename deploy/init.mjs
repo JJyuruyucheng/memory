@@ -14,7 +14,7 @@ export function createApiClient(base, fetcher = fetch) {
   let token = ''; let cookie = '';
   return {
     async call(path, { method = 'GET', body, missing = false } = {}) {
-      const response = await fetcher(new URL(path, origin), { method, redirect: 'error', headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(cookie ? { Cookie: cookie } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      const response = await fetcher(new URL(path, origin), { method, redirect: 'error', signal: AbortSignal.timeout(30000), headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(cookie ? { Cookie: cookie } : {}) }, ...(body ===undefined ? {} : { body: JSON.stringify(body) }) });
       const setCookie = response.headers.get('set-cookie'); if (setCookie) cookie = setCookie.split(';')[0];
       if (missing && response.status === 404) return null;
       if (!response.ok) throw new Error(`Memos ${method} ${path.split('?')[0]} 失败（HTTP ${response.status}）；未打印响应以保护凭据。`);
@@ -35,7 +35,10 @@ export async function initialize({ base, admin, members, spaceId = 'together', t
   if (typeof title !== 'string' || !title.trim() || title.length > 60 || (startDate && dayKey(startDate) !== startDate)) throw new Error('空间名称需要 1—60 个字符，开始日期需要为真实日期。');
   const accounts = [admin, ...members];
   if (members.length !== 2 || new Set(accounts.map(account => account.username)).size !== 3) throw new Error('需要三个不同账号：一个管理员和两个日常账号。');
-  for (const account of accounts) if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,34}[A-Za-z0-9])?$/.test(account.username) || typeof account.password !== 'string' || account.password.length < 12) throw new Error('账号格式无效或密码少于 12 个字符。');
+  for (const [index, account] of accounts.entries()) {
+    const minimum = index === 0 ? 12 : 6;
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,34}[A-Za-z0-9])?$/.test(account.username) || typeof account.password !== 'string' || account.password.length < minimum) throw new Error(`账号格式无效；管理员密码至少 12 位，日常账号初始密码至少 6 位。`);
+  }
   const api = createApiClient(base, fetcher);
   try {
     const profile = await api.call('/api/instance/profile');
@@ -58,7 +61,9 @@ export async function initialize({ base, admin, members, spaceId = 'together', t
       try {
         await participant.login(member.username, member.password);
         if (!membership) {
-        const invitation = await api.call(`/api/${name}/invitations`, { method: 'POST', body: { invitee: existing.name, role: 'USER' } });
+          let invitation = await api.call(`/api/${name}/invitations/${encodeURIComponent(member.username)}`, { missing: true });
+          if (!invitation) invitation = await api.call(`/api/${name}/invitations`, { method: 'POST', body: { invitee: existing.name, role: 'USER' } });
+          if (invitation.invitee !== existing.name || invitation.role !== 'USER') throw new Error('已有邀请的目标或权限与预期不一致；不会自动覆盖。');
           await participant.call(`/api/${invitation.name}:accept`, { method: 'POST', body: {} });
         }
       } finally { await participant.logout(); }
@@ -84,10 +89,10 @@ async function main() {
     if (result.done) throw new Error('标准输入提前结束，初始化未完成。');
     return result.value || fallback;
   }
-  async function account(label) {
+  async function account(label, minimum = 6) {
     const username = (await ask(`${label}登录名（英文字母、数字、连字符）：`)).trim();
     const name = await ask(`${label}显示名称：`, { fallback: username });
-    const password = await ask(`${label}密码（至少 12 位，不回显）：`, { secret: true });
+    const password = await ask(`${label}密码（至少 ${minimum} 位，不回显）：`, { secret: true });
     const confirm = await ask('再次输入密码：', { secret: true });
     if (password !== confirm) throw new Error('两次密码不一致。');
     return { username, name, password };
@@ -98,7 +103,7 @@ async function main() {
     const title = await ask('空间名称 [朝夕]：', { fallback: '朝夕' });
     const startDate = await ask('在一起的日期（YYYY-MM-DD，可留空）：');
     if (startDate && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new Error('日期格式无效。');
-    const admin = await account('管理员'); const first = await account('日常账号一'); const second = await account('日常账号二');
+    const admin = await account('管理员', 12); const first = await account('日常账号一'); const second = await account('日常账号二');
     const result = await initialize({ base, admin, members: [first, second], spaceId, title, startDate });
     stdout.write(`初始化完成：${result.space}，三个账号，已关闭注册并启用私密访问。\n请确认构建参数 MEMORY_SPACE=${result.space}。\n`);
   } finally { reader.close(); }

@@ -1,16 +1,17 @@
 import { CONFIG } from './config.js';
 import { icon } from './icons.js';
-import { createDemoProvider } from './demo-provider.js';
-import { createMemosProvider } from './memos-provider.js';
+import { mountLoginVerification } from './login-controller.js';
+import { renderEntryMedia } from './entry-media.js';
 import { escapeHtml as esc, filterEntries, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
 
 const app = document.querySelector('#app');
 const modalRoot = document.querySelector('#modal-root');
-const provider = CONFIG.mode === 'live' ? createMemosProvider(CONFIG) : createDemoProvider();
+let provider, loginVerification;
 const moodNames = { happy: '微笑', neutral: '一般', sad: '难受', unset: '未填写' };
 const moodIcons = { happy: 'smile', neutral: 'neutral', sad: 'sad' };
 const filters = { query: '', type: 'all', mood: 'all', authorId: 'all', month: '', favoritesOnly: false, trash: false };
-let state, searchTimer, toastTimer, dialogReturnFocus, draftTimer;
+let state = { currentUser: null, users: [], entries: [], settings: {} }, loginPending = false, bootPending = true;
+let searchTimer, toastTimer, dialogReturnFocus, draftTimer;
 let editorFiles = [], editorMedia = [], editorId = null, previewUrls = [];
 let calendarCursor = dayKey(new Date()).slice(0, 7), selectedDay = '';
 const route = () => location.hash.slice(1).split('?')[0] || 'timeline';
@@ -38,7 +39,9 @@ const navItems = [['timeline', 'book', '时光线'], ['album', 'photo', '我们�
 function navLink(item) { const [id, symbol, label] = item; return `<a href="#${id}" class="nav-link ${route() === id ? 'active' : ''}" ${route() === id ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${label}</span></a>`; }
 
 function render() {
+  document.body.classList.toggle('is-login', !state?.currentUser && CONFIG.mode !== 'demo');
   if (!state?.currentUser) return renderLogin();
+  loginVerification?.destroy(); loginVerification = null;
   const active = document.activeElement?.id, selection = document.activeElement?.selectionStart;
   const current = state.currentUser, stats = computeStats(state.entries);
   app.innerHTML = `
@@ -98,7 +101,7 @@ function renderEntry(entry, trash = false) {
   return `<article class="memory-card ${entry.type === 'event' ? 'event-card' : ''}">
     <div class="memory-meta">${avatar(author, true)}<div><strong>${esc(author.name)}</strong><time datetime="${esc(entry.occurredAt)}">${dateLabel(entry.occurredAt)}${entry.createdAt && dayKey(entry.createdAt) !== dayKey(entry.occurredAt) ? ' · 补记' : ''}</time></div><span class="entry-kind">${entry.type === 'event' ? `${icon('calendar')}事件` : '随记'}</span>${canEdit(entry) && !trash ? `<button class="icon-button" data-action="edit" data-id="${esc(entry.id)}" aria-label="编辑${esc(entry.title || '这条回忆')}">${icon('edit')}</button>` : ''}</div>
     ${entry.title ? `<h2>${esc(entry.title)}</h2>` : ''}<p class="memory-text">${esc(entry.content)}</p>
-    ${entry.media?.length ? `<div class="memory-media count-${Math.min(entry.media.length, 3)}">${entry.media.slice(0, 3).map((media, i) => `<button class="media-thumb" data-action="media" data-id="${esc(entry.id)}" data-index="${i}" aria-label="打开${esc(media.name || '回忆照片')}">${media.type === 'video' ? `<video src="${safeUrl(media.url)}" preload="metadata" playsinline></video><span class="video-label">${icon('video')} 视频</span>` : `<img src="${safeUrl(media.url)}" alt="${esc(media.name || entry.title || '回忆照片')}" loading="lazy" />`}${i === 2 && entry.media.length > 3 ? `<span class="more-photos">+${entry.media.length - 3}</span>` : ''}</button>`).join('')}</div>` : ''}
+    ${renderEntryMedia(entry, safeUrl)}
     <div class="entry-tags">${entry.mood ? `<span class="mood-tag ${entry.mood}">${icon(moodIcons[entry.mood])}${moodNames[entry.mood] || '未填写'}</span>` : ''}${(entry.tags || []).map(tag => `<button class="tag" data-action="search-tag" data-value="${esc(tag)}"># ${esc(tag)}</button>`).join('')}</div>
     <div class="memory-actions">${trash ? `${canEdit(entry) ? `<button class="text-button" data-action="restore" data-id="${esc(entry.id)}">${icon('restore')}恢复这条回忆</button>` : '<span class="muted">由作者恢复</span>'}` : `<button class="reaction-button ${liked ? 'selected' : ''}" data-action="reaction" data-id="${esc(entry.id)}" aria-pressed="${Boolean(liked)}" aria-label="${liked ? '收回回应' : '回应这条回忆'}">${icon('heart')}<span>${entry.reactionBy?.length || '喜欢'}</span></button><button class="reaction-button" data-action="detail" data-id="${esc(entry.id)}">${icon('comment')}<span>${entry.comments?.length || '说两句'}</span></button><button class="bookmark-button ${saved ? 'selected' : ''}" data-action="favorite" data-id="${esc(entry.id)}" aria-label="${saved ? '取消收藏' : '收藏这条回忆'}" aria-pressed="${Boolean(saved)}">${icon('bookmark')}</button>`}</div>
   </article>`;
@@ -270,7 +273,9 @@ document.addEventListener('change', async event => {
 });
 document.addEventListener('submit', async event => {
   const form = event.target; if (!['entry-form', 'settings-form', 'comment-form', 'login-form'].includes(form.id)) return;
-  event.preventDefault(); const submit = form.querySelector('[type="submit"]'); if (submit) submit.disabled = true;
+  event.preventDefault();
+  if (form.id === 'login-form' && loginPending) return;
+  const submit = form.querySelector('[type="submit"]'); if (submit) submit.disabled = true;
   try {
     const data = Object.fromEntries(new FormData(form));
     if (form.id === 'entry-form') {
@@ -281,19 +286,52 @@ document.addEventListener('submit', async event => {
       const anniversaries = [...form.querySelectorAll('[data-anniversary]')].map(row => ({ id: row.dataset.anniversary, title: row.querySelector('[name="ann-title"]').value.trim(), date: row.querySelector('[name="ann-date"]').value, yearly: row.querySelector('[name="ann-yearly"]').checked }));
       await provider.saveSettings({ ...state.settings, spaceName: data.spaceName.trim(), subtitle: data.subtitle.trim(), startDate: data.startDate, anniversaries }); render(); toast('我们的小世界，已更新。');
     } else if (form.id === 'comment-form') { await provider.addComment(form.dataset.id, data.content.trim()); const id = form.dataset.id; render(); showDetail(id); toast('你的话，留在这段回忆里了。'); }
-    else { state = await provider.login(data.username, data.password); form.reset(); render(); }
-  } catch (error) { if (!state.currentUser && form.id !== 'login-form') { clearDrafts(); closeModal(false); render(); toast('登录已失效，请重新登录。', true); } else { const target = form.querySelector('.form-error'); if (target) target.textContent = error.message; else toast(error.message, true); } }
-  finally { if (submit?.isConnected) submit.disabled = false; }
+    else {
+      if (CONFIG.mode !== 'live' || !loginVerification?.getToken()) throw new Error('请先完成安全验证。');
+      loginPending = true; form.setAttribute('aria-busy', 'true');
+      form.querySelectorAll('input').forEach(input => { input.disabled = true; });
+      try { state = await provider.login(data.username, data.password, loginVerification.getToken()); }
+      finally {
+        loginPending = false;
+        form.querySelector('[name="password"]').value = '';
+        const currentForm = document.querySelector('#login-form');
+        currentForm?.removeAttribute('aria-busy');
+        currentForm?.querySelectorAll('input').forEach(input => { input.disabled = false; });
+        loginVerification?.reset();
+      }
+      form.reset(); render();
+    }
+  } catch (error) { if (!state.currentUser && form.id !== 'login-form') { clearDrafts(); closeModal(false); render(); toast('登录已失效，请重新登录。', true); } else { const target = form.id === 'login-form' ? document.querySelector('#login-form .form-error') : form.querySelector('.form-error'); if (target) target.textContent = error.message; else toast(error.message, true); } }
+  finally { if (submit?.isConnected) submit.disabled = form.id === 'login-form' ? !loginVerification?.getToken() : false; }
 });
-window.addEventListener('hashchange', () => { selectedDay = ''; filters.query = ''; filters.type = route() === 'events' ? 'event' : 'all'; render(); window.scrollTo({ top: 0 }); });
+window.addEventListener('hashchange', () => { if (bootPending) return; selectedDay = ''; filters.query = ''; filters.type = route() === 'events' ? 'event' : 'all'; render(); window.scrollTo({ top: 0 }); });
 
 function renderLogin() {
+  loginVerification?.destroy(); loginVerification = null;
   if (CONFIG.mode === 'demo') {
     app.innerHTML = `<main class="boot"><img src="./assets/mark.svg" alt="" width="48" height="48" /><h1>选一个示例视角</h1><p>这是本机演示，不需要密码。</p>${state.users.map(u => `<button class="secondary" data-action="resume-demo" data-value="${esc(u.id)}">${esc(u.name)}</button>`).join('')}</main>`;
     return;
   }
-  app.innerHTML = `<main class="login-page"><div class="login-brand"><img src="./assets/mark.svg" alt="" width="56" height="56" /><span>朝夕</span></div><div class="login-panel"><h1>回到我们的小世界</h1><p>那些平凡又珍贵的日子，都在这里。</p><form id="login-form"><label>账号<input name="username" autocomplete="username" required /></label><label>密码<input name="password" type="password" autocomplete="current-password" required /></label><p class="form-error" role="alert"></p><button type="submit" class="primary">翻开我们的记忆${icon('arrow')}</button></form><p class="login-footnote">${icon('lock')}仅受邀的两位成员可登录 · 维护账号另行使用</p></div><span class="login-close">朝夕之间，都是我们。</span></main>`;
+  const preview = CONFIG.mode === 'preview';
+  app.innerHTML = `<main class="login-page"><div class="login-layout"><section class="login-story" aria-label="朝夕"><a class="login-brand" href="#"><img src="./assets/mark.svg" alt="" width="48" height="48" /><span>朝夕<small>我们的记忆</small></span></a><div class="login-story-copy"><p class="login-intro">留给两个人的地方</p><h1>把日子过成故事，<br>把我们写进朝夕。</h1><p>一顿晚饭，一次远行，<br>还有那些说不完的小事。<br>都值得好好记住。</p></div><p class="login-story-end">朝夕之间，都是我们。</p></section><section class="login-panel" aria-labelledby="login-title"><div class="login-lock">${icon('lock')}<span>${preview ? '登录预览' : '我们的共同空间'}</span></div><h2 id="login-title">好久不见，欢迎回家</h2><p>登录后，翻开属于我们的那一页。</p><form id="login-form"><label for="login-username">账号<input id="login-username" name="username" autocomplete="${preview ? 'off' : 'username'}" placeholder="输入你的账号" maxlength="64" autocapitalize="none" spellcheck="false" required ${preview ? 'disabled' : ''} /></label><label for="login-password">密码<input id="login-password" name="password" type="password" autocomplete="${preview ? 'off' : 'current-password'}" placeholder="输入你的密码" maxlength="256" required ${preview ? 'disabled' : ''} /></label><div class="login-verification"><div id="login-captcha"></div><p id="verification-status" role="status">${preview ? '正式登录服务尚未接通。' : '正在准备安全验证…'}</p><button type="button" id="verification-retry" class="text-button" hidden>重新加载验证</button></div><p class="form-error" role="alert"></p><button type="submit" class="primary" disabled>翻开我们的记忆${icon('arrow')}</button></form>${preview ? '<p class="login-preview-note">当前是 GitHub Pages 登录预览。私密空间待后端开通后启用，这里不会提交账号密码，也不会展示回忆。</p>' : `<p class="login-footnote">${icon('lock')}仅限受邀账号 · 不开放注册</p>`}</section></div></main>`;
+  if (!preview) {
+    if (loginPending) {
+      document.querySelector('#login-form').setAttribute('aria-busy', 'true');
+      document.querySelectorAll('#login-form input').forEach(input => { input.disabled = true; });
+    }
+    loginVerification = mountLoginVerification(app, { isBusy: () => loginPending });
+  }
 }
 
-try { state = await provider.init(); render(); }
+try {
+  if (CONFIG.mode === 'preview') state = { mode: 'preview', currentUser: null, users: [], entries: [], settings: {} };
+  else {
+    provider = CONFIG.mode === 'live'
+      ? (await import('./memos-provider.js')).createMemosProvider(CONFIG)
+      : (await import('./demo-provider.js')).createDemoProvider();
+    state = await provider.init();
+  }
+  render();
+}
 catch (error) { app.innerHTML = `<main class="boot"><img src="./assets/mark.svg" alt="" width="48" height="48" /><h1>这页暂时没能打开</h1><p>${esc(error.message || '请检查网络或浏览器存储设置。')}</p><button class="secondary" data-action="retry">再试一次</button></main>`; }
+finally { bootPending = false; }

@@ -1,3 +1,4 @@
+// Source development stays in demo. Builds explicitly generate demo, preview or live.
 export const CONFIG = Object.freeze({
   mode: 'demo',
   apiBase: '',

@@ -4,20 +4,19 @@
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
-**[在线演示：朝夕 · 我们的记忆](https://jjyuruyucheng.github.io/memory/)**。GitHub Pages 只发布公开演示模式；试写和照片保存在当前浏览器，不是双人云同步。页面中的人物、日期、照片说明和故事均为虚构样例。
+**[Pages 入口：朝夕](https://jjyuruyucheng.github.io/memory/)**。本轮 Pages 发布目标升级为 `preview`：只显示登录预览，不初始化演示数据或记录服务，不提交真实口令，也没有跳过登录或进入演示的入口。**正式账号登录与私密存储尚未上线。**
 
-## 演示版与正式版
+## 三种运行模式
 
-| 能力 | Pages 演示版 | 正式版部署目标 |
-| --- | --- | --- |
-| 浏览页面与样例 | 可使用 | 可使用 |
-| 体验发布、评论、收藏等交互 | 仅当前浏览器的演示数据 | 通过 Memos 接口读写 |
-| 演示身份切换 | 便于检查双方与管理员视角，不是账号认证 | 真实 Memos 登录 |
-| 双人跨设备同步 | 不支持 | 依赖运行中的 Memos 和共享空间 |
-| 私人照片与视频 | 请勿在公开演示站存放私人资料 | 需要受保护的媒体接口及部署验证 |
-| 隐私与可靠性承诺 | 无真实私密空间 | 完成部署、权限、备份恢复验收后才可使用 |
+| 能力 | Pages 登录预览 `preview` | 本地演示 `demo` | 正式模式 `live` |
+| --- | --- | --- | --- |
+| 登录界面 | 仅展示，不提交真实口令 | 演示身份交互，不是真实认证 | 使用真正网关与账号会话 |
+| 记录与照片 | 不加载，不提供演示绕过入口 | 虚构样例及当前浏览器试写 | 通过真实后端读写 |
+| 发布、评论、收藏 | 不可使用 | 本机演示数据 | 依赖正式部署与授权 |
+| 双人跨设备同步 | 不支持 | 不支持 | 依赖运行中的 Memos 和共享空间 |
+| 私密存储 | 不提供 | 浏览器本地数据，不是私密云空间 | 完成目标部署、权限与恢复验收后使用 |
 
-演示数据保存在当前浏览器时，清除网站数据、换浏览器或换设备会影响可见数据；它不是云备份。下载导出文件也不等于已配置自动备份。本地已启动官方 Memos 26.11.1 并通过真实接口集成测试；Docker、反向代理、HTTPS 和目标主机恢复演练仍待部署验收，详见 [安全边界](docs/security.md)。
+本地默认仍为 `demo`，人物、日期、照片说明和故事均为虚构样例。该模式的数据继续保存在原浏览器中；本轮模式升级不清空已有演示记录。清除网站数据或更换设备会影响可见数据，导出文件也不等于自动云备份。本地已通过官方 Memos 26.11.1 的真实接口测试；该证据不代表 Render 生产服务已经上线，详见 [安全边界](docs/security.md)。
 
 ## 本地运行
 
@@ -41,7 +40,19 @@ node scripts/serve.mjs --source
 
 ## 构建模式
 
-默认 `MEMORY_MODE=demo`。构建先对全部 `src` JavaScript 执行 `node --check`，核对入口、模块、样式和素材署名依赖，再复制白名单资源并重新生成 `dist/src/config.js`。唯一复制的 JSON 是 `assets/credits.json`；`.env`、部署配置、数据库、备份和文档不进入公开产物。`apiBase` 固定为空字符串，表示同源请求，不能通过 URL 参数切换到真实后端。
+`MEMORY_MODE` 支持 `demo`、`preview`、`live`，默认 `demo`。构建先对全部 `src` JavaScript 执行 `node --check`，核对入口、静态/动态模块、样式和素材署名依赖，再复制白名单资源并重新生成 `dist/src/config.js`。唯一复制的 JSON 是 `assets/credits.json`；`.env`、部署配置、数据库、备份和文档不进入产物。`apiBase` 固定为空字符串，表示同源请求，不能通过 URL 参数切换到真实后端。
+
+`preview` 和 `live` 在复制阶段排除 `demo-provider.js`、`sample-data.js` 及四张虚构示例 JPG，不采用“先复制再删除”。素材署名清单可保留来源记录；它不表示这些图片仍在非演示产物中。普通本地模块（包括 `login-controller.js`）自动参与依赖检查与复制。非演示入口如果仍静态导入已排除的演示模块，构建会失败；演示分支应使用动态导入。
+
+Pages 预览构建示例（PowerShell）：
+
+```powershell
+$env:MEMORY_MODE = 'preview'
+$env:MEMORY_TARGET = 'pages'
+node scripts/build.mjs
+```
+
+`MEMORY_TARGET=pages` 严格拒绝 `demo` 和 `live`。回到本地演示前清除 `MEMORY_TARGET` 并设 `MEMORY_MODE=demo`，避免沿用上一条命令的环境设置。
 
 PowerShell 正式构建示例：
 
@@ -61,19 +72,21 @@ MEMORY_MODE=live MEMORY_SPACE=spaces/your-space-id node scripts/build.mjs
 
 ## GitHub 部署
 
-`Checks` 工作流在 Node.js 22 上运行内建测试和演示构建，不执行 `npm install`。`Publish demo to GitHub Pages` 在 `main` 更新或手动触发时执行测试，强制构建 `demo`，然后上传 `dist` 并部署到 `github-pages` 环境。官方 Actions 使用固定提交 SHA。
+`Checks` 工作流在 Node.js 22 上运行内建测试、本地演示构建和 Pages 预览构建，不执行 `npm install`。`Publish login preview to GitHub Pages` 在 `main` 更新或手动触发时执行测试，强制 `MEMORY_MODE=preview` 与 `MEMORY_TARGET=pages`，然后上传 `dist` 并部署到 `github-pages` 环境。官方 Actions 使用固定提交 SHA。
 
-**实际发布状态：已上线公开演示版。** 仓库已设为公开，Pages 构建源为 GitHub Actions；部署工作流成功，线上首页、演示配置和素材署名接口已验证 HTTP 200。正式私密服务不由 Pages 承担。
+**发布边界：Pages 是公开登录预览，不是真实账号服务。** 此前公开演示站已成功部署；本轮改为登录预览，实际切换以新的 Actions 成功记录及线上 `config.js` 的 `preview` 值为准。仓库已公开，真实资料和凭证不提交仓库；正式私密服务不由 Pages 承担。
 
 需要仓库管理员把 Pages 构建源设为 **GitHub Actions**。源仓库私有不代表 Pages 网站私有；私有仓库是否能启用 Pages 取决于账号套餐，不能通过本项目自动改变仓库公开性。[GitHub 官方能力](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages)、[私有发布条件](https://docs.github.com/en/enterprise-cloud%40latest/pages/getting-started-with-github-pages/changing-the-visibility-of-your-github-pages-site)。
 
-Pages 只托管静态页面，不能运行 Memos 和数据库。Actions 负责构建，不是常驻后端；Codespaces 会停止，也不作为长期服务。GitHub 官方亦不建议 Pages 承担发送密码等敏感交易，因此该工作流不发布真实登录模式。[Pages 限制](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits)。
+Pages 只托管静态页面，不能运行 Memos、数据库或私密存储。Actions 负责构建，不是常驻后端；Codespaces 会停止，也不作为长期服务。GitHub 官方亦不建议 Pages 承担发送密码等敏感交易，因此预览不会尝试真实账号登录。[Pages 限制](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits)。
 
 ## 正式使用
 
-正式版需要另行运行 Memos、数据库与媒体持久存储，并把网站及其 API 放在同一 HTTPS 来源。已在本地用官方 **Memos 26.11.1 Windows release** 和独立临时数据库验证两个成员及管理员登录、`SPACE` 共享、PNG 媒体鉴权、评论、回应/收藏、软删恢复及包含媒体的内容导出。认证使用官方 Connect 接口与会话 Cookie，访问令牌仅保留在内存。真实浏览器已检查演示发布、刷新后保留和评论；这些演示交互检查不冒充正式双设备使用测试。
+正式版计划在 Render 上运行真实网关、Memos、数据库与媒体持久存储，并保持网站及 API 同源 HTTPS。还需要用户提供相应的付费账户与所需 Cloudflare 密钥；这些条件未齐备时，不宣称正式登录或云端存储已经上线。真实口令和密钥只配置到部署平台的受保护设置，不写入仓库文件或浏览器构建配置。
 
-尚未验证的部分包括 Docker/nginx 实际运行、目标主机 TLS 与 Cookie 属性、实际视频设备兼容性及整卷备份恢复。部署材料与真实测试复现命令见 [部署文档](docs/deployment.md) 和 [实现架构](docs/architecture.md)。公开演示的本地身份切换不是认证实现；也没有部署自动清理或自动备份任务。
+已有底座证据：本地使用官方 **Memos 26.11.1 Windows release** 和独立临时数据库验证两个成员及管理员登录、`SPACE` 共享、PNG 媒体鉴权、评论、回应/收藏、软删恢复及含媒体的内容导出。安全网关验证验证码后转交官方 Connect 与会话 Cookie，访问令牌仅保留在内存；本轮也已通过实际网关联测，Cloudflare Siteverify 使用测试替身。演示浏览器的发布、刷新保留和评论也已检查；这些证据不等于新的 Render 网关或正式双设备使用已经验收。
+
+尚未验证的部分包括 Docker/Render 容器实际运行、目标主机 TLS 与 Cookie 属性、实际视频设备兼容性及整卷备份恢复。托管费用、开通步骤及限制见 [Render 托管指南](docs/hosting-render.md)，真实测试复现命令见 [部署文档](docs/deployment.md) 和 [实现架构](docs/architecture.md)。本地演示的身份切换不是认证实现；也没有部署自动清理或自动备份任务。
 
 日常使用两个成员账号，维护使用一个独立管理员账号；管理员可以由其中一位成员持有。原生管理员具有服务器及 Memos 相应管理权限，本项目不承诺内容对服务器管理员不可见，也未实现端到端加密。
 

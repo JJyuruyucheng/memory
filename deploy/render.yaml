@@ -1,0 +1,39 @@
+# Review the paid compute/disk costs before deploying. This file creates nothing by itself.
+# In Render's Blueprint setup, choose deploy/render.yaml as the Blueprint path.
+services:
+  - type: web
+    name: memory-chaoxi
+    runtime: docker
+    repo: https://github.com/JJyuruyucheng/memory
+    branch: main
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./deploy/render.Dockerfile
+    dockerContext: .
+    autoDeployTrigger: checksPass
+    healthCheckPath: /healthz
+    maxShutdownDelaySeconds: 30
+    disk:
+      name: memory-data
+      mountPath: /var/opt/memos
+      sizeGB: 5
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MEMORY_SPACE
+        value: spaces/together
+      - key: MEMORY_MEMBER_ONE_USERNAME
+        value: xbl
+      - key: MEMORY_MEMBER_TWO_USERNAME
+        value: ll
+      - key: MEMORY_MEMBER_ONE_PASSWORD
+        sync: false
+      - key: MEMORY_MEMBER_TWO_PASSWORD
+        sync: false
+      - key: MEMORY_ADMIN_USERNAME
+        value: memory-admin
+      - key: MEMORY_ADMIN_PASSWORD
+        generateValue: true
+    # PUBLIC_ORIGIN defaults to Render's automatically injected RENDER_EXTERNAL_URL.
+    # Add TURNSTILE_SITE_KEY + TURNSTILE_SECRET_KEY in the dashboard after obtaining this hostname.
+    # Until both exist, the login shell can load but the gateway must reject every login.
