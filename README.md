@@ -4,17 +4,17 @@
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
-**[Cloudflare 入口：朝夕](https://memory-awv.pages.dev/)** 已完成首次部署，当前登录保持关闭，等待原生验证码及真实 Auth/Storage 权限验收。**正式账号登录与私密存储尚未开放。** [GitHub Pages](https://jjyuruyucheng.github.io/memory/) 继续作为 `preview`：不加载记录、不提交真实口令，也没有跳过登录入口。
+**[Cloudflare 正式入口：朝夕](https://memory-awv.pages.dev/)** 已部署，目前正在验收真实 Turnstile 与账号口令登录，尚未完成日常使用验收。原生 Auth 已拒绝缺失和伪造验证码，真实用户 JWT 下的记录与私有图片权限探针已通过；这些结果不代表真实 widget 验证码与口令登录已经成功。[GitHub Pages](https://jjyuruyucheng.github.io/memory/) 继续作为 `preview`：不加载记录、不提交真实口令，也没有跳过登录入口。
 
-## 三种运行模式
+## 四种运行模式
 
-| 能力 | Pages 登录预览 `preview` | 本地演示 `demo` | 正式模式 `live` |
-| --- | --- | --- | --- |
-| 登录界面 | 仅展示，不提交真实口令 | 演示身份交互，不是真实认证 | 使用真正网关与账号会话 |
-| 记录与照片 | 不加载，不提供演示绕过入口 | 虚构样例及当前浏览器试写 | 通过真实后端读写 |
-| 发布、评论、收藏 | 不可使用 | 本机演示数据 | 依赖正式部署与授权 |
-| 双人跨设备同步 | 不支持 | 不支持 | 依赖运行中的 Memos 和共享空间 |
-| 私密存储 | 不提供 | 浏览器本地数据，不是私密云空间 | 完成目标部署、权限与恢复验收后使用 |
+| 能力 | GitHub Pages 预览 `preview` | 本地演示 `demo` | Memos 自托管 `live` | Supabase 免费托管 `supabase` |
+| --- | --- | --- | --- | --- |
+| 登录界面 | 仅展示，不提交真实口令 | 演示身份交互，不是真实认证 | 网关验证码与 Memos 账号会话 | 原生 Auth 与 Turnstile；真实登录验收中 |
+| 记录与照片 | 不加载，不提供演示绕过入口 | 虚构样例及当前浏览器试写 | 通过 Memos 读写 | 登录后经数据库 RLS 与私有 Storage 读写 |
+| 发布、评论、收藏 | 不可使用 | 本机演示数据 | 依赖正式部署与授权 | 已实现，依赖真实会话与数据库授权 |
+| 双人跨设备同步 | 不支持 | 不支持 | 依赖运行中的 Memos 和共享空间 | 共享云端数据，双设备使用仍待验 |
+| 私密存储 | 不提供 | 浏览器本地数据，不是私密云空间 | 完成目标部署、权限与恢复验收后使用 | 私有桶真实 HTTP 权限验收已通过，完整恢复仍待验 |
 
 本地默认仍为 `demo`，人物、日期、照片说明和故事均为虚构样例。该模式的数据继续保存在原浏览器中；本轮模式升级不清空已有演示记录。清除网站数据或更换设备会影响可见数据，导出文件也不等于自动云备份。本地已通过官方 Memos 26.11.1 的真实接口测试；该证据不代表 Render 生产服务已经上线，详见 [安全边界](docs/security.md)。
 
@@ -40,7 +40,7 @@ node scripts/serve.mjs --source
 
 ## 构建模式
 
-免费模式使用 `MEMORY_MODE=supabase`；当前 Cloudflare 构建命令为 `node scripts/build-cloudflare.mjs`，读取 [公共部署配置](deploy/cloudflare.public.json)，产物目录为 `dist`。它只接收项目 URL、publishable 公共密钥及 Turnstile Site Key；默认 `authReady=false`。SDK 版本固定为 2.119.0，构建校验 SHA-256 并本地打包，带出原 MIT 许可证和 Cloudflare CSP 响应头。私有资料、示例记录、后台密钥和口令均不进入此产物。环境变量入口仍见 [cloudflare.env.example](deploy/cloudflare.env.example)，正式配置与验收进度见 [免费托管指南](docs/hosting-free.md)。
+免费模式使用 `MEMORY_MODE=supabase`；当前 Cloudflare 构建命令为 `node scripts/build-cloudflare.mjs`，读取 [公共部署配置](deploy/cloudflare.public.json)，产物目录为 `dist`。它只接收项目 URL、publishable 公共密钥及 Turnstile Site Key；`authReady` 由维护者在受控验收或正式开放时启用，不能替代后端授权。SDK 版本固定为 2.119.0，构建校验 SHA-256 并本地打包，带出原 MIT 许可证和 Cloudflare CSP 响应头。私有资料、示例记录、后台密钥和口令均不进入此产物。环境变量入口仍见 [cloudflare.env.example](deploy/cloudflare.env.example)，正式配置与验收进度见 [免费托管指南](docs/hosting-free.md)。
 
 `MEMORY_MODE` 支持 `demo`、`preview`、`live`、`supabase`，默认 `demo`。构建先对全部 `src` JavaScript 执行 `node --check`，核对入口、静态/动态模块、样式和素材署名依赖，再复制白名单资源并重新生成 `dist/src/config.js`。唯一复制的 JSON 是 `assets/credits.json`；`.env`、部署配置、数据库、备份和文档不进入产物。`apiBase` 固定为空字符串供 Memos 使用；Supabase 的 HTTPS 项目 URL 另由构建校验，不能通过 URL 参数替换后端。
 
@@ -56,7 +56,7 @@ node scripts/build.mjs
 
 `MEMORY_TARGET=pages` 严格拒绝除 `preview` 外的模式。回到本地演示前清除 `MEMORY_TARGET` 并设 `MEMORY_MODE=demo`，避免沿用上一条命令的环境设置。
 
-PowerShell 正式构建示例：
+PowerShell Memos 自托管构建示例：
 
 ```powershell
 $env:MEMORY_MODE = 'live'
@@ -70,27 +70,31 @@ Shell 示例：
 MEMORY_MODE=live MEMORY_SPACE=spaces/your-space-id node scripts/build.mjs
 ```
 
-缺少有效 `MEMORY_SPACE` 的真实模式会构建失败。空间 ID 是资源标识，不是授权凭证；用户是否能读取和修改内容仍须由 Memos 验证。构建产物中不得放账号口令、Token、SMTP 密码或私人样例。
+缺少有效 `MEMORY_SPACE` 的 `live` 模式会构建失败。空间 ID 是资源标识，不是授权凭证；用户是否能读取和修改内容仍须由 Memos 验证。构建产物中不得放账号口令、Token、SMTP 密码或私人样例。
 
 ## GitHub 部署
 
 `Checks` 工作流在 Node.js 22 上运行内建测试、本地演示构建和 Pages 预览构建，不执行 `npm install`。`Publish login preview to GitHub Pages` 在 `main` 更新或手动触发时执行测试，强制 `MEMORY_MODE=preview` 与 `MEMORY_TARGET=pages`，然后上传 `dist` 并部署到 `github-pages` 环境。官方 Actions 使用固定提交 SHA。
 
-**发布边界：Pages 是公开登录预览，不是真实账号服务。** 此前公开演示站已成功部署；本轮改为登录预览，实际切换以新的 Actions 成功记录及线上 `config.js` 的 `preview` 值为准。仓库已公开，真实资料和凭证不提交仓库；正式私密服务不由 Pages 承担。
+**发布边界：GitHub Pages 是公开登录预览，不是真实账号服务。** 当前预览不加载记录或接受真实口令；Actions 强制构建为 `preview`。仓库已公开，真实资料和凭证不提交仓库；Cloudflare 正式入口的认证、数据与私有媒体由 Supabase 提供。
 
 需要仓库管理员把 Pages 构建源设为 **GitHub Actions**。源仓库私有不代表 Pages 网站私有；私有仓库是否能启用 Pages 取决于账号套餐，不能通过本项目自动改变仓库公开性。[GitHub 官方能力](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages)、[私有发布条件](https://docs.github.com/en/enterprise-cloud%40latest/pages/getting-started-with-github-pages/changing-the-visibility-of-your-github-pages-site)。
 
-Pages 只托管静态页面，不能运行 Memos、数据库或私密存储。Actions 负责构建，不是常驻后端；Codespaces 会停止，也不作为长期服务。GitHub 官方亦不建议 Pages 承担发送密码等敏感交易，因此预览不会尝试真实账号登录。[Pages 限制](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits)。
+GitHub Pages 只托管静态页面，不能运行 Memos、数据库或私密存储。Actions 负责构建，不是常驻后端；Codespaces 会停止，也不作为长期服务。GitHub 官方亦不建议 Pages 承担发送密码等敏感交易，因此预览不会尝试真实账号登录。[Pages 限制](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits)。
 
 ## 正式使用
 
-当前优先 [免费起步方案](docs/hosting-free.md)：Cloudflare Pages 托管前端，Supabase Free 提供原生认证、数据库与私有媒体，Turnstile 负责验证码。Supabase 项目已在指定 Free 组织创建；前端适配已实现。正式账号登录仍须完成原生验证码、关闭注册、私有 bucket 和真实权限验收，不能把代码测试通过等同于正式上线。现有 Memos/Render 模板保留为付费备选，没有创建其资源或订阅。口令和私密密钥不写入仓库或浏览器构建包。
+当前优先 [免费起步方案](docs/hosting-free.md)：Cloudflare Pages 托管前端，Supabase Free 提供原生认证、数据库与私有媒体，Turnstile 负责验证码。固定三账号、业务身份与私有桶已初始化，公开注册和匿名登录已关闭。使用公共 key 的直接密码请求在缺失或伪造验证码时均被原生 Auth 拒绝；真实 widget token 与正确口令的成功登录仍在验收中，尚不能称日常使用已经开放。口令和私密密钥不写入仓库或浏览器构建包。
+
+真实 HTTP 权限探针的 11 项检查已全部通过，包含九图发布、三账号鉴权下载、匿名拒绝、跨作者修改拒绝及原子换图；业务断言使用普通用户 JWT，管理员凭证只用于测试会话准备与本次测试数据清理。清理后独立查询确认测试记录、媒体登记、Storage 对象和测试会话均无残留，初始化与探针端点均已覆写为 410。探针使用管理员生成的临时 magic-link 会话，不能代替密码或 CAPTCHA 成功验收；详见 [验收记录](docs/verification-free.md)。
+
+现有 Memos/Render 模板保留为付费自托管备选，没有创建其资源或订阅。
 
 已有底座证据：本地使用官方 **Memos 26.11.1 Windows release** 和独立临时数据库验证两个成员及管理员登录、`SPACE` 共享、PNG 媒体鉴权、评论、回应/收藏、软删恢复及含媒体的内容导出。安全网关验证验证码后转交官方 Connect 与会话 Cookie，访问令牌仅保留在内存；本轮也已通过实际网关联测，Cloudflare Siteverify 使用测试替身。演示浏览器的发布、刷新保留和评论也已检查；这些证据不等于新的 Render 网关或正式双设备使用已经验收。
 
 尚未验证的部分包括 Docker/Render 容器实际运行、目标主机 TLS 与 Cookie 属性、实际视频设备兼容性及整卷备份恢复。托管费用、开通步骤及限制见 [Render 托管指南](docs/hosting-render.md)，真实测试复现命令见 [部署文档](docs/deployment.md) 和 [实现架构](docs/architecture.md)。本地演示的身份切换不是认证实现；也没有部署自动清理或自动备份任务。
 
-日常使用两个成员账号，维护使用一个独立管理员账号；管理员可以由其中一位成员持有。原生管理员具有服务器及 Memos 相应管理权限，本项目不承诺内容对服务器管理员不可见，也未实现端到端加密。
+日常使用两个成员账号，维护使用一个独立管理员账号；管理员可以由其中一位成员持有。Supabase 模式中的独立管理员仍使用普通 Auth 身份，其业务权限由受保护的 profiles 与 RLS 确定；项目拥有者的云端管理权限另行保管。Memos 自托管模式的原生管理员具有相应服务器及管理权限。本项目不承诺内容对后端维护者不可见，也未实现端到端加密。
 
 ## 开源与维护
 

@@ -1,6 +1,6 @@
 # Supabase 数据库与 Provider 契约
 
-状态：正式迁移为 `supabase/migrations/20261116041930_memory_private_space.sql`，已应用于专用 memory 项目。先用官方 CLI 创建迁移文件，工具应用后按远端实际 migration version 对齐文件名。`supabase/verify-isolation.sql` 已在云端单事务执行通过并回滚，残留临时 Auth 用户为 0；运行后 authReady=false、profiles/entries/Auth 用户/bucket 都为 0。匿名 HTTP 读七张业务表均为 401/42501。真实 Auth CAPTCHA、Storage 字节请求和正式发布仍未验收；数据库断言不替代这些证据。
+状态：正式迁移为 `supabase/migrations/20261116041930_memory_private_space.sql`，已应用于专用 memory 项目。先用官方 CLI 创建迁移文件，工具应用后按远端实际 migration version 对齐文件名。`supabase/verify-isolation.sql` 已在云端单事务执行通过并回滚，临时 Auth 用户没有残留。之后已通过官方 API 初始化三身份、UUID 白名单及私有桶，并用真实用户 JWT 完成 Storage 字节请求和十一项权限检查，测试文件、记录和会话清理后另经 SQL 核对。原生密码接口缺失及伪造 CAPTCHA 均被拒；真实 widget 加口令登录仍待验。最新部署及开关状态见 [验证记录](verification-free.md)，不能把 SQL 模拟身份断言等同真实认证。
 
 ## 身份与启动门
 
@@ -80,14 +80,14 @@ Provider 必须允许读取未完成草稿的合法字段，不能用“草稿�
 
 ## 云初始化顺序
 
-以下是待执行流程，不表示账号、bucket、验证码或业务访问已开通。项目创建、数据库执行与平台配置由根任务和项目拥有者统一控制；应用不能根据“项目存在”就自动打开运行门。
+以下为重新初始化时应遵守的流程，具体已经完成的步骤见 [验证记录](verification-free.md)。项目创建、数据库执行与平台配置由根任务和项目拥有者统一控制；应用不能根据“项目存在”就自动打开运行门。
 
 1. 核对项目 ref、组织、套餐、区域和状态；先列出现有 public 表、函数、授权与 storage.objects 策略，确认是专用目标。已有宽泛的 Storage SELECT/INSERT/UPDATE/DELETE policy 可能与本项目策略以 OR 合并放宽权限，不能不检查就追加。不要暴露 memory_private schema。
 2. 审阅草案，使用当前官方 CLI 的 `migration new` 生成迁移，保存可审核的 SQL；执行前确认实际目标与命令 `--help`。CLI v3 默认本地，托管变更需明确选择远端；工具提供 apply_migration 时由根任务按其说明控制。迁移后的 runtime_guard 必须仍为 false。
 3. 用可信服务端官方 Storage API 创建 memory-media，private、50,000,000 bytes 和八种 MIME；如 bucket 已存在，先读取并核验配置，不覆盖未知 bucket。API 创建 bucket 不等于文件隔离验收通过。
 4. 项目拥有者在 Supabase 控制台开启原生 Turnstile，secret 只留平台；Cloudflare widget 的 hostname 配实际前端域名。关闭 Allow new users to sign up、Allow anonymous sign-ins 及无关身份提供商，保留 email/password。测试直接 Auth password endpoint 缺少/假/过期 token 被拒，不能以隐藏网页按钮代替。Captcha 未配置或未验收，guard 保持 false。
 5. 验证原生防护配置后，再通过官方 Auth Admin API 创建两个普通用户和独立管理员，使用预先确认的固定用户名映射与秘密密码输入；若采用邮箱别名并 email_confirm=true，需明确没有真实邮箱时无法依赖邮箱自助找回。得到实际三个 Auth UUID 后，可信初始化写入 profiles，严格核对 slot/username/role，不能自动把未知已有账号提权或覆盖口令。不要在服务端留下长期公开的管理员初始化端点。
-6. 在事务中临时开启 guard 跑数据库权限矩阵并 ROLLBACK；实际用户 JWT/真实验证码/Storage 请求还要单独验收。确认未授权 API、第四用户、跨作者修改、草稿泄漏、附件替换及匿名下载均被拒；确认发布、清理和恢复成功。
+6. 数据库模拟权限矩阵可在事务中临时开启 guard 并最终 ROLLBACK。跨连接的真实 HTTP 验收需要维护者另行提交受控的 guard 开启，前端保持关闭；不能声称其他 HTTP 连接能看到未提交的开关。完成真实用户 JWT 与 Storage 检查后清理本次文件、记录和会话，再复查残留；异常时关闭 guard。真实 widget 加口令登录另行验收，不能用管理员生成会话替代。
 7. 只有上述实际结果满足要求，可信数据库管理员才永久设置 runtime_guard.authReady=true。若验收失败，false 保持；切回 false 可停止后续业务 API 访问，但不能收回用户已下载的副本、浏览器缓存或此前泄露的有效 bearer token，不能称为抹除数据。
 
 在原生验证码可用前，不批量创建三账号，不提前写个人记录，不开启业务访问。当前只持有 publishable key 的客户端不具有 Auth Admin 初始化能力；缺少可信初始化渠道时应停止在可审阅流程，不能把 secret 塞入浏览器作为替代。
