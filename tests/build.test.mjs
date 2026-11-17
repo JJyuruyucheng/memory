@@ -32,6 +32,8 @@ test('Supabase 构建仅发送公共配置，验证 SDK 完整性，默认关闭
     assert.ok(files.includes(path.join('assets', 'supabase-client-2.119.0.js')));
     assert.ok(files.includes(path.join('assets', 'sortable-1.15.7.js')));
     assert.ok(files.includes(path.join('assets', 'SORTABLE-LICENSE.txt')));
+    assert.ok(files.includes(path.join('assets', 'embla-carousel-8.6.0.js')));
+    assert.ok(files.includes(path.join('assets', 'EMBLA-LICENSE.txt')));
     assert.ok(files.includes(path.join('src', 'boot.js')));
     assert.ok(!files.includes(path.join('assets', 'photo-coffee.jpg')));
     assert.ok(!files.includes(path.join('src', 'sample-data.js')));
@@ -49,6 +51,12 @@ test('Supabase 构建仅发送公共配置，验证 SDK 完整性，默认关闭
     await assert.rejects(build({ rootDir: fixture, env, quiet: true }), /排序组件完整性检查失败/);
     assert.equal(await readFile(path.join(fixture, 'dist', 'keep.txt'), 'utf8'), 'last-good-build');
     await writeFile(sortableFile, sortableBytes);
+    const carouselFile = path.join(fixture, 'public', 'assets', 'embla-carousel-8.6.0.js');
+    const carouselBytes = await readFile(carouselFile);
+    await writeFile(carouselFile, 'tampered');
+    await assert.rejects(build({ rootDir: fixture, env, quiet: true }), /轮播组件完整性检查失败/);
+    assert.equal(await readFile(path.join(fixture, 'dist', 'keep.txt'), 'utf8'), 'last-good-build');
+    await writeFile(carouselFile, carouselBytes);
     await writeFile(path.join(fixture, 'public', 'assets', 'supabase-client-2.119.0.js'), 'tampered');
     await assert.rejects(build({ rootDir: fixture, env, quiet: true }), /完整性检查失败/);
     assert.equal(await readFile(path.join(fixture, 'dist', 'keep.txt'), 'utf8'), 'last-good-build');

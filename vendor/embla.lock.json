@@ -1,0 +1,17 @@
+{
+  "name": "embla-carousel",
+  "version": "8.6.0",
+  "license": "MIT",
+  "source": "https://github.com/davidjerleke/embla-carousel/tree/v8.6.0",
+  "registryIntegrity": "sha512-SjWyZBHJPbqxHOzckOfo8lHisEaJWmwd23XppYFYVh10bU66/Pn5tkVkbkCMZVdbUE5eTCI2nD8OyIP4Z+uwkA==",
+  "files": [
+    {
+      "file": "public/assets/embla-carousel-8.6.0.js",
+      "sha256": "f05b5dbfe37d79b636b9db74ad04ed5e99b4bce369d781b0fb38b0b2ac619e66"
+    },
+    {
+      "file": "public/assets/EMBLA-LICENSE.txt",
+      "sha256": "992490064b90ec94c302fe5f29dcc14cb44145857064e46f9ffe6c8f511c1093"
+    }
+  ]
+}

@@ -156,6 +156,130 @@
 .release-title { display: block; font-size: 15px; font-weight: 500; line-height: 1.6; }
 .release-details > ul { margin: 10px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); line-height: 1.9; }
 .release-details > ul li + li { margin-top: 5px; }
+
+/* Login photographs are their own public selection, separate from private memory attachments. */
+.login-story { position: relative; min-width: 0; overflow: hidden; }
+.login-story > [hidden] { display: none !important; }
+.login-photo-gallery { position: absolute; inset: 0; color: #fff; background: #35483d; }
+.login-photo-viewport { position: absolute; inset: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; touch-action: pan-y pinch-zoom; }
+.login-photo-viewport::-webkit-scrollbar { display: none; }
+.login-photo-viewport:focus-visible { outline: 3px solid white; outline-offset: -5px; }
+.login-photo-viewport.is-embla { overflow: hidden; scroll-snap-type: none; }
+.login-photo-track { display: flex; height: 100%; }
+.login-photo-slide { position: relative; flex: 0 0 100%; min-width: 0; height: 100%; scroll-snap-align: start; }
+.login-photo-slide img, .login-photo-hold { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.login-photo-slide img:not([src]) { visibility: hidden; }
+.login-photo-hold { position: absolute; inset: 0; pointer-events: none; }
+.login-photo-hold[hidden] { display: none; }
+.login-photo-brand { position: absolute; left: 38px; top: 38px; display: flex; align-items: center; gap: 10px; padding: 9px 13px 9px 9px; border-radius: 10px; background: rgba(255,255,255,.96); color: var(--text); pointer-events: none; }
+.login-photo-brand > span { display: flex; flex-direction: column; font-size: 23px; letter-spacing: .08em; line-height: 1.5; }
+.login-photo-brand small { font-size: 10px; letter-spacing: .02em; color: var(--muted); }
+.login-photo-bottom { position: absolute; bottom: 0; left: 0; right: 0; padding: 44px 28px 22px; background: linear-gradient(transparent, rgba(17,31,24,.78)); pointer-events: none; } /* taste-skill-ignore: neutral scrim over photographs keeps white captions readable. */
+.login-photo-bottom > p { font-size: 18px; line-height: 1.7; margin-bottom: 12px; }
+.login-photo-controls { display: flex; align-items: center; gap: 2px; min-height: 44px; pointer-events: auto; }
+.login-photo-controls button { color: white; min-width: 40px; min-height: 44px; padding: 8px; border-radius: 6px; background: transparent; border: 0; }
+.login-photo-controls button:hover { background: rgba(255,255,255,.16); }
+.login-photo-controls button:focus-visible { outline: 2px solid white; outline-offset: -2px; }
+.login-photo-controls .previous .icon { transform: rotate(180deg); }
+.login-photo-arrow { display: grid; place-items: center; flex: none; }
+.login-photo-arrow .icon { width: 19px; height: 19px; }
+.login-photo-count { font-size: 12px; margin-right: auto; white-space: nowrap; min-width: 40px; }
+.login-photo-dots { display: flex; align-items: center; justify-content: center; flex-wrap: nowrap; min-width: 0; }
+.login-photo-dots button { min-width: 20px; width: 22px; display: grid; place-items: center; padding: 0; }
+.login-photo-dots button span { width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,.55); transition: width .18s, background .18s; }
+.login-photo-dots button[aria-current=true] span { width: 15px; border-radius: 4px; background: white; }
+.login-photo-pause { font-size: 12px; white-space: nowrap; margin-left: 4px; }
+.login-photo-settings-copy { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--muted); padding-bottom: 4px; }
+.login-photo-settings-copy .icon { flex: none; width: 18px; height: 18px; }
+.dialog.login-photos-dialog { width: min(880px, calc(100% - 32px)); padding: 27px 28px; }
+.login-photos-heading > p { color: var(--muted); font-size: 13px; margin-top: 5px; }
+.login-photo-public-note { display: flex; align-items: flex-start; gap: 7px; padding: 11px 13px; margin-top: 17px; background: var(--mood-neutral-bg); color: var(--mood-neutral-ink); border-radius: 8px; font-size: 12px; line-height: 1.8; }
+.login-photo-public-note .icon { width: 16px; height: 16px; flex: none; margin-top: 3px; }
+.login-photo-editor-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 13px; margin-top: 19px; }
+.login-photo-add { min-height: 39px; }
+.login-photo-add:has(input:disabled) { color: var(--muted); background: var(--raised); cursor: not-allowed; }
+.login-photo-limit, .login-photo-total { font-size: 12px; color: var(--muted); }
+.login-photo-total { margin-left: auto; }
+.login-photo-editor-status { font-size: 12px; color: var(--muted); min-height: 23px; line-height: 1.8; margin-top: 8px; }
+.login-photo-editor-grid.editor-previews { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; margin-top: 7px; }
+.login-photo-editor-grid > .login-photo-preview { width: auto; height: auto; aspect-ratio: 1.25; min-width: 0; overflow: hidden; border-radius: 9px; background: var(--raised); }
+.login-photo-thumbnail { width: 100%; height: 100%; }
+.login-photo-thumbnail img { width: 100%; height: 100%; object-fit: cover; }
+.login-photo-thumbnail > span { display: flex; align-items: center; justify-content: center; height: 100%; padding: 20px; font-size: 12px; text-align: center; color: var(--muted); }
+.login-photo-preview .login-photo-handle { position: absolute; display: flex; align-items: center; gap: 4px; left: 0; bottom: 0; padding: 7px 9px; min-height: 36px; background: rgba(255,255,255,.96); color: var(--accent); cursor: grab; border: 0; border-radius: 0 7px 0 7px; user-select: none; touch-action: none; font-size: 12px; }
+.login-photo-handle .icon { width: 12px; height: 17px; }
+.login-photo-preview .login-photo-replace { position: absolute; bottom: 0; right: 0; overflow: hidden; display: grid; place-items: center; min-height: 36px; min-width: 50px; margin: 0; background: rgba(255,255,255,.96); color: var(--accent); border-radius: 7px 0 7px 0; font-size: 12px; font-weight: 400; cursor: pointer; }
+.login-photo-replace input { position: absolute; inset: 0; opacity: 0; margin: 0; min-height: 0; width: 100%; height: 100%; cursor: pointer; }
+.login-photo-remove { position: absolute; right: 5px; top: 5px; display: grid; place-items: center; width: 30px; height: 30px; padding: 6px; border: 0; border-radius: 50%; background: rgba(255,255,255,.96); color: var(--text); }
+.login-photo-remove .icon { width: 16px; height: 16px; }
+.login-photo-replace:focus-within, .login-photo-handle:focus-visible, .login-photo-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.login-photo-editor-grid.is-empty { min-height: 125px; display: grid; grid-template-columns: 1fr; background: var(--raised); border-radius: 9px; place-items: center; }
+.login-photo-empty { color: var(--muted); font-size: 13px; padding: 24px; }
+.login-photo-order-help { margin-top: 8px; font-size: 11px; color: var(--muted); }
+.login-photo-order-help[hidden] { display: none; }
+.login-photo-cleanup { margin-top: 16px; }
+.login-photo-cleanup > .text-button { font-size: 11px; color: var(--muted); }
+.login-photo-cleanup-confirm { margin-top: 7px; padding: 10px 12px; background: var(--raised); border-radius: 8px; }
+.login-photo-cleanup-confirm[hidden] { display: none; }
+.login-photo-cleanup-confirm p { color: var(--muted); font-size: 12px; line-height: 1.8; margin-bottom: 5px; }
+.login-photo-cleanup-confirm .text-button { font-size: 12px; margin-right: 14px; color: var(--accent); min-height: 32px; }
+.login-photos-dialog .dialog-footer { margin-top: 17px; }
+.login-photos-dialog .dialog-footer > .text-button { font-size: 13px; }
+.login-photo-save-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 9px; }
+#login-photos-form[hidden] { display: none; }
+.login-photos-preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 18px; padding-right: 30px; }
+.login-photos-preview-heading h2 { padding-right: 0; }
+.login-photos-preview-heading .text-button { color: var(--accent); white-space: nowrap; font-size: 12px; }
+.login-photos-preview .login-layout { border-radius: 13px; }
+.login-photos-preview .login-story { min-height: 420px; padding: 28px; }
+.login-photos-preview .login-story-copy { padding: 25px 0; }
+.login-photos-preview .login-story-copy h1 { font-size: 25px; }
+.login-photos-preview .login-layout .login-panel { padding: 28px 24px; }
+.login-photos-preview .login-panel h2 { font-size: 20px; }
+.login-photos-preview .login-panel label { display: block; font-size: 12px; margin-top: 15px; }
+.login-photos-preview .login-panel .primary { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 23px; font-size: 12px; }
+.login-photos-preview .login-photo-brand { left: 24px; top: 24px; }
+.login-photos-preview .login-photo-bottom { padding-left: 17px; padding-right: 13px; }
+.login-photos-preview .login-photo-dots button { width: 17px; min-width: 17px; }
+.login-photo-preview-note { margin-top: 12px; color: var(--muted); font-size: 12px; }
+@media(max-width: 900px) {
+  .login-photo-brand { top: 27px; left: 27px; }
+  .login-photo-bottom { padding-left: 22px; padding-right: 18px; }
+  .login-photo-dots button { min-width: 16px; width: 17px; }
+  .login-photo-controls { gap: 0; }
+  .login-photo-controls .login-photo-pause { padding: 4px; min-width: 36px; margin-left: 0; }
+}
+@media(max-width: 600px) {
+  .login-story.has-login-photos { display: block; height: 190px; min-height: 190px; padding: 0; }
+  .login-photo-brand { top: 15px; left: 17px; padding: 5px 9px 5px 5px; gap: 5px; border-radius: 7px; }
+  .login-photo-brand > img { width: 31px; height: 31px; }
+  .login-photo-brand > span { font-size: 18px; }
+  .login-photo-brand small { font-size: 9px; }
+  .login-photo-bottom { padding: 27px 11px 6px 17px; }
+  .login-photo-bottom > p { font-size: 13px; margin-bottom: 0; }
+  .login-photo-controls { min-height: 44px; }
+  .login-photo-count { font-size: 11px; }
+  .login-photo-dots button { min-width: 19px; width: 20px; }
+  .login-photo-controls button { min-width: 36px; }
+  .login-photo-dots button { min-width: 19px; }
+  .dialog.login-photos-dialog { width: calc(100% - 20px); padding: 25px 19px; }
+  .login-photo-editor-grid.editor-previews { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .login-photo-limit { order: 3; flex-basis: 100%; }
+  .login-photo-preview .login-photo-handle, .login-photo-preview .login-photo-replace { min-height: 44px; min-width: 52px; }
+  .login-photo-remove { width: 44px; height: 44px; right: 0; top: 0; padding: 12px; border-radius: 0 8px 0 8px; }
+  .login-photo-public-note { font-size: 12px; }
+  .login-photo-settings-copy { line-height: 1.8; }
+  .login-photo-save-actions { margin-left: auto; gap: 6px; }
+  .login-photo-save-actions > button { font-size: 12px; padding-left: 10px; padding-right: 10px; }
+  .login-photos-preview .login-story { min-height: 170px; height: 170px; }
+  .login-photos-preview .login-photo-brand { top: 13px; left: 14px; }
+  .login-photos-preview .login-layout .login-panel { padding: 22px 20px; }
+  .login-photos-preview-heading { gap: 8px; padding-right: 24px; }
+  .login-photos-preview-heading h2 { font-size: 18px; }
+}
+@media(prefers-reduced-motion: reduce) {
+  .login-photo-dots button span { transition: none; }
+}
 .release-meta b { color: var(--accent); font-weight: 500; font-size: 11px; }
 .release-chevron { position: absolute; right: 0; top: 15px; width: 16px; height: 16px; color: var(--muted); }
 .release-details[open] .release-chevron { transform: rotate(180deg); }

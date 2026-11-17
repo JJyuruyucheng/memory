@@ -5,11 +5,14 @@ import { renderEntryMedia } from './entry-media.js';
 import { releaseHistory } from './releases.js';
 import { mountDatePickers, destroyDatePickers } from './date-pickers.js';
 import { mountAttachmentSorter, destroyAttachmentSorter } from './attachment-sorter.js';
+import { mountLoginCarousel } from './login-carousel.js';
+import { loginPhotoEditorMarkup, mountLoginPhotoEditor } from './login-photo-editor.js';
+import { prepareLoginPhoto } from './login-photo-image.js';
 import { escapeHtml as esc, filterEntries, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
 
 const app = document.querySelector('#app');
 const modalRoot = document.querySelector('#modal-root');
-let provider, loginVerification;
+let provider, loginVerification, loginPhotos, loginCarousel, loginPhotoEditor;
 const moodNames = { happy: '微笑', neutral: '一般', sad: '难受', unset: '未填写' };
 const moodIcons = { happy: 'smile', neutral: 'neutral', sad: 'sad' };
 const filters = { query: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all', favoritesOnly: false, trash: false };
@@ -49,6 +52,7 @@ function render() {
   document.body.classList.toggle('is-login', !state?.currentUser && CONFIG.mode !== 'demo');
   if (!state?.currentUser) return renderLogin();
   loginVerification?.destroy(); loginVerification = null;
+  loginCarousel?.destroy(); loginCarousel = null;
   const active = document.activeElement?.id, selection = document.activeElement?.selectionStart;
   const current = state.currentUser, stats = computeStats(visibleEntries());
   app.innerHTML = `
@@ -154,6 +158,7 @@ function renderSettings() {
     <section class="settings-section"><div><h2>共同空间</h2><p>会显示在首页，也会和回忆一起导出。</p>${!editable ? `<p class="permission-note" id="shared-permission">${icon('lock')}仅管理员可修改 · 当前可查看</p>` : ''}</div><fieldset ${!editable ? 'disabled aria-describedby="shared-permission"' : ''}><label>空间名字<input name="spaceName" value="${esc(state.settings.spaceName)}" maxlength="30" required /></label><label>一句喜欢的话<input name="subtitle" value="${esc(state.settings.subtitle || '')}" maxlength="80" /></label><label>故事开始的那天<input name="startDate" type="date" value="${esc(state.settings.startDate)}" required /></label></fieldset></section>
     <section class="settings-section"><div><h2>纪念日</h2><p>每年重复的日子，会自动计算下一次相遇。</p>${!editable ? `<p class="permission-note" id="anniversary-permission">${icon('lock')}仅管理员可修改 · 当前可查看</p>` : ''}</div><fieldset ${!editable ? 'disabled aria-describedby="anniversary-permission"' : ''}><div id="anniversary-fields">${(state.settings.anniversaries || []).map(a => anniversaryFields(a)).join('')}</div><button type="button" class="text-button" data-action="add-anniversary">${icon('plus')}加一个日子</button></fieldset></section>
     ${editable ? '<div class="settings-submit"><button type="submit" class="primary">保存我们的小世界</button></div>' : ''}</form>
+    ${loginPhotos ? `<section class="settings-section login-photo-settings"><div><h2>登录页照片</h2><p>你们都可以新增、替换和调整顺序。</p></div><div class="settings-actions"><div class="login-photo-settings-copy">${icon('photo')}<span>留一组合照，装点回家的第一眼。</span></div><button class="secondary" data-action="login-photos">${icon('edit')}编辑登录页照片</button></div></section>` : ''}
     <section class="settings-section"><div><h2>数据与账号</h2><p>${CONFIG.mode === 'demo' ? '试写记录保存在此浏览器；清理网站数据会丢失它们。' : '导出含回忆和媒体，请妥善保存。'}</p></div><div class="settings-actions"><button class="secondary" data-action="export-mine">${icon('download')}导出我写的回忆</button>${state.currentUser.role === 'admin' || CONFIG.mode === 'demo' ? '<button class="secondary" data-action="export-all">导出完整共同档案</button>' : ''}${CONFIG.mode === 'demo' ? '<button class="text-button danger" data-action="reset-demo">恢复初始演示内容</button>' : '<button class="text-button" data-action="logout">退出当前账号</button>'}</div></section>`;
 }
 function anniversaryFields(a = {}) { return `<div class="anniversary-fields" data-anniversary="${esc(a.id || crypto.randomUUID())}"><label><span class="sr-only">纪念日名字</span><input name="ann-title" placeholder="例如：第一次见面" value="${esc(a.title || '')}" maxlength="40" required /></label><label><span class="sr-only">纪念日期</span><input name="ann-date" type="date" value="${esc(a.date || '')}" required /></label><label class="checkbox-label"><input name="ann-yearly" type="checkbox" ${a.yearly ? 'checked' : ''} />每年</label><button type="button" class="icon-button" data-action="remove-anniversary" aria-label="移除纪念日">${icon('close')}</button></div>`; }
@@ -174,7 +179,9 @@ function openDialog(content, cls = '') {
   dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) closeModal(); } });
 }
 function closeModal(saveDraft = true) {
+  if (saveDraft && loginPhotoEditor?.isSaving) { toast('照片正在保存，请稍候。'); return; }
   if (saveDraft) persistDraft();
+  loginPhotoEditor?.destroy(); loginPhotoEditor = null;
   destroyDatePickers(modalRoot);
   destroyAttachmentSorter(modalRoot);
   clearTimeout(draftTimer); modalRoot.querySelector('dialog')?.close(); modalRoot.innerHTML = '';
@@ -216,7 +223,7 @@ function renderEditorPreviews() {
 }
 document.addEventListener('keydown', event => {
   const handle = event.target.closest('.preview-handle');
-  if (!handle || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+  if (!handle?.closest('#editor-previews') || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
   event.preventDefault();
   const from = editorAttachments.findIndex(item => item.key === handle.dataset.key);
   const to = event.key === 'Home' ? 0 : event.key === 'End' ? editorAttachments.length - 1 : from + (['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1);
@@ -282,6 +289,15 @@ document.addEventListener('click', async event => {
       case 'confirm-reset': state = await provider.resetDemo(); closeModal(); render(); toast('已恢复初始示例。'); break;
       case 'resume-demo': await provider.switchUser(value); render(); break;
       case 'updates': showUpdates(); break;
+      case 'login-photos': {
+        if (!loginPhotos || !state.currentUser) throw new Error('请先登录后再编辑照片。');
+        openDialog(loginPhotoEditorMarkup(), 'login-photos-dialog');
+        loginPhotoEditor = mountLoginPhotoEditor(modalRoot, { provider: loginPhotos, prepareFile: prepareLoginPhoto,
+          onSaved: manifest => { closeModal(false); toast(manifest?.cleanupPending ? '登录页照片已更新，部分旧文件等待清理。' : '登录页照片已更新。'); },
+          onCancel: () => closeModal(),
+        });
+        break;
+      }
       case 'logout': {
         let failure;
         try { await provider.logout(); } catch (error) { failure = error; }
@@ -374,11 +390,13 @@ window.addEventListener('hashchange', () => { if (bootPending || (!provider && C
 window.addEventListener('memory:session-ended', () => {
   recoveryEpoch++; reconnectAttempt = null; reconnectError = null; reconnectPending = false; bootPending = true;
   provider?.dispose?.(); state.currentUser = null; clearDrafts(); closeModal(false);
+  loginCarousel?.destroy(); loginCarousel = null;
   app.innerHTML = '<main class="boot"><h1>登录状态已更新</h1><p>正在重新打开我们的空间…</p></main>';
 });
 
 function renderLogin() {
   loginVerification?.destroy(); loginVerification = null;
+  loginCarousel?.destroy(); loginCarousel = null;
   if (CONFIG.mode === 'demo') {
     app.innerHTML = `<main class="boot"><img src="./assets/mark.svg" alt="" width="48" height="48" /><h1>选一个示例视角</h1><p>这是本机演示，不需要密码。</p>${state.users.map(u => `<button class="secondary" data-action="resume-demo" data-value="${esc(u.id)}">${esc(u.name)}</button>`).join('')}</main>`;
     return;
@@ -386,6 +404,9 @@ function renderLogin() {
   const preview = CONFIG.mode === 'preview';
   app.innerHTML = `<main class="login-page"><div class="login-layout"><section class="login-story" aria-label="朝夕"><a class="login-brand" href="#"><img src="./assets/mark.svg" alt="" width="48" height="48" /><span>朝夕<small>我们的记忆</small></span></a><div class="login-story-copy"><p class="login-intro">留给两个人的地方</p><h1>把日子过成故事，<br>把我们写进朝夕。</h1><p>一顿晚饭，一次远行，<br>还有那些说不完的小事。<br>都值得好好记住。</p></div><p class="login-story-end">朝夕之间，都是我们。</p></section><section class="login-panel" aria-labelledby="login-title"><div class="login-lock">${icon('lock')}<span>${preview ? '登录预览' : '我们的共同空间'}</span></div><h2 id="login-title">好久不见，欢迎回家</h2><p>登录后，翻开属于我们的那一页。</p><form id="login-form"><label for="login-username">账号<input id="login-username" name="username" autocomplete="${preview ? 'off' : 'username'}" placeholder="输入你的账号" maxlength="64" autocapitalize="none" spellcheck="false" required ${preview ? 'disabled' : ''} /></label><label for="login-password">密码<input id="login-password" name="password" type="password" autocomplete="${preview ? 'off' : 'current-password'}" placeholder="输入你的密码" maxlength="256" required ${preview ? 'disabled' : ''} /></label><div class="login-verification"><div id="login-captcha"></div><p id="verification-status" role="status">${preview ? '正式登录服务尚未接通。' : '正在准备安全验证…'}</p><button type="button" id="verification-retry" class="text-button" hidden>重新加载验证</button></div><p class="form-error" role="alert"></p><button type="submit" class="primary" disabled>翻开我们的记忆${icon('arrow')}</button></form>${preview ? '<p class="login-preview-note">当前是 GitHub Pages 登录预览。私密空间待后端开通后启用，这里不会提交账号密码，也不会展示回忆。</p>' : `<p class="login-footnote">${icon('lock')}仅限受邀账号 · 不开放注册<br />默认在本设备保持登录 30 天，请勿在公用设备登录</p>`}<button class="text-button login-updates" data-action="updates">系统更新信息</button></section></div></main>`;
   if (!preview) {
+    if (loginPhotos) loginCarousel = mountLoginCarousel(app.querySelector('.login-story'), {
+      loadPhotos: () => loginPhotos.getLoginPhotos(), getPhotoUrl: id => loginPhotos.getLoginPhotoUrl(id),
+    });
     if (loginPending) {
       document.querySelector('#login-form').setAttribute('aria-busy', 'true');
       document.querySelectorAll('#login-form input').forEach(input => { input.disabled = true; });
@@ -399,6 +420,7 @@ function renderLogin() {
 
 function renderReconnect(error = null) {
   loginVerification?.destroy(); loginVerification = null;
+  loginCarousel?.destroy(); loginCarousel = null;
   app.innerHTML = `<main class="boot"><img src="./assets/mark.svg" alt="" width="48" height="48" /><h1>${error ? '暂时未能连接' : '正在恢复登录…'}</h1><p>${error ? esc(error.message || '请检查网络后重新连接。') : '正在确认本设备的登录状态。'}</p>${error ? `<button class="secondary" data-action="${provider ? 'reconnect' : 'retry'}">重新连接</button>` : ''}</main>`;
 }
 async function reconnect() {
@@ -426,6 +448,7 @@ try {
     if (CONFIG.mode === 'live') provider = (await import('./memos-provider.js')).createMemosProvider(CONFIG);
     else if (CONFIG.mode === 'supabase') {
       const client = await (await import('./supabase-client.js')).createBrowserSupabaseClient(CONFIG);
+      loginPhotos = (await import('./login-photos-provider.js')).createLoginPhotosProvider({ client, getCurrentUser: () => state.currentUser });
       provider = (await import('./supabase-provider.js')).createSupabaseProvider({ ...CONFIG, client, onSessionChanged: ({ restore = true } = {}) => {
         recoveryEpoch++; reconnectAttempt = null;
         clearDrafts(); closeModal(false); reconnectError = null; reconnectPending = restore;
@@ -433,7 +456,10 @@ try {
         // account's rendered text or media while another tab changes accounts.
         if (restore) { const eventEpoch = recoveryEpoch; renderReconnect(); setTimeout(() => { if (eventEpoch === recoveryEpoch) reconnect(); }, 0); } else render();
       } });
-    } else provider = (await import('./demo-provider.js')).createDemoProvider();
+    } else {
+      provider = (await import('./demo-provider.js')).createDemoProvider();
+      loginPhotos = (await import('./login-photos-provider.js')).createDemoLoginPhotosProvider({ getCurrentUser: () => state.currentUser });
+    }
     const restored = await provider.init(); if (bootEpoch === recoveryEpoch) state = restored;
   }
   if (bootEpoch === recoveryEpoch) render();

@@ -188,6 +188,15 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
     if (createHash('sha256').update(bytes).digest('hex') !== item.sha256) throw new Error('附件排序组件完整性检查失败。');
     sorterAssets.push({ file: item.file, bytes });
   }
+  const carouselLock = JSON.parse(await readFile(new URL('../vendor/embla.lock.json', import.meta.url), 'utf8'));
+  if (carouselLock.name !== 'embla-carousel' || carouselLock.version !== '8.6.0' || carouselLock.files.length !== 2) throw new Error('轮播组件锁定清单不匹配。');
+  const carouselAssets = [];
+  for (const item of carouselLock.files) {
+    if (!/^public\/assets\/(embla-carousel-8\.6\.0\.js|EMBLA-LICENSE\.txt)$/.test(item.file)) throw new Error('轮播组件路径不在白名单。');
+    const bytes = await readFile(await requireFile(root, item.file));
+    if (createHash('sha256').update(bytes).digest('hex') !== item.sha256) throw new Error('轮播组件完整性检查失败。');
+    carouselAssets.push({ file: item.file, bytes });
+  }
 
   // Validate before touching a previous build, so failed source checks preserve it.
   await preflight(root, excluded);
@@ -220,6 +229,7 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
   await writeFile(path.join(dist, 'assets', 'credits.json'), await readFile(path.join(root, 'public', 'assets', 'credits.json')));
   for (const item of pickerAssets) await writeFile(path.join(dist, 'assets', path.basename(item.file)), item.bytes);
   for (const item of sorterAssets) await writeFile(path.join(dist, 'assets', path.basename(item.file)), item.bytes);
+  for (const item of carouselAssets) await writeFile(path.join(dist, 'assets', path.basename(item.file)), item.bytes);
   if (sdk) {
     await writeFile(path.join(dist, 'assets', 'supabase-client-2.119.0.js'), sdk);
     await writeFile(path.join(dist, 'assets', 'SUPABASE-LICENSE.txt'), await readFile(path.join(root, 'vendor', 'SUPABASE-LICENSE')));
