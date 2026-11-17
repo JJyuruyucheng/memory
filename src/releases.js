@@ -2,6 +2,13 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 8, date: '2026-11-17', version: 'v0.6.1', title: '给照片留出完整的位置',
+    changes: [
+      '登录页 Logo 移至右侧登录区域，照片上不再叠加品牌标识，编辑器预览同步调整。',
+      '登录页照片默认每五秒自动切换，保留手动切换、暂停和减少动态效果支持。',
+    ],
+  },
+  {
     number: 7, date: '2026-11-17', version: 'v0.6.0', title: '回家的第一眼，是我们',
     changes: [
       '登录页新增照片轮播，支持左右切换、触屏滑动、圆点选择和暂停播放。',

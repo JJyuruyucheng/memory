@@ -4,7 +4,7 @@
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
-当前产品版本 **v0.6.0**：登录页照片轮播，以及两位成员均可使用的照片编辑、排序与保存前预览。用户已明确同意仅专门发布的轮播照片公开；原相册、记录附件与悄悄话保持原权限。入口为「我们与设置 → 登录页照片」，最多八张。详见 [修改日志](CHANGELOG.md)、[本版验证记录](docs/release-v0.6.0.md) 和 [照片协议](docs/login-photos.md)。
+当前产品版本 **v0.6.1**：登录页 Logo 移到右侧登录区域，照片默认每五秒轮播，编辑预览同步调整。两位成员均可在「我们与设置 → 登录页照片」新增、替换和排序最多八张图片。仅专门发布的轮播照片公开；原相册、记录附件与悄悄话保持原权限。详见 [修改日志](CHANGELOG.md)、[本版验证记录](docs/release-v0.6.1.md) 和 [照片协议](docs/login-photos.md)。
 
 **[Cloudflare 正式入口：朝夕](https://memory-awv.pages.dev/)** 已上线；用户已确认使用 `xbl` 完成真实 Turnstile 与口令登录并进入时间线。原生 Auth 已拒绝缺失和伪造验证码，真实用户 JWT 下的记录与私有图片权限探针也已通过。真实验证码 token 的过期与重放拒绝仍待专项验收。[GitHub Pages](https://jjyuruyucheng.github.io/memory/) 继续作为 `preview`：不加载记录、不提交真实口令，也没有跳过登录入口。
 

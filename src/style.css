@@ -158,6 +158,10 @@
 .release-details > ul li + li { margin-top: 5px; }
 
 /* Login photographs are their own public selection, separate from private memory attachments. */
+.login-panel-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+.login-panel-heading .login-brand { flex: none; gap: 10px; font-size: 24px; letter-spacing: .08em; color: var(--text); }
+.login-panel-heading .login-lock { margin: 0; font-size: 11px; }
+.login-panel-heading .login-brand img { flex: none; }
 .login-story { position: relative; min-width: 0; overflow: hidden; }
 .login-story > [hidden] { display: none !important; }
 .login-photo-gallery { position: absolute; inset: 0; color: #fff; background: #35483d; }
@@ -171,9 +175,6 @@
 .login-photo-slide img:not([src]) { visibility: hidden; }
 .login-photo-hold { position: absolute; inset: 0; pointer-events: none; }
 .login-photo-hold[hidden] { display: none; }
-.login-photo-brand { position: absolute; left: 38px; top: 38px; display: flex; align-items: center; gap: 10px; padding: 9px 13px 9px 9px; border-radius: 10px; background: rgba(255,255,255,.96); color: var(--text); pointer-events: none; }
-.login-photo-brand > span { display: flex; flex-direction: column; font-size: 23px; letter-spacing: .08em; line-height: 1.5; }
-.login-photo-brand small { font-size: 10px; letter-spacing: .02em; color: var(--muted); }
 .login-photo-bottom { position: absolute; bottom: 0; left: 0; right: 0; padding: 44px 28px 22px; background: linear-gradient(transparent, rgba(17,31,24,.78)); pointer-events: none; } /* taste-skill-ignore: neutral scrim over photographs keeps white captions readable. */
 .login-photo-bottom > p { font-size: 18px; line-height: 1.7; margin-bottom: 12px; }
 .login-photo-controls { display: flex; align-items: center; gap: 2px; min-height: 44px; pointer-events: auto; }
@@ -238,12 +239,10 @@
 .login-photos-preview .login-panel h2 { font-size: 20px; }
 .login-photos-preview .login-panel label { display: block; font-size: 12px; margin-top: 15px; }
 .login-photos-preview .login-panel .primary { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 23px; font-size: 12px; }
-.login-photos-preview .login-photo-brand { left: 24px; top: 24px; }
 .login-photos-preview .login-photo-bottom { padding-left: 17px; padding-right: 13px; }
 .login-photos-preview .login-photo-dots button { width: 17px; min-width: 17px; }
 .login-photo-preview-note { margin-top: 12px; color: var(--muted); font-size: 12px; }
 @media(max-width: 900px) {
-  .login-photo-brand { top: 27px; left: 27px; }
   .login-photo-bottom { padding-left: 22px; padding-right: 18px; }
   .login-photo-dots button { min-width: 16px; width: 17px; }
   .login-photo-controls { gap: 0; }
@@ -251,10 +250,6 @@
 }
 @media(max-width: 600px) {
   .login-story.has-login-photos { display: block; height: 190px; min-height: 190px; padding: 0; }
-  .login-photo-brand { top: 15px; left: 17px; padding: 5px 9px 5px 5px; gap: 5px; border-radius: 7px; }
-  .login-photo-brand > img { width: 31px; height: 31px; }
-  .login-photo-brand > span { font-size: 18px; }
-  .login-photo-brand small { font-size: 9px; }
   .login-photo-bottom { padding: 27px 11px 6px 17px; }
   .login-photo-bottom > p { font-size: 13px; margin-bottom: 0; }
   .login-photo-controls { min-height: 44px; }
@@ -272,7 +267,6 @@
   .login-photo-save-actions { margin-left: auto; gap: 6px; }
   .login-photo-save-actions > button { font-size: 12px; padding-left: 10px; padding-right: 10px; }
   .login-photos-preview .login-story { min-height: 170px; height: 170px; }
-  .login-photos-preview .login-photo-brand { top: 13px; left: 14px; }
   .login-photos-preview .login-layout .login-panel { padding: 22px 20px; }
   .login-photos-preview-heading { gap: 8px; padding-right: 24px; }
   .login-photos-preview-heading h2 { font-size: 18px; }
