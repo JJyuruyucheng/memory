@@ -152,13 +152,35 @@ function renderAnniversaries() {
   const anniversaries = (state.settings.anniversaries || []).map(a => anniversaryInfo(a, new Date()));
   return `${heading('值得记住的日子', '有些日期，一想到就会嘴角上扬。', false)}<div class="anniversary-grid">${anniversaries.map(a => `<article class="anniversary-card">${icon('calendar')}<h2>${esc(a.title)}</h2><p>${esc(a.date)}${a.yearly ? ' · 每年纪念' : ''}</p><div class="num">${a.isToday ? '今天' : a.isPast ? '已珍藏' : a.daysUntil}<small>${!a.isToday && !a.isPast ? '天后' : ''}</small></div><span>${a.isPast ? '这一页已经成为回忆' : a.isToday ? '把今天也好好记下来' : `下一次：${esc(a.nextDate)}`}</span></article>`).join('') || '<div class="empty-state"><h2>留一个日子，给期待</h2><p>在“我们与设置”中添加纪念日。</p></div>'}</div><a href="#us" class="secondary inline-button">${icon('settings')}管理纪念日</a>`;
 }
+function renderLoginPhotoSettings() {
+  return loginPhotos ? `<section class="settings-section login-photo-settings"><div><h2>登录页照片</h2><p>你们都可以新增、替换和调整顺序。</p></div><div class="settings-actions"><div class="login-photo-settings-copy">${icon('photo')}<span>留一组合照，装点回家的第一眼。</span></div><button class="secondary" data-action="login-photos">${icon('edit')}编辑登录页照片</button></div></section>` : '';
+}
+function mountLoginPhotoStory() {
+  const story = app.querySelector('.login-story');
+  if (!story || !loginPhotos || ['demo', 'preview'].includes(CONFIG.mode)) return;
+  loginCarousel?.destroy();
+  loginCarousel = mountLoginCarousel(story, { loadPhotos: () => loginPhotos.getLoginPhotos(), getPhotoUrl: id => loginPhotos.getLoginPhotoUrl(id) });
+}
+function loadOptionalLoginPhotos(create) {
+  // Start independently from Auth restoration. A slow optional module cannot hold the first screen open.
+  import('./login-photos-provider.js').then(create).then(photos => {
+    loginPhotos = photos;
+    if (bootPending) return;
+    if (!state.currentUser) { mountLoginPhotoStory(); return; }
+    const form = app.querySelector('#settings-form');
+    if (route() === 'us' && form && !app.querySelector('.login-photo-settings')) {
+      // Keep the actual form nodes, focus, and any unsaved shared settings intact.
+      form.insertAdjacentHTML('afterend', renderLoginPhotoSettings());
+    }
+  }).catch(() => {}); // Keep the original login story and ordinary settings when the optional feature fails.
+}
 function renderSettings() {
   const editable = state.currentUser.role === 'admin';
   return `${heading('我们与这个小世界', '把喜欢的称呼，和故事的开头留在这里。', false)}<nav class="settings-shortcuts" aria-label="更多回忆入口">${navLink(['favorites', 'bookmark', '我的收藏'])}${navLink(['anniversaries', 'heart', '纪念日'])}${navLink(['trash', 'trash', '回收站'])}${state.currentUser.role === 'admin' ? navLink(['admin', 'shield', '管理小屋']) : ''}</nav><form id="settings-form" class="settings-form">
     <section class="settings-section"><div><h2>共同空间</h2><p>会显示在首页，也会和回忆一起导出。</p>${!editable ? `<p class="permission-note" id="shared-permission">${icon('lock')}仅管理员可修改 · 当前可查看</p>` : ''}</div><fieldset ${!editable ? 'disabled aria-describedby="shared-permission"' : ''}><label>空间名字<input name="spaceName" value="${esc(state.settings.spaceName)}" maxlength="30" required /></label><label>一句喜欢的话<input name="subtitle" value="${esc(state.settings.subtitle || '')}" maxlength="80" /></label><label>故事开始的那天<input name="startDate" type="date" value="${esc(state.settings.startDate)}" required /></label></fieldset></section>
     <section class="settings-section"><div><h2>纪念日</h2><p>每年重复的日子，会自动计算下一次相遇。</p>${!editable ? `<p class="permission-note" id="anniversary-permission">${icon('lock')}仅管理员可修改 · 当前可查看</p>` : ''}</div><fieldset ${!editable ? 'disabled aria-describedby="anniversary-permission"' : ''}><div id="anniversary-fields">${(state.settings.anniversaries || []).map(a => anniversaryFields(a)).join('')}</div><button type="button" class="text-button" data-action="add-anniversary">${icon('plus')}加一个日子</button></fieldset></section>
     ${editable ? '<div class="settings-submit"><button type="submit" class="primary">保存我们的小世界</button></div>' : ''}</form>
-    ${loginPhotos ? `<section class="settings-section login-photo-settings"><div><h2>登录页照片</h2><p>你们都可以新增、替换和调整顺序。</p></div><div class="settings-actions"><div class="login-photo-settings-copy">${icon('photo')}<span>留一组合照，装点回家的第一眼。</span></div><button class="secondary" data-action="login-photos">${icon('edit')}编辑登录页照片</button></div></section>` : ''}
+    ${renderLoginPhotoSettings()}
     <section class="settings-section"><div><h2>数据与账号</h2><p>${CONFIG.mode === 'demo' ? '试写记录保存在此浏览器；清理网站数据会丢失它们。' : '导出含回忆和媒体，请妥善保存。'}</p></div><div class="settings-actions"><button class="secondary" data-action="export-mine">${icon('download')}导出我写的回忆</button>${state.currentUser.role === 'admin' || CONFIG.mode === 'demo' ? '<button class="secondary" data-action="export-all">导出完整共同档案</button>' : ''}${CONFIG.mode === 'demo' ? '<button class="text-button danger" data-action="reset-demo">恢复初始演示内容</button>' : '<button class="text-button" data-action="logout">退出当前账号</button>'}</div></section>`;
 }
 function anniversaryFields(a = {}) { return `<div class="anniversary-fields" data-anniversary="${esc(a.id || crypto.randomUUID())}"><label><span class="sr-only">纪念日名字</span><input name="ann-title" placeholder="例如：第一次见面" value="${esc(a.title || '')}" maxlength="40" required /></label><label><span class="sr-only">纪念日期</span><input name="ann-date" type="date" value="${esc(a.date || '')}" required /></label><label class="checkbox-label"><input name="ann-yearly" type="checkbox" ${a.yearly ? 'checked' : ''} />每年</label><button type="button" class="icon-button" data-action="remove-anniversary" aria-label="移除纪念日">${icon('close')}</button></div>`; }
@@ -404,9 +426,7 @@ function renderLogin() {
   const preview = CONFIG.mode === 'preview';
   app.innerHTML = `<main class="login-page"><div class="login-layout"><section class="login-story" aria-label="朝夕"><a class="login-brand" href="#"><img src="./assets/mark.svg" alt="" width="48" height="48" /><span>朝夕<small>我们的记忆</small></span></a><div class="login-story-copy"><p class="login-intro">留给两个人的地方</p><h1>把日子过成故事，<br>把我们写进朝夕。</h1><p>一顿晚饭，一次远行，<br>还有那些说不完的小事。<br>都值得好好记住。</p></div><p class="login-story-end">朝夕之间，都是我们。</p></section><section class="login-panel" aria-labelledby="login-title"><div class="login-lock">${icon('lock')}<span>${preview ? '登录预览' : '我们的共同空间'}</span></div><h2 id="login-title">好久不见，欢迎回家</h2><p>登录后，翻开属于我们的那一页。</p><form id="login-form"><label for="login-username">账号<input id="login-username" name="username" autocomplete="${preview ? 'off' : 'username'}" placeholder="输入你的账号" maxlength="64" autocapitalize="none" spellcheck="false" required ${preview ? 'disabled' : ''} /></label><label for="login-password">密码<input id="login-password" name="password" type="password" autocomplete="${preview ? 'off' : 'current-password'}" placeholder="输入你的密码" maxlength="256" required ${preview ? 'disabled' : ''} /></label><div class="login-verification"><div id="login-captcha"></div><p id="verification-status" role="status">${preview ? '正式登录服务尚未接通。' : '正在准备安全验证…'}</p><button type="button" id="verification-retry" class="text-button" hidden>重新加载验证</button></div><p class="form-error" role="alert"></p><button type="submit" class="primary" disabled>翻开我们的记忆${icon('arrow')}</button></form>${preview ? '<p class="login-preview-note">当前是 GitHub Pages 登录预览。私密空间待后端开通后启用，这里不会提交账号密码，也不会展示回忆。</p>' : `<p class="login-footnote">${icon('lock')}仅限受邀账号 · 不开放注册<br />默认在本设备保持登录 30 天，请勿在公用设备登录</p>`}<button class="text-button login-updates" data-action="updates">系统更新信息</button></section></div></main>`;
   if (!preview) {
-    if (loginPhotos) loginCarousel = mountLoginCarousel(app.querySelector('.login-story'), {
-      loadPhotos: () => loginPhotos.getLoginPhotos(), getPhotoUrl: id => loginPhotos.getLoginPhotoUrl(id),
-    });
+    mountLoginPhotoStory();
     if (loginPending) {
       document.querySelector('#login-form').setAttribute('aria-busy', 'true');
       document.querySelectorAll('#login-form input').forEach(input => { input.disabled = true; });
@@ -448,7 +468,6 @@ try {
     if (CONFIG.mode === 'live') provider = (await import('./memos-provider.js')).createMemosProvider(CONFIG);
     else if (CONFIG.mode === 'supabase') {
       const client = await (await import('./supabase-client.js')).createBrowserSupabaseClient(CONFIG);
-      loginPhotos = (await import('./login-photos-provider.js')).createLoginPhotosProvider({ client, getCurrentUser: () => state.currentUser });
       provider = (await import('./supabase-provider.js')).createSupabaseProvider({ ...CONFIG, client, onSessionChanged: ({ restore = true } = {}) => {
         recoveryEpoch++; reconnectAttempt = null;
         clearDrafts(); closeModal(false); reconnectError = null; reconnectPending = restore;
@@ -456,9 +475,10 @@ try {
         // account's rendered text or media while another tab changes accounts.
         if (restore) { const eventEpoch = recoveryEpoch; renderReconnect(); setTimeout(() => { if (eventEpoch === recoveryEpoch) reconnect(); }, 0); } else render();
       } });
+      loadOptionalLoginPhotos(module => module.createLoginPhotosProvider({ client, getCurrentUser: () => state.currentUser }));
     } else {
       provider = (await import('./demo-provider.js')).createDemoProvider();
-      loginPhotos = (await import('./login-photos-provider.js')).createDemoLoginPhotosProvider({ getCurrentUser: () => state.currentUser });
+      loadOptionalLoginPhotos(module => module.createDemoLoginPhotosProvider({ getCurrentUser: () => state.currentUser }));
     }
     const restored = await provider.init(); if (bootEpoch === recoveryEpoch) state = restored;
   }

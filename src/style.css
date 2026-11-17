@@ -161,10 +161,10 @@
 .login-story { position: relative; min-width: 0; overflow: hidden; }
 .login-story > [hidden] { display: none !important; }
 .login-photo-gallery { position: absolute; inset: 0; color: #fff; background: #35483d; }
-.login-photo-viewport { position: absolute; inset: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; touch-action: pan-y pinch-zoom; }
+.login-photo-viewport { position: absolute; inset: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; touch-action: auto; }
 .login-photo-viewport::-webkit-scrollbar { display: none; }
 .login-photo-viewport:focus-visible { outline: 3px solid white; outline-offset: -5px; }
-.login-photo-viewport.is-embla { overflow: hidden; scroll-snap-type: none; }
+.login-photo-viewport.is-embla { overflow: hidden; scroll-snap-type: none; touch-action: pan-y pinch-zoom; }
 .login-photo-track { display: flex; height: 100%; }
 .login-photo-slide { position: relative; flex: 0 0 100%; min-width: 0; height: 100%; scroll-snap-align: start; }
 .login-photo-slide img, .login-photo-hold { width: 100%; height: 100%; object-fit: cover; object-position: center; }

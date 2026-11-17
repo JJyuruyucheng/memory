@@ -28,6 +28,6 @@
 
 此前共享且已被对方访问的同一文件 URL 在转悄悄话后仍可能命中旧 CDN 缓存。本次仍观察到旧 URL 为 200/HIT，新的 cacheNonce 与冷路径均为 400/DYNAMIC。没有宣称能收回已下载副本、已签发链接或旧缓存。
 
-用户此前确认 v0.4.0 在当时线路下无需 VPN 可登录和加载图片；之后反馈手机刷新及长时间停留仍有问题。本版修复代码中已定位的问题；桌面与模拟通过不能替代该手机及运营商线路实测。
+用户此前确认 v0.4.0 在当时线路下无需 VPN 可登录和加载图片；之后反馈手机刷新及长时间停留仍有问题。本版发布后，用户进一步确认手机关闭 VPN 后“刷新正常，保持登录”。该结果对应当时设备与线路；长时间后台恢复仍为模拟验证，不能用桌面与模拟结果替代真实手机的长时间停留测试。
 
 官方依据：[Supabase 自动刷新生命周期](https://supabase.com/docs/reference/javascript/auth-startautorefresh)、[会话](https://supabase.com/docs/guides/auth/sessions)、[Cloudflare Pages 响应头](https://developers.cloudflare.com/pages/configuration/headers/)、[SortableJS 源码与许可](https://github.com/SortableJS/Sortable/tree/1.15.7)。

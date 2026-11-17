@@ -4,7 +4,7 @@
 
 ## 数据与权限
 
-迁移源为 CLI 3.1.0 `migration new login_photos` 生成的 `supabase/migrations/20261117005211_login_photos.sql`；生产应用与实际 HTTP 验证结果由发布记录记载，不能以本文件或本地测试代替。
+迁移源由 CLI 3.1.0 `migration new login_photos` 生成，应用后与生产实际版本同步为 `supabase/migrations/20261117012619_login_photos.sql`；生产应用与实际 HTTP 验证结果由发布记录记载，不能以本文件或本地测试代替。
 
 独立 `memory_login` schema 不应加入 Data API 暴露列表。`gallery` 只有一行，保存整数 `revision` 与有序照片 ID；`assets` 保存预留、上传者、随机路径、类型、大小和 pending / ready / retired 状态。两表均启用 RLS，`anon`、`authenticated` 和 `service_role` 没有直接表权限。客户端通过 public schema 中的窄 RPC 访问；public 函数是 invoker，特权实现放在非暴露 schema，固定空 `search_path` 并撤销默认 PUBLIC 执行权限。
 
@@ -27,9 +27,11 @@
 
 每个上传者最多保存 **16 张未被当前清单选中的照片**，pending、ready、retired 均占名额。加上最多 8 张当前展示图，全站这套协议最多 56 个登记、每个最多 5,000,000 bytes；不能将其视为平台无限存储。达到未发布名额时返回 SQLSTATE `P0001` / message `LOGIN_PHOTO_QUOTA`，客户端映射 `UPLOAD_QUOTA`。
 
-预留与发布锁单例 gallery；发布、删除、丢弃依序锁 gallery→assets，Storage INSERT 锁自己的 pending asset，防止删除登记之后仍插入对象。没有对象 UPDATE / upsert 策略，替换必须创建新随机路径。发布重新核验所有真实对象并原子替换有序 ID 集合；被移除的旧图同事务变成 retired，不能复活到清单。过期 revision 返回 `40001`，不覆盖另一人的修改。
+预留与发布锁单例 gallery；发布、删除、丢弃依序锁 gallery→assets，Storage INSERT 锁自己的 pending asset，防止删除登记之后仍插入对象。没有对象 UPDATE / upsert 策略，替换必须创建新随机路径。发布重新核验所有真实对象并原子替换有序 ID 集合；被移除的旧图同事务变成 retired，不能复活到清单。过期 revision 返回 `PT409` / HTTP 409，不覆盖另一人的修改，也不将业务冲突当作数据库序列化错误重试。
 
 ## 客户端
+
+正式轮播仅接入 Supabase；Memos 备选版保留原登录文案并隐藏照片编辑入口。Demo 的登录页照片仅保存在当前页面内存，刷新即清空，不同于记录使用的 IndexedDB；不会上传或同步生产。GitHub Pages 仍是登录界面预览，不读取正式照片。
 
 `src/login-photos-provider.js` 使用现有官方客户端和 publishable key；它不接收 secret/service role key。普通登录、会话和记录 Provider 不依赖轮播是否加载成功。
 
@@ -45,10 +47,10 @@
 
 ## 验证
 
-`tests/login-photos-provider.test.mjs` 验证实际 SDK 调用边界、懒加载与限并发、严格 metadata 投影、上传顺序、CAS 失败保留旧图、发布响应丢失不删除新图、清理失败与账号切换。它不伪称运行了 Postgres RLS。
+`tests/login-photos-provider.test.mjs` 以 SDK 形状的 fixture 验证懒加载与限并发、严格 metadata 投影、上传顺序、CAS 失败保留旧图、发布响应丢失不删除新图、清理失败与账号切换。`tests/login-photos-sdk.test.mjs` 再运行实际发送的官方 SDK、Provider 和请求传输，验证匿名精选下载链路；网络仍为合成响应。二者都不伪称运行了真实 Postgres RLS。
 
 `supabase/verify-login-photos.sql` 在单一事务中模拟四种角色并最终 ROLLBACK，复用三名既有受保护身份而不修改 Auth/密码/会话。它检查清单投影、匿名/第四用户拒绝、暂存隔离、两个成员和管理员可编辑、CAS、配额和 guard。它不写 Storage 系统表，不证明真实 JWT 签名、HTTP bytes 或并发请求。
 
-真实 HTTP 发布验收还需核验：匿名读取已发布照片成功；已知 pending / ready-unselected / retired 路径拒绝；两成员都能增改与排序；第四用户不可写；最大 8 张与 MIME / 大小限制；禁止 upsert 和直接删 selected；失效 CAS 拒绝；原 `memory-media` 匿名依旧拒绝。临时对象与登记必须逐一通过 Storage API / 受控协议清理，并验证剩余数为零。若清单已有真实照片，不可为测试先清空它；需要先制定不会删除/退役现有照片的验证步骤。
+每次涉及轮播权限的发布都应核验：匿名读取已发布照片成功；已知 pending / ready-unselected / retired 路径拒绝；两成员都能增改与排序；最大 8 张与 MIME / 大小限制；禁止 upsert 和直接删 selected；失效 CAS 返回 409；原 `memory-media` 匿名依旧拒绝。第四用户以回滚 SQL 断言验证，不在生产创建第四个真实账号。v0.6.0 的 21 项真实 HTTP 及 28 项 SQL 验证均通过，证据见 [发布记录](release-v0.6.0.md)。临时对象与登记必须逐一通过 Storage API / 受控协议清理，并验证剩余数为零。若清单已有真实照片，不可为测试先清空它；需要先制定不会删除/退役现有照片的验证步骤。
 
 参考：[Storage public/private](https://supabase.com/docs/guides/storage/buckets/fundamentals)、[Storage RLS](https://supabase.com/docs/guides/storage/security/access-control)、[Storage 系统表只读原则](https://supabase.com/docs/guides/storage/schema/design)、[固定角色与最小授权](https://supabase.com/docs/guides/api/securing-your-api)。

@@ -1,5 +1,9 @@
 # Third-party notices
 
+## Embla Carousel
+
+The login photo carousel uses [Embla Carousel 8.6.0](https://github.com/davidjerleke/embla-carousel/tree/v8.6.0) under the MIT license. Its original UMD bundle is vendored locally without modification. [The license](public/assets/EMBLA-LICENSE.txt) and [the archive integrity and file checksums](vendor/embla.lock.json) are preserved. No remote CDN is required at runtime.
+
 ## Supabase JavaScript SDK
 
 The free hosting provider uses the official [`@supabase/supabase-js`](https://github.com/supabase/supabase-js) 2.119.0 browser bundle under the MIT license. The original bundle is vendored without modification; [the license](vendor/SUPABASE-LICENSE) and [the version, archive integrity and bundle checksum](vendor/supabase.lock.json) are preserved. The Supabase build ships the license beside the bundle. No CDN executes third-party SDK updates at runtime.

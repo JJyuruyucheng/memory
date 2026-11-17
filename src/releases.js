@@ -2,6 +2,16 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 7, date: '2026-11-17', version: 'v0.6.0', title: '回家的第一眼，是我们',
+    changes: [
+      '登录页新增照片轮播，支持左右切换、触屏滑动、圆点选择和暂停播放。',
+      '我们与设置新增登录页照片入口，两位成员均可新增、替换、移除和调整最多八张照片。',
+      '保存前可预览登录效果，上传时自动优化图片尺寸，并重新编码移除原始照片元数据。',
+      '仅专门发布的登录页照片允许公开查看，原相册、记录附件与悄悄话继续按原权限保护。',
+      '手机使用紧凑照片区，图片加载失败保留原文案，单张异常不会卡住后续轮播。',
+    ],
+  },
+  {
     number: 6, date: '2026-11-16', version: 'v0.5.0', title: '回到这里，接着记录',
     changes: [
       '系统更新信息默认定位并展开最新一条，历史版本可逐条展开。',

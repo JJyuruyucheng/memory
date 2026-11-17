@@ -71,7 +71,7 @@ select pg_temp.login_review_actor('b');
 select pg_temp.login_review_ok((public.publish_login_photos('{}',101)->>'revision')::integer=102,'second member can edit selection');
 select pg_temp.login_review_actor('admin');
 select pg_temp.login_review_ok((public.publish_login_photos('{}',102)->>'revision')::integer=103,'administrator can edit selection');
-select pg_temp.login_review_error($q$select public.publish_login_photos('{}',102)$q$,'40001','stale revision rejected');
+select pg_temp.login_review_error($q$select public.publish_login_photos('{}',102)$q$,'PT409','stale revision rejected');
 reset role;
 insert into login_review_room select greatest(0,16-count(*)::integer) from memory_login.assets a cross join memory_login.gallery g where g.id=1 and a."createdBy"=(select id from login_review_ids where label='a') and not(a.id=any(g.photos));
 set local role authenticated;

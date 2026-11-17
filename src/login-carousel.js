@@ -27,6 +27,21 @@ function preloadPhoto(photo) {
   });
 }
 
+// Bounded lookup lets a failed photograph leave the other slides usable.
+// The caller's generation check also prevents an obsolete request from advancing the carousel.
+export async function findAvailableLoginPhoto({ count, start, step = 1, load, isCurrent = () => true }) {
+  if (!Number.isInteger(count) || count < 1 || count > 8 || !Number.isInteger(start) || ![-1, 1].includes(step) || typeof load !== 'function') return null;
+  for (let attempt = 0; attempt < count; attempt++) {
+    if (!isCurrent()) return null;
+    const index = ((start + attempt * step) % count + count) % count;
+    let photo;
+    try { photo = await load(index); } catch { photo = null; }
+    if (!isCurrent()) return null;
+    if (photo) return { index, photo };
+  }
+  return null;
+}
+
 // This controller owns only the story panel. Loading a photograph never rerenders login or CAPTCHA.
 export function mountLoginCarousel(story, { loadPhotos, getPhotoUrl, photos: initialPhotos } = {}) {
   if (!story) return { destroy() {}, update() {} };
@@ -44,7 +59,7 @@ export function mountLoginCarousel(story, { loadPhotos, getPhotoUrl, photos: ini
   };
   const schedule = () => {
     clear();
-    if (!destroyed && shown.length > 1 && !paused()) timer = setTimeout(() => go(current + 1), 6000);
+    if (!destroyed && shown.length > 1 && !paused()) timer = setTimeout(() => go(current + 1, false, 1, true), 6000);
   };
   const ensure = index => {
     const photo = shown[index];
@@ -71,16 +86,17 @@ export function mountLoginCarousel(story, { loadPhotos, getPhotoUrl, photos: ini
     const hold = story.querySelector('.login-photo-hold'); if (hold) hold.hidden = true;
     ensure((current + 1) % shown.length);
   };
-  const go = async (index, instant = false) => {
+  const go = async (index, instant = false, step = 1, automatic = false) => {
     if (!shown.length || destroyed) return;
-    const target = (index + shown.length) % shown.length, request = ++navigation, expected = epoch;
-    const ready = await ensure(target);
-    if (destroyed || request !== navigation || expected !== epoch) return;
-    if (!ready) { clear(); return; }
-    current = target;
+    const request = ++navigation, expected = epoch;
+    const isCurrent = () => !destroyed && story.isConnected && request === navigation && expected === epoch && (!automatic || !paused());
+    const found = await findAvailableLoginPhoto({ count: shown.length, start: index, step, load: ensure, isCurrent });
+    if (!isCurrent()) return;
+    if (!found) { clear(); return; }
+    current = found.index;
     if (carousel) carousel.scrollTo(current, instant || mediaQuery.matches);
     else story.querySelector('.login-photo-viewport')?.scrollTo({ left: story.querySelector('.login-photo-viewport').clientWidth * current, behavior: instant || mediaQuery.matches ? 'instant' : 'smooth' });
-    selected(); rememberCurrent(ready); schedule();
+    selected(); rememberCurrent(found.photo); schedule();
   };
   const display = (photos, startIndex = 0) => {
     if (destroyed || !story.isConnected || !photos.length) return;
@@ -102,8 +118,8 @@ export function mountLoginCarousel(story, { loadPhotos, getPhotoUrl, photos: ini
     panel.addEventListener('click', event => {
       const dot = event.target.closest('[data-carousel-index]');
       const arrow = event.target.closest('[data-carousel-step]');
-      if (dot) go(Number(dot.dataset.carouselIndex));
-      else if (arrow) go(current + Number(arrow.dataset.carouselStep));
+      if (dot) { const target = Number(dot.dataset.carouselIndex); go(target, false, target < current ? -1 : 1); }
+      else if (arrow) { const step = Number(arrow.dataset.carouselStep); go(current + step, false, step); }
       else if (event.target.closest('.login-photo-pause')) {
         userPaused = !userPaused;
         const button = panel.querySelector('.login-photo-pause');
@@ -113,7 +129,7 @@ export function mountLoginCarousel(story, { loadPhotos, getPhotoUrl, photos: ini
     }, options);
     panel.addEventListener('keydown', event => {
       if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
-      event.preventDefault(); go(current + (event.key === 'ArrowLeft' ? -1 : 1));
+      event.preventDefault(); const step = event.key === 'ArrowLeft' ? -1 : 1; go(current + step, false, step);
     }, options);
     panel.addEventListener('pointerenter', () => { hovered = true; schedule(); }, options);
     panel.addEventListener('pointerleave', () => { hovered = false; schedule(); }, options);
@@ -121,10 +137,15 @@ export function mountLoginCarousel(story, { loadPhotos, getPhotoUrl, photos: ini
     panel.addEventListener('focusout', event => { focused = panel.contains(event.relatedTarget); schedule(); }, options);
     viewport.addEventListener('scroll', () => {
       if (carousel || !viewport.clientWidth) return;
-      const index = Math.min(shown.length - 1, Math.round(viewport.scrollLeft / viewport.clientWidth));
+      const index = Math.max(0, Math.min(shown.length - 1, Math.round(viewport.scrollLeft / viewport.clientWidth)));
       if (index !== current) {
+        const step = index < current ? -1 : 1;
         current = index; selected(); showHold();
-        ensure(index).then(ready => { if (index === current && !destroyed && panel.isConnected) rememberCurrent(ready); });
+        const request = ++navigation, expected = epoch;
+        ensure(index).then(ready => {
+          if (request !== navigation || expected !== epoch || destroyed || !panel.isConnected) return;
+          if (ready) rememberCurrent(ready); else go(index + step, false, step);
+        });
         schedule();
       }
     }, { ...options, passive: true });
@@ -135,8 +156,13 @@ export function mountLoginCarousel(story, { loadPhotos, getPhotoUrl, photos: ini
       viewport.classList.add('is-embla'); viewport.scrollLeft = 0;
       carousel = Embla(viewport, { loop: true, startIndex: current, duration: mediaQuery.matches ? 0 : 28 });
       carousel.on('select', () => {
-        current = carousel.selectedScrollSnap(); const index = current; selected(); showHold();
-        ensure(index).then(ready => { if (index === current && !destroyed && panel.isConnected) rememberCurrent(ready); }); schedule();
+        const index = carousel.selectedScrollSnap(), step = index < current ? -1 : 1;
+        current = index; selected(); showHold();
+        const request = ++navigation, expected = epoch;
+        ensure(index).then(ready => {
+          if (request !== navigation || expected !== epoch || destroyed || !panel.isConnected) return;
+          if (ready) rememberCurrent(ready); else go(index + step, false, step);
+        }); schedule();
       });
       carousel.on('pointerDown', clear); carousel.on('pointerUp', schedule);
     }).catch(() => {}); // Native horizontal scrolling and arrows stay available if the optional vendor fails.

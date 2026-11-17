@@ -33,7 +33,7 @@ function validateSave(input, files) {
 }
 function sdkError(error) {
   const status = Number(error?.status || error?.statusCode || 0), code = String(error?.code || '');
-  if (code === '40001' || status === 409) return new LoginPhotosError('登录照片已被另一个页面更新，请重新打开后再保存。', 'CONFLICT');
+  if (['PT409', '40001'].includes(code) || status === 409) return new LoginPhotosError('登录照片已被另一个页面更新，请重新打开后再保存。', 'CONFLICT');
   if (status === 401) return new LoginPhotosError('登录已失效，请重新登录后编辑。', 'UNAUTHENTICATED');
   if (status === 403 || code === '42501') return new LoginPhotosError('当前账号无法编辑这些登录照片。', 'FORBIDDEN');
   if (code === 'P0001' && error?.message === 'LOGIN_PHOTO_QUOTA') return new LoginPhotosError('未完成上传过多，请先清理当前账号未发布的登录照片。', 'UPLOAD_QUOTA');

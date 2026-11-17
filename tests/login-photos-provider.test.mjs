@@ -12,7 +12,7 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
 
 // Official SDK boundary fixture: authorization/CAS decisions belong to the
 // real database and are also exercised by the separate rollback/HTTP checks.
-function fixture({ before = async () => {}, user = A, revision = 1, selected = [P], losePublishResponse = false, cleanupFails = false } = {}) {
+function fixture({ before = async () => {}, user = A, revision = 1, selected = [P], losePublishResponse = false, cleanupFails = false, conflictCode = 'PT409', conflictStatus = 409 } = {}) {
   let identity = user, nextId = 20;
   const listeners = new Set(), calls = [], urls = [], revoked = [];
   const assets = new Map(selected.map(id => [id, { ...photo(id), creator: A, state: 'ready' }]));
@@ -39,7 +39,7 @@ function fixture({ before = async () => {}, user = A, revision = 1, selected = [
         asset.state = 'ready'; return ok(asset);
       }
       if (name === 'publish_login_photos') {
-        if (args.p_expected_revision !== gallery.revision) return fail('40001', 409);
+        if (args.p_expected_revision !== gallery.revision) return fail(conflictCode, conflictStatus);
         const chosen = args.p_photo_ids.map(id => assets.get(id));
         if (chosen.some(asset => !asset || asset.state !== 'ready')) return fail('42501', 403);
         for (const asset of assets.values()) if (gallery.photos.some(p => p.id === asset.id) && !chosen.includes(asset)) asset.state = 'retired';
@@ -122,10 +122,12 @@ test('both member identities can retain, replace and order selected photos; rese
   assert.deepEqual(mutation.map(c => c.name || c.kind), ['reserve_login_photo', 'upload', 'finalize_login_photo', 'publish_login_photos']);
 });
 
-test('CAS failure removes only this attempt uploads and preserves existing public pictures', async () => {
-  const { provider, objects, assets, gallery } = fixture();
-  await assert.rejects(provider.saveLoginPhotos({ revision: 0, photos: [{ fileIndex: 0 }] }, [blob()]), { code: 'CONFLICT' });
-  assert.deepEqual(gallery().photos.map(p => p.id), [P]); assert.equal(objects.size, 1); assert.equal(assets.size, 1);
+test('PT409, legacy 40001 and HTTP409 conflicts remove only this attempt uploads and preserve existing public pictures', async t => {
+  for (const [conflictCode, conflictStatus] of [['PT409', 409], ['PT409', 0], ['40001', 0], ['legacy-conflict', 409]]) await t.test(`${conflictCode}/${conflictStatus}`, async () => {
+    const { provider, objects, assets, gallery } = fixture({ conflictCode, conflictStatus });
+    await assert.rejects(provider.saveLoginPhotos({ revision: 0, photos: [{ fileIndex: 0 }] }, [blob()]), { code: 'CONFLICT' });
+    assert.deepEqual(gallery().photos.map(p => p.id), [P]); assert.equal(objects.size, 1); assert.equal(assets.size, 1);
+  });
 });
 
 test('lost publication response cannot delete photos that the server successfully selected', async () => {
