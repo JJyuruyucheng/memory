@@ -66,4 +66,6 @@
 
 ### 发布状态
 
-数据库迁移已经应用；前端推送、GitHub CI 和正式站页面验收仍待完成。上述本机与 SQL 证据不替代线上发布确认。
+- 功能提交 `b34ac6a` 已推送 `JJyuruyucheng/memory` 的 `main`，Cloudflare Pages、GitHub Pages 的 build / deploy 和 test-and-build 共四项检查均成功。
+- 正式站 `https://memory-awv.pages.dev/` 的更新数据返回 v0.7.0；main、style、媒体查看器及其样式、固定 Panzoom 和 MIT 许可均返回 HTTP 200，且包含当前实现。应用代码为 no-store，仅固定版本 Panzoom 使用 immutable 缓存。GitHub Pages 预览的更新数据也已返回 v0.7.0。
+- 发布后复用正式站浏览器标签连接超时，因此未把本机 demo 验收写成正式站登录态 UI 验收。真实账号的业务授权证据来自本次云端 SQL/RLS 回滚验证，前端交互证据来自上述本机浏览器操作；Android 真机边界仍如上所述。
