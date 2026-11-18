@@ -1,10 +1,10 @@
 import { icon } from './icons.js';
 import { ARTICLE_SLUG, ASSISTANT_NAME as TITLE, MAX_MESSAGE_LENGTH, requestHistory } from './assistant-contract.js';
 import { mountAssistantPosition } from './assistant-position.js';
+import { mascotMarkup, mountAssistantMascot, tabbyArt as art } from './assistant-mascot.js';
 
 const WELCOME = `你好，我是${TITLE}。想问这篇文章，还是找点别的内容？`;
 const QUESTIONS = ['这篇文章讲了什么？', '这篇文章有哪些值得注意的点？'];
-const art = name => `./assets/assistant/tabby-${name}.png`;
 const avatar = `<img src="${art('launcher')}" width="74" height="74" alt="" draggable="false" />`;
 
 export function mountAssistant(host, ask) {
@@ -12,8 +12,9 @@ export function mountAssistant(host, ask) {
   const { signal } = events;
   const root = document.createElement('div');
   root.className = 'tabby-assistant';
+  const mascot = mascotMarkup();
   root.innerHTML = ask
-    ? `<button type="button" class="tabby-launcher" aria-label="打开${TITLE}" aria-controls="tabby-chat" aria-expanded="false" title="${TITLE} · 按住拖动">${avatar}</button>
+    ? `<button type="button" class="tabby-launcher" aria-label="打开${TITLE}" aria-controls="tabby-chat" aria-expanded="false" title="${TITLE} · 按住拖动">${mascot}</button>
       <section id="tabby-chat" class="tabby-chat" role="dialog" aria-labelledby="tabby-title" hidden>
         <header class="tabby-header">
           <span class="tabby-avatar">${avatar}</span><h2 id="tabby-title" tabindex="-1">${TITLE}</h2>
@@ -34,10 +35,11 @@ export function mountAssistant(host, ask) {
           <button type="submit" class="tabby-send" disabled>发送${icon('arrow')}</button>
         </form>
       </section>`
-    : `<div class="tabby-launcher is-locked" role="img" aria-label="${TITLE}，登录后可用" title="登录后可用">${avatar}<span aria-hidden="true">${icon('lock')}</span></div>`;
+    : `<div class="tabby-launcher is-locked" role="img" aria-label="${TITLE}，登录后可用" title="登录后可用">${mascot}<span class="tabby-lock" aria-hidden="true">${icon('lock')}</span></div>`;
   host.append(root);
   const launcher = root.querySelector('.tabby-launcher');
   const panel = root.querySelector('.tabby-chat');
+  const motion = mountAssistantMascot(launcher, signal);
   const layout = mountAssistantPosition(root, launcher, panel, { interactive: Boolean(ask), signal });
   const destroy = () => { events.abort(); root.remove(); };
   layout();
@@ -62,7 +64,6 @@ export function mountAssistant(host, ask) {
     for (const button of quick.children) button.disabled = Boolean(pending);
     clear.disabled = !turn && !transcript.length && !input.value;
     send.disabled = Boolean(pending) || !input.value.trim();
-    input.readOnly = Boolean(pending);
     form.setAttribute('aria-busy', String(Boolean(pending)));
   }
 
@@ -125,8 +126,8 @@ export function mountAssistant(host, ask) {
     const attemptSignal = AbortSignal.any([attempt.signal, signal]);
     const messages = requestHistory(transcript, question);
     pending = attempt;
-    input.value = question;
     empty.hidden = true;
+    motion.setThinking(true);
     showStatus('thinking', '在想这件事…');
     updateControls();
     scrollToLatest();
@@ -135,7 +136,6 @@ export function mountAssistant(host, ask) {
       if (attemptSignal.aborted || pending !== attempt) return;
       transcript.push({ role: 'user', content: question }, { role: 'assistant', content: reply });
       showMessage('assistant', reply, sources, incomplete);
-      input.value = '';
       turn = null;
       showStatus(null);
     } catch (error) {
@@ -144,7 +144,12 @@ export function mountAssistant(host, ask) {
         : error instanceof TypeError ? '网络连接失败，请重试。' : error?.message || '助手暂时无法回复，请重试。';
       showStatus('retry', message);
     } finally {
-      if (pending === attempt) { pending = null; updateControls(); scrollToLatest(); }
+      if (pending === attempt) {
+        pending = null;
+        motion.setThinking(false);
+        updateControls();
+        scrollToLatest();
+      }
     }
   }
 
@@ -155,6 +160,7 @@ export function mountAssistant(host, ask) {
   }
 
   launcher.addEventListener('click', () => {
+    motion.wake();
     if (!panel.hidden) { close(); return; }
     panel.hidden = false;
     launcher.setAttribute('aria-expanded', 'true');
@@ -172,19 +178,28 @@ export function mountAssistant(host, ask) {
     event.stopPropagation();
     close();
   }, { capture: true, signal });
-  input.addEventListener('input', updateControls, { signal });
+  panel.addEventListener('pointerdown', motion.wake, { signal, passive: true });
+  input.addEventListener('input', () => { motion.wake(); updateControls(); }, { signal });
   input.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       form.requestSubmit();
     }
   }, { signal });
-  form.addEventListener('submit', event => { event.preventDefault(); event.stopPropagation(); void submit(input.value); }, { signal });
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const question = input.value.trim();
+    if (!question || pending) return;
+    input.value = '';
+    void submit(question);
+  }, { signal });
   for (const button of quick.children) button.addEventListener('click', () => void submit(button.textContent), { signal });
   retry.addEventListener('click', () => { if (turn) void submit(turn.question, turn.context || ''); }, { signal });
   clear.addEventListener('click', () => {
     pending?.abort();
     pending = null;
+    motion.setThinking(false);
     turn = null;
     transcript.length = 0;
     log.replaceChildren();

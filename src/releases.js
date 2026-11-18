@@ -2,6 +2,14 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 17, date: '2026-11-18', version: 'v0.12.0', title: '会跳跃和打瞌睡的瓜子',
+    changes: [
+      '点击瓜子时会轻跳回应，等待回复时会回头，闲置后会蜷睡并轻轻呼吸，睡眠符号渐隐渐现。',
+      '放大桌面和手机端的瓜子。拖到屏幕边缘松开后会藏起身子，只露头探看。',
+      '发送时立即清空输入框，等待回复期间可写下一条草稿，失败的问题可从对话里重试。',
+    ],
+  },
+  {
     number: 16, date: '2026-11-18', version: 'v0.11.1', title: '瓜子助手与拖拽体验',
     changes: [
       '博客助手更名为瓜子，放大桌面和手机端的猫咪入口。',
