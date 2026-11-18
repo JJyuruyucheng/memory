@@ -11,7 +11,10 @@ import { prepareLoginPhoto } from './login-photo-image.js';
 import { mediaViewerMarkup, mountMediaViewer } from './media-viewer.js';
 import { entryTagsMarkup, mountEntryTags } from './entry-tags-editor.js';
 import { calendarGrid, feedDatePickerMarkup, mountFeedDatePicker, shiftCalendarMonth } from './feed-date-picker.js';
-import { escapeHtml as esc, filterEntries, collectEntryTags, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
+import { mountTagOverflow } from './feed-tag-overflow.js';
+import { mountEntryBody, mountEntryUpload } from './entry-editor-controls.js';
+import { renderAdminActivity } from './admin-activity.js';
+import { ALLOWED_FILE_TYPES, escapeHtml as esc, filterEntries, collectEntryTags, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
 
 const app = document.querySelector('#app');
 const modalRoot = document.querySelector('#modal-root');
@@ -24,6 +27,9 @@ let state = { currentUser: null, users: [], entries: [], settings: {} }, loginPe
 let reconnectPending = false, reconnectError = null, reconnectAttempt, recoveryEpoch = 0;
 let searchTimer, toastTimer, dialogReturnFocus, draftTimer;
 let editorAttachments = [], editorId = null, editorTags = null, previewUrls = [];
+let unmountEntryBody, unmountEntryUpload, unmountTagOverflow;
+let feedTagsExpanded = false;
+let adminActivity = { days: 30, pending: false };
 let calendarCursor = dayKey(new Date()).slice(0, 7), selectedDay = '';
 const route = () => location.hash.slice(1).split('?')[0] || 'timeline';
 const isFeedView = view => ['timeline', 'events', 'favorites'].includes(view);
@@ -53,12 +59,16 @@ const navItems = [['timeline', 'book', '时光线'], ['album', 'photo', '我们�
 function navLink(item) { const [id, symbol, label] = item; return `<a href="#${id}" class="nav-link ${route() === id ? 'active' : ''}" ${route() === id ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${label}</span></a>`; }
 
 function render() {
+  unmountTagOverflow?.();
+  unmountTagOverflow = null;
   const identity = state?.currentUser?.id || null;
   if (identity !== filterIdentity) {
     clearTimeout(searchTimer);
     Object.assign(filters, { query: '', tag: '', month: '', authorId: 'all' });
     calendarCursor = dayKey(new Date()).slice(0, 7);
     selectedDay = '';
+    feedTagsExpanded = false;
+    adminActivity = { days: 30, pending: false };
     filterIdentity = identity;
   }
   if (!identity) { delete app.dataset.scrollView; delete app.dataset.feedFilterKey; document.body.classList.remove('has-feed-layout'); }
@@ -105,6 +115,11 @@ function render() {
   for (const [selector, top] of scrollPositions) { const region = app.querySelector(selector); if (region) region.scrollTop = top; }
   if (active) { const el = document.getElementById(active); if (el) { el.focus({ preventScroll: true }); if (typeof selection === 'number' && el.setSelectionRange) el.setSelectionRange(selection, selection); } }
   mountDatePickers(app);
+  unmountTagOverflow = mountTagOverflow(app.querySelector('.tag-filter-list'), feedTagsExpanded,
+    expanded => { feedTagsExpanded = expanded; });
+  if (route() === 'admin' && current.role === 'admin' && provider?.loadAdminActivity && !adminActivity.started) {
+    queueMicrotask(() => { if (!adminActivity.started) loadAdminActivity(); });
+  }
 }
 function heading(title, subtitle, action = true) {
   const searchable = action && isFeedView(route());
@@ -146,11 +161,12 @@ function renderFilters() {
   const authors = state.users.filter(person => person.role !== 'admin');
   if (filters.tag && !tags.includes(filters.tag)) filters.tag = '';
   if (filters.authorId !== 'all' && !authors.some(person => person.id === filters.authorId)) filters.authorId = 'all';
+  const orderedTags = filters.tag ? [filters.tag, ...tags.filter(tag => tag !== filters.tag)] : tags;
   const date = selectedDay || filters.month;
   const dateText = date ? date.replaceAll('-', '/') : '全部日期';
   return `<div class="filters"><div class="filter-row">
     <div class="segmented" aria-label="记录类型">${[['all', '全部'], ['note', '随记'], ['event', '事件'], ['whisper', '悄悄话']].map(([id, label]) => `<button data-action="filter-type" data-value="${id}" aria-pressed="${type === id}" ${view === 'events' && id !== 'event' ? 'disabled' : ''}>${label}</button>`).join('')}</div>
-    ${tags.length ? `<div class="tag-filter-list" role="group" aria-label="按小标签筛选"><button id="filter-tag-all" class="tag-filter" data-action="filter-tag" data-value="" aria-pressed="${!filters.tag}">全部标签</button>${tags.map(tag => `<button id="filter-tag-value-${esc(encodeURIComponent(tag))}" class="tag-filter" data-action="filter-tag" data-value="${esc(tag)}" aria-pressed="${filters.tag === tag}"># ${esc(tag)}</button>`).join('')}</div>` : ''}
+    ${tags.length ? `<div class="tag-filter-list" role="group" aria-label="按小标签筛选"><div id="feed-tag-items" class="feed-tag-items"><button id="filter-tag-all" class="tag-filter" data-action="filter-tag" data-value="" aria-pressed="${!filters.tag}">全部标签</button>${orderedTags.map(tag => `<button id="filter-tag-value-${esc(encodeURIComponent(tag))}" class="tag-filter" data-action="filter-tag" data-value="${esc(tag)}" aria-pressed="${filters.tag === tag}" title="#${esc(tag)}">#${esc(tag)}</button>`).join('')}</div><button type="button" class="feed-tag-toggle" aria-controls="feed-tag-items" aria-expanded="false" hidden>展开</button></div>` : ''}
     <div class="feed-selects">
       <label class="select-field"><span class="sr-only">按作者筛选</span><select id="filter-author"><option value="all">所有作者</option>${authors.map(u => `<option value="${esc(u.id)}" ${filters.authorId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>
       <label class="select-field"><span class="sr-only">按心情筛选</span><select id="filter-mood"><option value="all">所有心情</option>${Object.entries(moodNames).map(([id, label]) => `<option value="${id}" ${filters.mood === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
@@ -240,7 +256,26 @@ function anniversaryFields(a = {}) { return `<div class="anniversary-fields" dat
 function renderAdmin(stats) {
   if (state.currentUser.role !== 'admin') return `${heading('这扇门留给维护账号', '日常记录不需要管理员权限。', false)}<a href="#timeline" class="secondary inline-button">回到时光线</a>`;
   const bytes = state.entries.flatMap(e => e.media).reduce((sum, m) => sum + (Number(m.size) || 0), 0);
-  return `${heading('管理小屋', '照顾好这个装着回忆的地方。', false)}<div class="info-line">${CONFIG.mode === 'demo' ? '当前是示例维护视角，操作只影响此浏览器。' : '管理员具有读取、编辑和导出私密内容的权限，请仅在维护时使用。'}</div><div class="stats-strip"><div><span>回忆总数</span><strong class="num">${stats.total}<small>条</small></strong></div><div><span>记录附件大小</span><strong class="num">${(bytes / 1024 / 1024).toFixed(1)}<small>MiB</small></strong></div><div><span>回收站</span><strong class="num">${state.entries.filter(e => e.deletedAt).length}<small>条</small></strong></div></div><div class="settings-section"><div><h2>空间里的账号</h2><p>维护身份与日常身份分开使用。</p></div><div class="member-list">${state.users.map(u => `<div class="member-row">${avatar(u, true)}<strong>${esc(u.name)}</strong><span>${u.role === 'admin' ? '管理员' : '日常成员'}</span></div>`).join('')}</div></div><div class="settings-section"><div><h2>备份与恢复</h2><p>导出档案方便带走内容；完整系统恢复还需数据库、媒体与配置备份。</p></div><div class="settings-actions"><button class="secondary" data-action="export-all">${icon('download')}导出完整共同档案</button><a class="secondary inline-button" href="#trash">${icon('restore')}查看回收站</a><button class="text-button" data-action="backup-help">了解备份范围</button></div></div>`;
+  const activity = provider?.loadAdminActivity
+    ? renderAdminActivity(adminActivity, { avatar, dateLabel, supabaseUrl: CONFIG.supabaseUrl })
+    : '<p class="info-line">正式版管理小屋提供账号活动和服务资源统计。</p>';
+  return `${heading('管理小屋', '查看账号活动、服务资源和备份。', false)}${activity}<div class="stats-strip"><div><span>回忆总数</span><strong class="num">${stats.total}<small>条</small></strong></div><div><span>记录附件大小</span><strong class="num">${(bytes / 1024 / 1024).toFixed(1)}<small>MiB</small></strong></div><div><span>回收站</span><strong class="num">${state.entries.filter(e => e.deletedAt).length}<small>条</small></strong></div></div><div class="settings-section"><div><h2>备份与恢复</h2><p>导出档案方便带走内容；完整系统恢复还需数据库、媒体与配置备份。</p></div><div class="settings-actions"><button class="secondary" data-action="export-all">${icon('download')}导出完整共同档案</button><a class="secondary inline-button" href="#trash">${icon('restore')}查看回收站</a><button class="text-button" data-action="backup-help">了解备份范围</button></div></div>`;
+}
+
+async function loadAdminActivity(days = adminActivity.days) {
+  if (route() !== 'admin' || state.currentUser?.role !== 'admin' || !provider?.loadAdminActivity
+      || (adminActivity.pending && days === adminActivity.days)) return;
+  const request = { days, started: true, pending: true };
+  adminActivity = request;
+  render();
+  try {
+    request.report = await provider.loadAdminActivity(days);
+  } catch (error) {
+    request.error = error.message || '统计暂时无法读取，请刷新重试。';
+  } finally {
+    request.pending = false;
+    if (adminActivity === request && route() === 'admin' && state.currentUser?.role === 'admin') render();
+  }
 }
 
 function openDialog(content, cls = '', returnFocus = document.activeElement) {
@@ -258,6 +293,8 @@ function closeModal(saveDraft = true) {
   if (saveDraft && loginPhotoEditor?.isSaving) { toast('照片正在保存，请稍候。'); return; }
   if (saveDraft) persistDraft();
   editorTags = null;
+  unmountEntryBody?.(); unmountEntryBody = null;
+  unmountEntryUpload?.(); unmountEntryUpload = null;
   loginPhotoEditor?.destroy(); loginPhotoEditor = null;
   mediaViewer?.destroy(); mediaViewer = null;
   destroyDatePickers(modalRoot);
@@ -271,7 +308,7 @@ function showFeedDatePicker(button) {
   const entries = visibleEntries().filter(entry => entry.status !== 'draft');
   const dates = new Set(filterEntries(entries, feedScope(route())).map(entry => dayKey(entry.occurredAt)).filter(Boolean));
   openDialog(feedDatePickerMarkup(), 'feed-date-dialog', button);
-  mountFeedDatePicker(modalRoot.querySelector('dialog'), { initialMonth: filters.month || calendarCursor, selectedDay, dates });
+  mountFeedDatePicker(modalRoot.querySelector('dialog'), { selectedMonth: filters.month, selectedDay, dates });
 }
 function showMobileSearch(button) {
   clearTimeout(searchTimer);
@@ -297,15 +334,33 @@ function openEditor(entry) {
   openDialog(`<form id="entry-form" data-original-type="${esc(entry?.type || '')}"><header class="editor-header"><div><h2>${entry ? '再添一点细节' : '今天，也值得记住'}</h2></div><div class="editor-who">${avatar(author, true)}<div><span>${esc(author.name)}</span><span id="entry-visibility">${icon('lock')}${visibilityLabel(data.type)}</span></div></div></header>
     <div class="editor-layout"><div class="editor-story"><label>给这段回忆起个名字 <span class="optional">随记可不填</span><input name="title" value="${esc(data.title || '')}" placeholder="例如：下班路上，一起看了晚霞" maxlength="120" /></label>
     <p id="whisper-warning" class="privacy-warning" hidden>${icon('info')}改为悄悄话后，对方将不能再查看；此前的副本、缓存和已签发链接无法即时收回。</p>
-    <label class="editor-content">想记住的事<textarea name="content" rows="9" placeholder="慢慢写，这里没有字数任务。" maxlength="20000">${esc(data.content || '')}</textarea></label></div>
+    <div class="editor-content"><label for="entry-content">正文</label><div class="editor-body-field">
+      <textarea id="entry-content" name="content" rows="2" placeholder="写下想记住的事" maxlength="20000">${esc(data.content || '')}</textarea>
+      <button type="button" class="body-resize" aria-label="调整正文高度，可拖动或按上下方向键"></button></div></div></div>
     <div class="editor-side"><div class="form-two"><label>记录类型<select name="type"><option value="note" ${!['event', 'whisper'].includes(data.type) ? 'selected' : ''}>日常随记</option><option value="event" ${data.type === 'event' ? 'selected' : ''}>重要事件</option><option value="whisper" ${data.type === 'whisper' ? 'selected' : ''}>悄悄话</option></select></label><label>发生在<input name="occurredAt" type="datetime-local" value="${dateTimeInput(data.occurredAt)}" required /></label></div>
     <fieldset class="mood-options"><legend>心情</legend>${['happy', 'neutral', 'sad'].map(m => `<label class="mood-option mood-${m}"><input type="radio" name="mood" value="${m}" ${data.mood === m ? 'checked' : ''} />${icon(moodIcons[m])}<span>${moodNames[m]}</span>${icon('check', 'mood-check')}</label>`).join('')}<label class="mood-option no-mood"><input type="radio" name="mood" value="" ${!data.mood ? 'checked' : ''} /><span>未填写</span>${icon('check', 'mood-check')}</label></fieldset>
-    <section class="editor-attachments" aria-label="照片与视频"><div class="upload-row"><label class="upload-control">${icon('photo')}<span>添加照片或短视频</span><input id="media-input" type="file" accept="image/*,video/*" multiple /></label></div><small class="upload-hint">最多 9 张图片 · 最多 10 个附件 · 单个 ${CONFIG.mode === 'supabase' ? '50 MB' : '50 MiB'}</small><div id="editor-previews" class="editor-previews"></div></section></div></div>
+    <section class="editor-attachments" aria-label="照片与视频"><label class="upload-control editor-dropzone">${icon('photo')}<span>添加照片或视频</span><small>也可拖入文件</small><input id="media-input" type="file" accept="image/*,video/*" aria-describedby="editor-upload-limits" multiple /></label><small class="upload-hint" id="editor-upload-limits">最多 9 张图片 · 10 个附件 · 单个 ${CONFIG.mode === 'supabase' ? '50 MB' : '50 MiB'}</small><p id="editor-upload-error" class="form-error" role="alert"></p><div id="editor-previews" class="editor-previews"></div></section></div></div>
     ${entryTagsMarkup(suggestions)}
     <p id="form-error" class="form-error" role="alert"></p><div class="dialog-footer"><div>${entry && canEdit(entry) ? `<button type="button" class="text-button danger delete-entry" data-action="delete" data-id="${esc(entry.id)}">移到回收站</button>` : ''}<span id="draft-status" role="status">${!entry && (draft.content || draft.title || draft.tags?.length || draft.tagText) ? '已恢复草稿' : ''}</span></div><button type="submit" class="primary">${icon('check')}${entry ? '保存修改' : '收好这一刻'}</button></div></form>`, 'editor-dialog');
   editorId = entry?.id || null;
   editorTags = mountEntryTags(modalRoot.querySelector('.editor-tags'), { tags: data.tags, tagText: draft.tagText, onChange: scheduleDraft });
   editorAttachments = (entry?.media || []).map(media => ({ key: crypto.randomUUID(), kind: 'media', media }));
+  unmountEntryBody = mountEntryBody(modalRoot.querySelector('.editor-body-field'));
+  unmountEntryUpload = mountEntryUpload(modalRoot.querySelector('.editor-dropzone'), addEditorFiles);
+  renderEditorPreviews();
+}
+function addEditorFiles(files) {
+  if (!files.length) return;
+  const error = modalRoot.querySelector('#editor-upload-error');
+  const badFile = files.find(file => !ALLOWED_FILE_TYPES[file.type] || file.size <= 0 || file.size > CONFIG.maxFileBytes);
+  const existingImages = editorAttachments.filter(item => (item.kind === 'media' ? item.media.type : ALLOWED_FILE_TYPES[item.file.type]) === 'image').length;
+  const totalImages = existingImages + files.filter(file => ALLOWED_FILE_TYPES[file.type] === 'image').length;
+  if (badFile || editorAttachments.length + files.length > 10 || totalImages > CONFIG.maxImages) {
+    error.textContent = badFile ? `无法添加“${badFile.name}”，请检查格式与大小。` : '每条记录最多添加 9 张图片、10 个附件。';
+    return;
+  }
+  error.textContent = '';
+  editorAttachments.push(...files.map(file => ({ key: crypto.randomUUID(), kind: 'file', file })));
   renderEditorPreviews();
 }
 function renderEditorPreviews() {
@@ -380,6 +435,7 @@ document.addEventListener('click', async event => {
         break;
       case 'filter-type': filters.type = value; render(); break;
       case 'filter-tag': filters.tag = filters.tag === value ? '' : value; render(); break;
+      case 'refresh-admin-activity': await loadAdminActivity(); break;
       case 'filter-media': filters.mediaType = value; render(); break;
       case 'clear-filters': clearTimeout(searchTimer); Object.assign(filters, { query: '', tag: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all' }); selectedDay = ''; render(); break;
       case 'search-tag': clearTimeout(searchTimer); filters.tag = value; filters.query = ''; filters.type = 'all'; selectedDay = ''; if (route() !== 'timeline') history.pushState(null, '', '#timeline'); render(); break;
@@ -394,7 +450,7 @@ document.addEventListener('click', async event => {
       }
       case 'delete': await provider.deleteEntry(id); closeModal(); render(); toast('已移到回收站，可以恢复。'); break;
       case 'restore': await provider.restoreEntry(id); render(); toast('这段回忆已经回来了。'); break;
-      case 'remove-media': editorAttachments.splice(Number(index), 1); renderEditorPreviews(); break;
+      case 'remove-media': editorAttachments.splice(Number(index), 1); modalRoot.querySelector('#editor-upload-error').textContent = ''; renderEditorPreviews(); break;
       case 'calendar-day':
         selectedDay = selectedDay === value ? '' : value;
         filters.month = value.slice(0, 7);
@@ -481,7 +537,7 @@ document.addEventListener('change', async event => {
     if (event.target.id === 'filter-author') { filters.authorId = event.target.value; render(); }
     if (event.target.id === 'filter-mood') { filters.mood = event.target.value; render(); }
     if (event.target.id === 'filter-month') { filters.month = event.target.value; render(); }
-    if (event.target.id === 'media-input') { editorAttachments.push(...[...event.target.files].map(file => ({ key: crypto.randomUUID(), kind: 'file', file }))); event.target.value = ''; renderEditorPreviews(); }
+    if (event.target.id === 'admin-activity-period') await loadAdminActivity(Number(event.target.value));
   } catch (error) { toast(error.message, true); }
 });
 document.addEventListener('submit', async event => {
@@ -537,6 +593,7 @@ window.addEventListener('hashchange', () => {
   if (bootPending || (!provider && CONFIG.mode !== 'preview')) return;
   clearTimeout(searchTimer);
   if (modalRoot.querySelector('.search-dialog, .feed-date-dialog')) closeModal();
+  feedTagsExpanded = false;
   selectedDay = '';
   Object.assign(filters, { query: '', tag: '', month: '', type: route() === 'events' ? 'event' : 'all' });
   render();

@@ -401,6 +401,15 @@ export function createSupabaseProvider(config = {}) {
       const saved = await result(query(client.from('settings').update(settings).eq('id', 1).select('*').single()), expected);
       requireUser(expected); Object.assign(state.settings, checkedSettings(saved)); return state.settings;
     }),
+    loadAdminActivity: days => enqueue(async expected => {
+      if (requireUser(expected).role !== 'admin') throw new SupabaseProviderError('仅管理员可查看账号活动。', 'FORBIDDEN', 403);
+      const report = await result(query(client.rpc('admin_activity_report', { p_days: days })), expected,
+        { fallback: '统计暂时无法读取，请刷新重试。' });
+      if (!Array.isArray(report.accounts) || !Array.isArray(report.recent) || !report.resources) {
+        throw invalid('统计数据格式无效。');
+      }
+      return report;
+    }),
     exportData: (scope = 'all') => enqueue(expected => exportData(scope, expected)),
     refresh: () => enqueue(expected => loadState(expected, state.currentUser.id)),
     dispose() { disposed = true; mayRestore = false; clearLocal(); if (client.memorySession?.dispose) client.memorySession.dispose(); else client.auth.stopAutoRefresh?.(); subscription?.data?.subscription?.unsubscribe(); },

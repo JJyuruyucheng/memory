@@ -6,7 +6,7 @@ const tagFromText = value => value.trim().replace(/^[#＃]+\s*/, '');
 
 export function entryTagsMarkup(suggestions) {
   return `<section class="editor-tags" aria-labelledby="entry-tags-label">
-    <div class="entry-tag-heading"><label id="entry-tags-label" for="entry-tag-text">小标签</label><span>必填</span></div>
+    <div class="entry-tag-heading"><label id="entry-tags-label" for="entry-tag-text">小标签</label><span class="required-mark" aria-hidden="true">※</span></div>
     <div class="entry-tag-field">
       <span class="entry-tag-chips"></span>
       <input type="text" id="entry-tag-text" placeholder="输入标签，用逗号分隔" autocomplete="off"

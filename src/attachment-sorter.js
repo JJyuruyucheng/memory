@@ -7,11 +7,13 @@ export async function mountAttachmentSorter(target, onOrder, onError = () => {})
     const Sortable = await loadLocalScript({ url: new URL('../assets/sortable-1.15.7.js', import.meta.url), read: () => globalThis.Sortable, label: '附件排序组件' });
     if (!target.isConnected) return;
     target.memorySorter?.destroy();
+    const touch = matchMedia('(any-pointer: coarse)').matches;
     target.memorySorter = new Sortable(target, {
-      handle: '.preview-handle', draggable: '.attachment-preview', dataIdAttr: 'data-key',
+      handle: touch ? '.attachment-preview' : '.preview-handle',
+      filter: '.preview-remove', preventOnFilter: false, draggable: '.attachment-preview', dataIdAttr: 'data-key',
       animation: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 150,
-      delay: 120, delayOnTouchOnly: true, touchStartThreshold: 4,
-      ghostClass: 'preview-ghost', chosenClass: 'preview-chosen',
+      forceFallback: touch, delay: 320, delayOnTouchOnly: true, touchStartThreshold: 5, fallbackTolerance: 4,
+      ghostClass: 'preview-ghost', chosenClass: 'preview-chosen', fallbackClass: 'preview-lifted',
       onEnd(event) {
         if (event.oldIndex !== event.newIndex) onOrder([...target.children].map(item => item.dataset.key));
       },

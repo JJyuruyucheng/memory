@@ -4,7 +4,7 @@
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
-当前产品版本 **v0.8.0** 的登记和编辑弹窗至少需要一个小标签。已有标签可直接点选，自定义标签用中英文逗号分隔。记录列表可按整月或具体一天筛选，也可组合使用小标签、类型、作者、心情和搜索。手机搜索从顶栏放大镜打开，桌面两栏独立滚动。图片预览支持缩放和拖拽，图片与视频可下载。详见 [修改日志](CHANGELOG.md)、[v0.7.0 验证记录](docs/release-v0.7.0.md) 和 [照片协议](docs/login-photos.md)。
+当前产品版本 **v0.9.0**。管理小屋支持账号活动和托管资源统计。首页日期筛选显示全年月份，标签过多时可展开。登记弹窗支持选择小标签、从桌面拖入附件、用手机长按缩略图排序，以及自动调整正文高度。图片预览支持缩放和拖拽，图片与视频可下载。详见 [修改日志](CHANGELOG.md)、[v0.7.0 验证记录](docs/release-v0.7.0.md) 和 [照片协议](docs/login-photos.md)。
 
 **[Cloudflare 正式入口：朝夕](https://memory-awv.pages.dev/)** 已上线；用户已确认使用 `xbl` 完成真实 Turnstile 与口令登录并进入时间线。原生 Auth 已拒绝缺失和伪造验证码，真实用户 JWT 下的记录与私有图片权限探针也已通过。真实验证码 token 的过期与重放拒绝仍待专项验收。[GitHub Pages](https://jjyuruyucheng.github.io/memory/) 继续作为 `preview`：不加载记录、不提交真实口令，也没有跳过登录入口。
 

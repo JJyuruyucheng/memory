@@ -2,6 +2,17 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 12, date: '2026-11-18', version: 'v0.9.0', title: '管理统计与手机登记体验',
+    changes: [
+      '管理小屋新增两个成员的登录、发帖、留言、修改、删除和恢复统计，支持按时间筛选并查看最近操作。',
+      '新增数据库大小、媒体存储、连接数和 Supabase CPU 与内存报告入口。',
+      '日期筛选打开即展示全年 12 个月，选月后可筛选整月或具体一天。',
+      '列表标签更紧凑，超出一行时可展开和收起。记录标题加粗，和正文分开。',
+      '登记弹窗的正文默认两行，随输入增高，也可拖动右下角调整。小标签用 ※ 标记必填。',
+      '附件缩小排序标记，手机可长按缩略图拖动排序。电脑可从文件管理器拖入照片或视频。',
+    ],
+  },
+  {
     number: 11, date: '2026-11-18', version: 'v0.8.0', title: '小标签与日期筛选',
     changes: [
       '登记和编辑记录时至少填写一个小标签，已有标签在弹窗内按整行宽度排列，可直接点选。',
