@@ -66,7 +66,7 @@ Cloudflare Pages 项目 `memory` 在 **Workers & Pages → memory → Settings �
 
 ## 构建模式
 
-免费模式使用 `MEMORY_MODE=supabase`；当前 Cloudflare 构建命令为 `node scripts/build-cloudflare.mjs`，读取 [公共部署配置](deploy/cloudflare.public.json)，产物目录为 `dist`。配置包含项目 URL、publishable 公共密钥、Turnstile Site Key 和用于管理面板的容量数值。`authReady` 由维护者在受控验收或正式开放时启用，不能替代后端授权。SDK 版本固定为 2.119.0，构建校验 SHA-256 并本地打包，带出原 MIT 许可证和 Cloudflare CSP 响应头。私有资料、示例记录、后台密钥和口令均不进入此产物。环境变量入口仍见 [cloudflare.env.example](deploy/cloudflare.env.example)，正式配置与验收进度见 [免费托管指南](docs/hosting-free.md)。
+免费模式使用 `MEMORY_MODE=supabase`；当前 Cloudflare 构建命令为 `node scripts/build-cloudflare.mjs`，读取 [公共部署配置](deploy/cloudflare.public.mjs)，产物目录为 `dist`。配置包含项目 URL、publishable 公共密钥、Turnstile Site Key 和用于管理面板的容量数值。`authReady` 由维护者在受控验收或正式开放时启用，不能替代后端授权。SDK 版本固定为 2.119.0，构建校验 SHA-256 并本地打包，带出原 MIT 许可证和 Cloudflare CSP 响应头。私有资料、示例记录、后台密钥和口令均不进入此产物。环境变量入口仍见 [cloudflare.env.example](deploy/cloudflare.env.example)，正式配置与验收进度见 [免费托管指南](docs/hosting-free.md)。
 
 `MEMORY_MODE` 支持 `demo`、`preview`、`live`、`supabase`，默认 `demo`。构建先对全部 `src` JavaScript 执行 `node --check`，核对入口、静态/动态模块、样式和素材署名依赖，再复制白名单资源并重新生成 `dist/src/config.js`。唯一复制的 JSON 是 `assets/credits.json`；`.env`、部署配置、数据库、备份和文档不进入产物。`apiBase` 固定为空字符串供 Memos 使用；Supabase 的 HTTPS 项目 URL 另由构建校验，不能通过 URL 参数替换后端。
 

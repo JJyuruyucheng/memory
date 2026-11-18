@@ -54,7 +54,7 @@ Supabase 控制台已开启并保存原生 Turnstile；使用公共 key 的原�
 
 ## 实施顺序与验收
 
-Supabase 已连接，专用项目、迁移和 provider 已准备。Cloudflare 当前构建命令为 `node scripts/build-cloudflare.mjs`，产物目录 `dist`，`.node-version` 固定 Node 24。它只读取 [明确的公共配置](../deploy/cloudflare.public.json)：项目地址、publishable key、Turnstile Site Key、布尔 authReady 及容量参考值；不接收环境里的后台密钥。这些值会进入浏览器，不是秘密。先以 authReady=false 发布空登录壳取得正式域名，再限定 Turnstile hostname，配置 Supabase Auth 原生 CAPTCHA，关闭公开注册/匿名及无关认证方式。官方连接目前不提供 Auth 配置更新接口，这些配置需要已登录的控制台完成；不提取连接的 OAuth/PAT 绕过。
+Supabase 已连接，专用项目、迁移和 provider 已准备。Cloudflare 当前构建命令为 `node scripts/build-cloudflare.mjs`，产物目录 `dist`，`.node-version` 固定 Node 24。它只读取 [明确的公共配置](../deploy/cloudflare.public.mjs)：项目地址、publishable key、Turnstile Site Key、布尔 authReady 及容量参考值；不接收环境里的后台密钥。这些值会进入浏览器，不是秘密。先以 authReady=false 发布空登录壳取得正式域名，再限定 Turnstile hostname，配置 Supabase Auth 原生 CAPTCHA，关闭公开注册/匿名及无关认证方式。官方连接目前不提供 Auth 配置更新接口，这些配置需要已登录的控制台完成；不提取连接的 OAuth/PAT 绕过。
 
 管理小屋的 `resourceCapacity` 来自当前 Supabase Free 计划。数据库数据额度 500 MB 和媒体组织额度 1 GB 按文档示例的 1024 进制转换成字节。数据库磁盘容量 2 GB 独立显示，实际磁盘用量从基础设施页面查看。进度和参考余量基于本站当次采集的数据库与媒体用量，账期用量以 Supabase 为准。更换套餐时同步更新公共配置中的容量。[账单与配额](https://supabase.com/docs/guides/platform/billing-on-supabase) · [数据库磁盘](https://supabase.com/docs/guides/platform/database-size) · [媒体存储用量](https://supabase.com/docs/guides/platform/manage-your-usage/storage-size)
 

@@ -1,8 +1,7 @@
-import { readFile } from 'node:fs/promises';
+import config from '../deploy/cloudflare.public.mjs';
 import { build } from './build.mjs';
 
 // These are public browser values. Privileged credentials never belong in this file.
-const config = JSON.parse(await readFile(new URL('../deploy/cloudflare.public.json', import.meta.url), 'utf8'));
 const fields = ['supabaseUrl', 'supabasePublishableKey', 'turnstileSiteKey', 'authReady', 'resourceCapacity'];
 if (Object.keys(config).length !== fields.length || fields.some(key => !Object.hasOwn(config, key))
   || typeof config.authReady !== 'boolean' || fields.slice(0, 3).some(key => typeof config[key] !== 'string')) {
