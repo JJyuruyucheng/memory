@@ -41,8 +41,8 @@ export function mountAssistantPosition(root, launcher, panel, { interactive, sig
     const gap = 10;
     const below = bottom - y - size - gap;
     const above = y - top - gap;
-    const available = mobile ? bottom - top : Math.max(above, below);
-    const base = !mobile && available >= 275;
+    const available = Math.max(above, below);
+    const base = available >= 275;
     panel.style.width = `${Math.min(388, right - left)}px`;
     panel.style.height = `${Math.min(520, base ? available : bottom - top)}px`;
     const panelX = mobile ? right - panel.offsetWidth : clamp(x + size - panel.offsetWidth, left, right - panel.offsetWidth);
@@ -56,28 +56,28 @@ export function mountAssistantPosition(root, launcher, panel, { interactive, sig
   visual?.addEventListener('scroll', layout, { signal });
   if (!interactive) return layout;
 
+  function startDrag() {
+    if (!press || press.moving) return;
+    clearTimeout(timer);
+    press.moving = true;
+    suppressClick = true;
+    launcher.classList.add('is-dragging');
+  }
+
   launcher.addEventListener('pointerdown', event => {
     if (event.button !== 0 || !event.isPrimary) return;
     suppressClick = false;
     const rect = launcher.getBoundingClientRect();
     press = { id: event.pointerId, x: event.clientX, y: event.clientY, dx: event.clientX - rect.left, dy: event.clientY - rect.top, moving: false };
     launcher.setPointerCapture(event.pointerId);
-    timer = setTimeout(() => {
-      if (!press) return;
-      press.moving = true;
-      suppressClick = true;
-      launcher.classList.add('is-dragging');
-    }, 320);
+    timer = setTimeout(startDrag, 280);
   }, { signal });
 
   launcher.addEventListener('pointermove', event => {
     if (press?.id !== event.pointerId) return;
     if (!press.moving) {
-      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 8) {
-        clearTimeout(timer);
-        suppressClick = true;
-      }
-      return;
+      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) < 6) return;
+      startDrag();
     }
     const { left, top, right, bottom } = bounds();
     const size = launcher.offsetWidth;

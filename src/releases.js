@@ -2,6 +2,14 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 16, date: '2026-11-18', version: 'v0.11.1', title: '瓜子助手与拖拽体验',
+    changes: [
+      '博客助手更名为瓜子，放大桌面和手机端的猫咪入口。',
+      '按住猫咪即可拖动，松开后保留位置。',
+      '修复正式站助手核验已登录成员时的请求错误。',
+    ],
+  },
+  {
     number: 15, date: '2026-11-18', version: 'v0.11.0', title: '狸花猫博客助手',
     changes: [
       '右下角加入狸花猫，登录后可以点击聊天，或长按移动位置。',

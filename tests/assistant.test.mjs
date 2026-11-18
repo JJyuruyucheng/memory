@@ -35,6 +35,9 @@ function setup({ account = 200, profiles = [ { id } ], ...overrides } = {}) {
     assert.equal(target.origin, project.supabaseUrl);
     assert.equal(options.headers.Authorization, `Bearer ${token}`);
     assert.equal(options.headers.apikey, project.supabasePublishableKey);
+    assert.equal(options.headers['Cache-Control'], 'no-store');
+    assert.equal(options.redirect, 'manual');
+    assert.equal(options.cache, undefined);
     verified.push(target.pathname);
     if (target.pathname === '/auth/v1/user') return Response.json({ id }, { status: account });
     assert.equal(target.pathname, '/rest/v1/profiles');
@@ -44,6 +47,7 @@ function setup({ account = 200, profiles = [ { id } ], ...overrides } = {}) {
   const handle = createAssistantHandler({ authorize, articles, fetchOpenAI: async (url, options) => {
     assert.equal(url, 'https://api.openai.com/v1/responses');
     assert.equal(options.headers.Authorization, 'Bearer test-key');
+    assert.equal(options.redirect, 'manual');
     upstream.push(JSON.parse(options.body));
     return respond();
   }, ...overrides });
@@ -85,6 +89,7 @@ test('经成员认证后才返回公开索引和回复，历史和来源经过�
   assert.equal(upstream[0].store, false);
   assert.equal(upstream[0].max_output_tokens, 2048);
   assert.match(upstream[0].input[0].content, /一起磨咖啡/);
+  assert.match(upstream[0].instructions, /瓜子/);
   assert.deepEqual(upstream[0].input.at(-1), payload.messages[0]);
   const followUp = [...payload.messages, { role: 'assistant', content: '好呀。' }, { role: 'user', content: '好，谢谢。' }];
   const privateRequest = await handle(request({ body: { messages: followUp, articleSlug: 'private-draft' } }), { ...env, OPENAI_MODEL: 'test-model' });
@@ -141,6 +146,7 @@ test('未配置、额度不足、服务超时及空答复发送本地化错误',
   for (const [fetchOpenAI, code] of [
     [async () => Response.json({ error: { code: 'insufficient_quota', message: 'upstream-diagnostics' } }, { status: 429 }), 'OPENAI_QUOTA'],
     [async () => Response.json({}, { status: 401 }), 'OPENAI_CONFIGURATION'],
+    [async () => Response.redirect('https://unexpected.example/'), 'OPENAI_UNAVAILABLE'],
     [async () => { throw new DOMException('upstream-diagnostics', 'TimeoutError'); }, 'OPENAI_TIMEOUT'],
     [async () => respond(''), 'EMPTY_REPLY'],
   ]) {
@@ -149,4 +155,13 @@ test('未配置、额度不足、服务超时及空答复发送本地化错误',
     assert.equal(value.error.code, code);
     assert.ok(!value.error.message.includes('upstream-diagnostics'));
   }
+});
+
+test('成员服务返回重定向时停止校验，不联系模型', async () => {
+  const { handle, verified, upstream } = setup({ account: 302 });
+  const result = await handle(request(), env);
+  assert.equal(result.status, 503);
+  assert.equal((await result.json()).error.code, 'MEMBER_CHECK_UNAVAILABLE');
+  assert.deepEqual(verified, ['/auth/v1/user']);
+  assert.deepEqual(upstream, []);
 });

@@ -1,12 +1,11 @@
 import { icon } from './icons.js';
-import { ARTICLE_SLUG, MAX_MESSAGE_LENGTH, requestHistory } from './assistant-contract.js';
+import { ARTICLE_SLUG, ASSISTANT_NAME as TITLE, MAX_MESSAGE_LENGTH, requestHistory } from './assistant-contract.js';
 import { mountAssistantPosition } from './assistant-position.js';
 
-const TITLE = '狸花猫 · 博客助手';
-const WELCOME = '你好，我是这家博客的狸花猫。想问这篇文章，还是找点别的内容？';
+const WELCOME = `你好，我是${TITLE}。想问这篇文章，还是找点别的内容？`;
 const QUESTIONS = ['这篇文章讲了什么？', '这篇文章有哪些值得注意的点？'];
 const art = name => `./assets/assistant/tabby-${name}.png`;
-const avatar = `<img src="${art('launcher')}" width="56" height="56" alt="" draggable="false" />`;
+const avatar = `<img src="${art('launcher')}" width="74" height="74" alt="" draggable="false" />`;
 
 export function mountAssistant(host, ask) {
   const events = new AbortController();
@@ -14,7 +13,7 @@ export function mountAssistant(host, ask) {
   const root = document.createElement('div');
   root.className = 'tabby-assistant';
   root.innerHTML = ask
-    ? `<button type="button" class="tabby-launcher" aria-label="打开${TITLE}" aria-controls="tabby-chat" aria-expanded="false" title="${TITLE} · 长按可移动">${avatar}</button>
+    ? `<button type="button" class="tabby-launcher" aria-label="打开${TITLE}" aria-controls="tabby-chat" aria-expanded="false" title="${TITLE} · 按住拖动">${avatar}</button>
       <section id="tabby-chat" class="tabby-chat" role="dialog" aria-labelledby="tabby-title" hidden>
         <header class="tabby-header">
           <span class="tabby-avatar">${avatar}</span><h2 id="tabby-title" tabindex="-1">${TITLE}</h2>
@@ -31,7 +30,7 @@ export function mountAssistant(host, ask) {
         </div>
         <form class="tabby-compose">
           <label class="sr-only" for="tabby-input">消息内容</label>
-          <textarea id="tabby-input" rows="1" maxlength="${MAX_MESSAGE_LENGTH}" placeholder="问问狸花猫…" enterkeyhint="send" autocomplete="off"></textarea>
+          <textarea id="tabby-input" rows="1" maxlength="${MAX_MESSAGE_LENGTH}" placeholder="问问${TITLE}…" enterkeyhint="send" autocomplete="off"></textarea>
           <button type="submit" class="tabby-send" disabled>发送${icon('arrow')}</button>
         </form>
       </section>`

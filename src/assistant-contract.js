@@ -1,4 +1,5 @@
 export const ASSISTANT_PATH = '/api/assistant';
+export const ASSISTANT_NAME = '瓜子';
 export const MAX_MESSAGE_LENGTH = 2000;
 export const MAX_REPLY_LENGTH = 12000;
 export const MAX_HISTORY_LENGTH = 9;
