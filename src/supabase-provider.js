@@ -1,6 +1,7 @@
 import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, toUtcIso, validateEntry } from './domain.js';
 import { planAttachmentOrder, resolveAttachmentOrder } from './attachment-order.js';
 import { MAX_PROFILE_NAME, validAvatarJpeg } from './profile.js';
+import { requestAssistant } from './assistant-api.js';
 
 // Inject the official supabase-js client with detectSessionInUrl:false; bounded
 // session persistence belongs to its storage adapter, not this data provider.
@@ -319,6 +320,23 @@ export function createSupabaseProvider(config = {}) {
     else if (event === 'INITIAL_SESSION' && authIdentity === null && UUID.test(session?.user?.id ?? '')) authIdentity = session.user.id;
   });
   return {
+    async askAssistant(payload, { signal } = {}) {
+      const expected = generation;
+      const user = requireUser(expected);
+      const requestSignal = AbortSignal.any([sessionController.signal, AbortSignal.timeout(65000), ...(signal ? [signal] : [])]);
+      const { session } = await authResult(client.auth.getSession(), expected);
+      requireIdentity(expected, user.id);
+      if (session?.user?.id !== user.id || !session.access_token) throw new SupabaseProviderError('登录已失效，请重新登录。', 'UNAUTHENTICATED', 401);
+      try {
+        const reply = await requestAssistant(session.access_token, payload, requestSignal);
+        requireIdentity(expected, user.id);
+        return reply;
+      } catch (error) {
+        requireIdentity(expected, user.id);
+        if (error.status === 401) changeIdentity(null, false);
+        throw error;
+      }
+    },
     async init() {
       if ((loginAttempt && loginAttempt.generation === generation) || logoutPromise) throw new SupabaseProviderError('账号操作正在进行，请稍候。', 'AUTH_BUSY');
       if (state.currentUser) return enqueue(expected => loadState(expected, state.currentUser.id));

@@ -18,11 +18,14 @@ import { mountEntryBody, mountEntryUpload } from './entry-editor-controls.js';
 import { renderAdminActivity } from './admin-activity.js';
 import { avatarImageUrl } from './profile.js';
 import { profileEditorMarkup, mountProfileEditor } from './profile-editor.js';
+import { mountAssistant } from './assistant-chat.js';
 import { ALLOWED_FILE_TYPES, escapeHtml as esc, filterEntries, collectEntryTags, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
 
 const app = document.querySelector('#app');
 const modalRoot = document.querySelector('#modal-root');
+const assistantRoot = document.querySelector('#assistant-root');
 let provider, loginVerification, loginPhotos, loginCarousel, loginPhotoEditor, mediaViewer, profileEditor;
+let assistant, assistantIdentity;
 const moodNames = { happy: '微笑', neutral: '一般', sad: '难受', unset: '未填写' };
 const moodIcons = { happy: 'smile', neutral: 'neutral', sad: 'sad' };
 const filters = { query: '', tag: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all', favoritesOnly: false, trash: false };
@@ -68,6 +71,18 @@ function filtered() {
 }
 const navItems = [['timeline', 'book', '时光线'], ['album', 'photo', '我们的相册'], ['events', 'calendar', '重要时刻'], ['stats', 'chart', '时光统计']];
 function navLink(item) { const [id, symbol, label] = item; return `<a href="#${id}" class="nav-link ${route() === id ? 'active' : ''}" ${route() === id ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${label}</span></a>`; }
+
+function syncAssistant(locked = false) {
+  if (!['supabase', 'preview'].includes(CONFIG.mode)) return;
+  const identity = locked || reconnectPending || reconnectError ? null : state.currentUser?.id ?? null;
+  if (!assistant || assistantIdentity !== identity) {
+    assistant?.destroy();
+    assistantIdentity = identity;
+    assistant = mountAssistant(assistantRoot, identity && provider?.askAssistant);
+  }
+  const article = identity && modalRoot.querySelector('.detail-dialog[open][data-assistant-article]');
+  assistant.setContext(article || assistantRoot, article?.dataset.assistantArticle);
+}
 
 function render() {
   unmountTagOverflow?.();
@@ -140,6 +155,7 @@ function render() {
   mountDatePickers(app);
   unmountTagOverflow = mountTagOverflow(app.querySelector('.tag-filter-list'), feedTagsExpanded,
     expanded => { feedTagsExpanded = expanded; });
+  syncAssistant();
   if (route() === 'admin' && current.role === 'admin' && provider?.loadAdminActivity && !adminActivity.started) {
     queueMicrotask(() => { if (!adminActivity.started) loadAdminActivity(); });
   }
@@ -327,7 +343,10 @@ function closeModal(saveDraft = true) {
   mediaViewer?.destroy(); mediaViewer = null;
   destroyDatePickers(modalRoot);
   destroyAttachmentSorter(modalRoot);
-  clearTimeout(draftTimer); modalRoot.querySelector('dialog')?.close(); modalRoot.innerHTML = '';
+  clearTimeout(draftTimer);
+  modalRoot.querySelector('dialog')?.close();
+  assistant?.setContext(assistantRoot);
+  modalRoot.innerHTML = '';
   previewUrls.forEach(url => URL.revokeObjectURL(url)); previewUrls = [];
   if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus({ preventScroll: true });
   dialogReturnFocus = null;
@@ -435,6 +454,14 @@ document.addEventListener('keydown', event => {
 function showDetail(id) {
   const entry = visibleEntries().find(e => e.id === id); if (!entry) return;
   openDialog(`<h2>${esc(entry.title || (entry.type === 'whisper' ? '给自己的一页' : '日常的一页'))}</h2><p class="dialog-description">${esc(user(entry.authorId).name)} · ${dateLabel(entry.occurredAt, true, true)}${entry.type === 'whisper' ? ' · 仅作者和管理员可见' : ''}</p><p class="detail-body">${renderEntryText(entry.title, entry.content)}</p>${entry.comments?.length ? `<section class="comments" aria-label="留言">${entry.comments.map(c => `<div class="comment-row">${avatar(user(c.authorId), true)}<div><strong>${esc(user(c.authorId).name)}</strong><p>${esc(c.content)}</p><time datetime="${esc(c.createdAt)}">${dateLabel(c.createdAt, true, true)}</time></div></div>`).join('')}</section>` : ''}<form id="comment-form" data-id="${esc(id)}"><label class="sr-only" for="comment-content">留言内容</label><textarea id="comment-content" name="content" rows="2" maxlength="2000" required placeholder="看到这段回忆，想起了什么？"></textarea><button class="primary" type="submit">留在这一页</button><p class="form-error" role="alert"></p></form>`, 'detail-dialog');
+  const dialog = modalRoot.querySelector('.detail-dialog');
+  if (!entry.deletedAt && entry.type !== 'whisper') dialog.dataset.assistantArticle = entry.id;
+  syncAssistant();
+}
+function openLinkedEntry() {
+  if (!state.currentUser || route() !== 'timeline') return;
+  const id = new URLSearchParams(location.hash.split('?')[1] || '').get('entry');
+  if (id && visibleEntries().some(entry => entry.id === id && !entry.deletedAt)) showDetail(id);
 }
 function showMedia(id, index = 0) {
   const entry = visibleEntries().find(e => e.id === id), file = entry?.media[index]; if (!file) return;
@@ -523,6 +550,7 @@ document.addEventListener('click', async event => {
       }
       case 'logout': {
         let failure;
+        syncAssistant(true);
         try { await provider.logout(); } catch (error) { failure = error; }
         finally { clearDrafts(); state.currentUser = null; closeModal(false); render(); }
         if (failure) toast('本机已退出；网络异常，服务器会话退出尚未确认。', true);
@@ -628,7 +656,7 @@ document.addEventListener('submit', async event => {
         currentForm?.querySelectorAll('input').forEach(input => { input.disabled = false; });
         loginVerification?.reset();
       }
-      form.reset(); render();
+      form.reset(); render(); openLinkedEntry();
     }
   } catch (error) { if (!state.currentUser && form.id !== 'login-form') { clearDrafts(); closeModal(false); render(); toast('登录已失效，请重新登录。', true); } else { const target = form.id === 'login-form' ? document.querySelector('#login-form .form-error') : form.querySelector('.form-error'); if (target) target.textContent = error.message; else toast(error.message, true); } }
   finally { if (submit?.isConnected) submit.disabled = form.id === 'login-form' ? !loginVerification?.getToken() : false; }
@@ -636,19 +664,20 @@ document.addEventListener('submit', async event => {
 window.addEventListener('hashchange', () => {
   if (bootPending || (!provider && CONFIG.mode !== 'preview')) return;
   clearTimeout(searchTimer);
-  if (modalRoot.querySelector('.search-dialog, .feed-date-dialog')) closeModal();
+  if (modalRoot.querySelector('.search-dialog, .feed-date-dialog, .detail-dialog')) closeModal();
   feedTagsExpanded = false;
   expandedEntries.clear();
   selectedDay = '';
   Object.assign(filters, { query: '', tag: '', month: '', type: route() === 'events' ? 'event' : 'all' });
   render();
+  openLinkedEntry();
   window.scrollTo({ top: 0 });
 });
 window.addEventListener('memory:session-ended', () => {
   unmountEntryPreviews?.();
   expandedEntries.clear();
   recoveryEpoch++; reconnectAttempt = null; reconnectError = null; reconnectPending = false; bootPending = true;
-  provider?.dispose?.(); state.currentUser = null; clearDrafts(); closeModal(false);
+  provider?.dispose?.(); state.currentUser = null; syncAssistant(true); clearDrafts(); closeModal(false);
   loginCarousel?.destroy(); loginCarousel = null;
   app.innerHTML = '<main class="boot"><h1>登录状态已更新</h1><p>正在重新打开我们的空间…</p></main>';
 });
@@ -673,19 +702,21 @@ function renderLogin() {
       ...(CONFIG.mode === 'supabase' ? { getConfig: async () => ({ configured: CONFIG.authReady === true && Boolean(CONFIG.turnstileSiteKey), siteKey: CONFIG.turnstileSiteKey, action: 'login' }) } : {}),
     });
   }
+  syncAssistant(true);
 }
 
 function renderReconnect(error = null) {
   loginVerification?.destroy(); loginVerification = null;
   loginCarousel?.destroy(); loginCarousel = null;
   app.innerHTML = `<main class="boot"><img src="./assets/mark.svg" alt="" width="48" height="48" /><h1>${error ? '暂时未能连接' : '正在恢复登录…'}</h1><p>${error ? esc(error.message || '请检查网络后重新连接。') : '正在确认本设备的登录状态。'}</p>${error ? `<button class="secondary" data-action="${provider ? 'reconnect' : 'retry'}">重新连接</button>` : ''}</main>`;
+  syncAssistant(true);
 }
 async function reconnect() {
   if (reconnectAttempt) return reconnectAttempt;
   const epoch = recoveryEpoch;
   reconnectError = null; reconnectPending = true; renderReconnect();
   const attempt = (async () => {
-    try { const restored = await provider.init(); if (epoch !== recoveryEpoch) return; state = restored; reconnectPending = false; render(); }
+    try { const restored = await provider.init(); if (epoch !== recoveryEpoch) return; state = restored; reconnectPending = false; render(); openLinkedEntry(); }
     catch (error) { if (epoch === recoveryEpoch) showRestoreFailure(error); }
     finally { if (reconnectAttempt === attempt) reconnectAttempt = null; }
   })();
@@ -707,7 +738,7 @@ try {
       const client = await (await import('./supabase-client.js')).createBrowserSupabaseClient(CONFIG);
       provider = (await import('./supabase-provider.js')).createSupabaseProvider({ ...CONFIG, client, onSessionChanged: ({ restore = true } = {}) => {
         recoveryEpoch++; reconnectAttempt = null;
-        clearDrafts(); closeModal(false); reconnectError = null; reconnectPending = restore;
+        syncAssistant(true); clearDrafts(); closeModal(false); reconnectError = null; reconnectPending = restore;
         // Restore only after Auth verifies the new identity. Never keep the old
         // account's rendered text or media while another tab changes accounts.
         if (restore) { const eventEpoch = recoveryEpoch; renderReconnect(); setTimeout(() => { if (eventEpoch === recoveryEpoch) reconnect(); }, 0); } else render();
@@ -719,7 +750,7 @@ try {
     }
     const restored = await provider.init(); if (bootEpoch === recoveryEpoch) state = restored;
   }
-  if (bootEpoch === recoveryEpoch) render();
+  if (bootEpoch === recoveryEpoch) { render(); openLinkedEntry(); }
 }
 catch (error) { if (bootEpoch === recoveryEpoch) showRestoreFailure(error); }
 finally { bootPending = false; }

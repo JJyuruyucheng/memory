@@ -4,7 +4,7 @@
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
-当前产品版本 **v0.10.0**。点击头像可编辑个人资料和登录密码，时光线长文支持折叠，日报编号小标题加粗。管理小屋支持账号活动、存储额度和用量统计。首页日期筛选显示全年月份，标签过多时可展开。登记弹窗支持选择小标签、从桌面拖入附件、用手机长按缩略图排序，以及自动调整正文高度。图片预览支持缩放和拖拽，图片与视频可下载。详见 [修改日志](CHANGELOG.md)、[v0.7.0 验证记录](docs/release-v0.7.0.md) 和 [照片协议](docs/login-photos.md)。
+源码版本 **v0.11.0**。登录后点击右下角狸花猫即可打开博客助手，长按可移动。点击头像可编辑个人资料和登录密码，时光线长文支持折叠，日报编号小标题加粗。管理小屋支持账号活动、存储额度和用量统计。首页日期筛选显示全年月份，标签过多时可展开。登记弹窗支持选择小标签、从桌面拖入附件、用手机长按缩略图排序，以及自动调整正文高度。图片预览支持缩放和拖拽，图片与视频可下载。详见 [修改日志](CHANGELOG.md)、[v0.7.0 验证记录](docs/release-v0.7.0.md) 和 [照片协议](docs/login-photos.md)。
 
 **[Cloudflare 正式入口：朝夕](https://memory-awv.pages.dev/)** 已上线；用户已确认使用 `xbl` 完成真实 Turnstile 与口令登录并进入时间线。原生 Auth 已拒绝缺失和伪造验证码，真实用户 JWT 下的记录与私有图片权限探针也已通过。真实验证码 token 的过期与重放拒绝仍待专项验收。[GitHub Pages](https://jjyuruyucheng.github.io/memory/) 继续作为 `preview`：不加载记录、不提交真实口令，也没有跳过登录入口。
 
@@ -43,6 +43,22 @@ node scripts/serve.mjs --source
 日期控件采用 [Air Datepicker 3.6.0](https://github.com/t1m0n/air-datepicker/tree/v3.6.0)（MIT），本地打包、中文定制；版本、SHA-256 与原许可证记录在 `vendor/air-datepicker.lock.json`。QA 服务仅额外开放明确列名的日期组件文件与许可证，正式 Supabase 构建还开放已锁定的官方 SDK；没有开放任意 JS、JSON、文档或私密配置。
 
 附件排序采用 [SortableJS 1.15.7](https://github.com/SortableJS/Sortable/tree/1.15.7)（MIT），固定版本本地打包，SHA-256 与原许可证见 `vendor/sortable.lock.json`。支持鼠标与触屏拖动；聚焦排序按钮后也可用方向键、Home、End 调整。固定版本公共组件可缓存；账号状态、业务代码与私密请求不因此改为离线缓存。
+
+## 狸花猫博客助手
+
+登录页显示狸花猫。完成 Supabase 登录并通过成员校验后，点击猫咪打开对话，长按猫咪即可在屏幕内移动。对话保留在当前页面内存里，清空、刷新或退出后移除。助手只能访问你发送的消息，以及 `server/assistant-articles.mjs` 中明确批准公开的文章摘录。当前索引为空，时光线、悄悄话与相册不会自动发给模型。
+
+本机从 PowerShell 7 启动 Supabase 模式。掩码输入的新密钥只留在当前终端和本地服务进程的环境中。`OPENAI_MODEL` 可覆盖默认的 `gpt-6.1-terra`。
+
+```powershell
+node scripts/build-cloudflare.mjs
+$env:OPENAI_API_KEY = Read-Host '输入新的 OpenAI API 密钥' -MaskInput
+node scripts/serve.mjs --port 5187
+```
+
+访问本地 `http://127.0.0.1:5187/`，登录后试发一条消息。真实登录使用原有 Supabase 和 Turnstile 配置，本地域名需在对应 Turnstile 站点的允许范围内。可运行 `node --test tests/assistant.test.mjs`，用模拟上游核对登录拦截、公开资料边界和 API 错误处理。测试不需要密钥。〔[Turnstile 本地测试说明](https://developers.cloudflare.com/turnstile/troubleshooting/testing/#local-development)〕
+
+Cloudflare Pages 项目 `memory` 在 **Workers & Pages → memory → Settings → Variables and Secrets** 添加加密密钥 `OPENAI_API_KEY`。需要换模型时，添加普通变量 `OPENAI_MODEL`。部署后由 `functions/api/assistant.js` 在同源 `/api/assistant` 读取运行时配置。GitHub Pages 登录预览仅显示猫咪。〔[Cloudflare Pages 运行时绑定](https://developers.cloudflare.com/pages/functions/bindings/#secrets) · [OpenAI Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create)〕
 
 ## 维护更新信息
 

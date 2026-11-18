@@ -260,6 +260,9 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
     await writeFile(path.join(dist, 'assets', 'supabase-client-2.119.0.js'), sdk);
     await writeFile(path.join(dist, 'assets', 'SUPABASE-LICENSE.txt'), await readFile(path.join(root, 'vendor', 'SUPABASE-LICENSE')));
     await writeFile(path.join(dist, '_headers'), cloudflareHeaders(supabase.supabaseUrl));
+    if (env.MEMORY_TARGET === 'cloudflare') {
+      await writeFile(path.join(dist, '_routes.json'), `${JSON.stringify({ version: 1, include: ['/api/assistant'], exclude: [] }, null, 2)}\n`);
+    }
   }
 
   // Explicit values prevent build-time secrets or an arbitrary API URL entering the bundle.

@@ -4,6 +4,8 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { securityHeaders } from './security-headers.mjs';
+import { ASSISTANT_PATH } from '../src/assistant-contract.js';
+import { createAssistantHandler, createSupabaseAssistantAuthorization } from '../server/assistant.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const MIME = {
@@ -57,26 +59,45 @@ async function isRegularUnlinkedFile(file, boundary) {
   return (await lstat(file)).isFile();
 }
 
-export async function startServer({ port = 5173, source = false } = {}) {
+export async function startServer({ port = 5173, source = false, env = process.env, fetchOpenAI, fetchSupabase, articles } = {}) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('端口须为 1–65535 的整数。');
   const hasDist = await access(path.join(ROOT, 'dist', 'index.html')).then(() => true, () => false);
   const built = !source && hasDist;
   const base = built ? path.join(ROOT, 'dist') : ROOT;
-  // Read only a validated public URL; never evaluate the built config as server code.
+  // Read only validated public settings from the generated config.
   const configText = await readFile(path.join(base, 'src', 'config.js'), 'utf8');
   const supabaseOrigin = /"supabaseUrl":\s*"(https:\/\/[a-z]{20}\.supabase\.co)"/.exec(configText)?.[1] ?? '';
   const headersForBuild = securityHeaders(supabaseOrigin);
+  const supabasePublishableKey = /"supabasePublishableKey":\s*"(sb_publishable_[A-Za-z0-9_-]{20,200})"/.exec(configText)?.[1];
+  const handleAssistant = supabaseOrigin && supabasePublishableKey && createAssistantHandler({
+    authorize: createSupabaseAssistantAuthorization({ supabaseUrl: supabaseOrigin, supabasePublishableKey,
+      authReady: /"authReady":\s*true\b/.test(configText) }, fetchSupabase), fetchOpenAI, articles,
+  });
 
   const server = createServer(async (request, response) => {
-    if (!['GET', 'HEAD'].includes(request.method)) {
-      response.setHeader('Allow', 'GET, HEAD');
-      fail(response, 405);
-      return;
-    }
     try {
       let pathname;
       try { pathname = safePathname(request.url); } catch { fail(response, 400); return; }
       const { decoded, segments } = pathname;
+      if (decoded === ASSISTANT_PATH) {
+        const host = request.headers.host;
+        if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(host)) { fail(response, 400); return; }
+        if (!handleAssistant) { fail(response, 404); return; }
+        const controller = new AbortController();
+        response.once('close', () => { if (!response.writableEnded) controller.abort(); });
+        const body = request.method === 'POST' ? request : undefined;
+        const result = await handleAssistant(new Request(`http://${host}${ASSISTANT_PATH}`, {
+          method: request.method, headers: request.headers, body, duplex: body ? 'half' : undefined, signal: controller.signal,
+        }), env);
+        response.writeHead(result.status, Object.fromEntries(result.headers));
+        response.end(await result.text());
+        return;
+      }
+      if (!['GET', 'HEAD'].includes(request.method)) {
+        response.setHeader('Allow', 'GET, HEAD');
+        fail(response, 405);
+        return;
+      }
       if (segments.some((segment) => segment.startsWith('.') || /^(?:config\.local|env)(?:[._-]|$)/i.test(segment)
         || /(?:^|[._-])(?:secret|credentials|private)(?:[._-]|$)/i.test(segment))) {
         fail(response, 404); return;

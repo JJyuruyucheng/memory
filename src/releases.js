@@ -2,6 +2,14 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 15, date: '2026-11-18', version: 'v0.11.0', title: '狸花猫博客助手',
+    changes: [
+      '右下角加入狸花猫，登录后可以点击聊天，或长按移动位置。',
+      '支持连续追问、清空对话和失败重试。退出账号后清空当前对话。',
+      '助手请求由服务端验证成员身份，文章问答只使用已批准公开的摘录。',
+    ],
+  },
+  {
     number: 14, date: '2026-11-18', version: 'v0.10.0', title: '长文阅读与个人资料',
     changes: [
       '每日热点速览的编号小标题加粗，正文紧跟对应小标题，条目之间保留间距。',
