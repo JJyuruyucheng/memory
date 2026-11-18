@@ -253,7 +253,7 @@ export function createDemoProvider(options = {}) {
     },
     saveSettings(settings) {
       return enqueue(async () => {
-        if (currentUser().role !== 'admin') throw new Error('共同设置由管理员账号维护，日常账号可查看。');
+        currentUser();
         if (!settings || typeof settings !== 'object') throw new Error('设置格式无效。');
         const value = { ...state.settings, ...settings };
         if (typeof value.spaceName !== 'string' || !value.spaceName.trim() || value.spaceName.trim().length > 60) throw new Error('空间名称为 1 至 60 个字符。');

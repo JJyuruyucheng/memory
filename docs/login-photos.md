@@ -10,7 +10,7 @@
 
 专用 bucket 名称 `login-photos`，必须通过官方 Storage API 创建为 `public:false`、`fileSizeLimit:5000000`，允许类型仅 `image/jpeg,image/png,image/webp`。不要通过 SQL 修改 `storage.objects` / `storage.buckets`。路径固定 `slides/<随机照片UUID>`，不包含上传者 ID、原文件名或任何私密记录关联。
 
-匿名可以读取清单，以及清单中已发布照片的 Storage bytes。它不能读取未发布、暂存、移除的照片，不能写入任何轮播数据。登录后的两名成员和管理员均可编辑该清单；写权限仍要求受保护的 `profiles` 白名单和 `runtime_guard.authReady=true`，不是仅检查一个 authenticated JWT。第四个已登录身份没有写权或暂存读取权。既有私密记录、账号角色、共同设置的管理员限制不变。
+匿名可以读取清单，以及清单中已发布照片的 Storage bytes。它不能读取未发布、暂存、移除的照片，不能写入任何轮播数据。登录后的两名成员和管理员均可编辑该清单；写权限仍要求受保护的 `profiles` 白名单和 `runtime_guard.authReady=true`，不是仅检查一个 authenticated JWT。第四个已登录身份没有写权或暂存读取权。私密记录与账号角色权限独立保留；共同设置的成员维护范围见 [共同设置权限](shared-settings.md)。
 
 关闭 runtime guard 会隐藏新的匿名清单/对象鉴权请求并禁止写入；这不撤回已有浏览器 Blob URL、下载副本、缓存或另行签发的 signed URL。
 

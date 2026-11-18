@@ -1,7 +1,7 @@
 export const CACHEABLE_VENDOR_PATHS = Object.freeze([
   '/assets/supabase-client-2.119.0.js', '/assets/air-datepicker-3.6.0.js',
   '/assets/air-datepicker-3.6.0.css', '/assets/sortable-1.15.7.js',
-  '/assets/embla-carousel-8.6.0.js',
+  '/assets/embla-carousel-8.6.0.js', '/assets/panzoom-4.6.2.js',
 ]);
 
 export function cacheControlFor(pathname = '') {

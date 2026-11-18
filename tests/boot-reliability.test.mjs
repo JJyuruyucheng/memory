@@ -5,8 +5,9 @@ import { runInNewContext } from 'node:vm';
 import { CACHEABLE_VENDOR_PATHS, securityHeaders, cloudflareHeaders } from '../scripts/security-headers.mjs';
 
 test('only the pinned public vendor files are cacheable; application and private paths remain no-store', () => {
+  assert.ok(CACHEABLE_VENDOR_PATHS.includes('/assets/panzoom-4.6.2.js'));
   for (const pathname of CACHEABLE_VENDOR_PATHS) assert.equal(securityHeaders('', pathname)['Cache-Control'], 'public, max-age=31536000, immutable');
-  for (const pathname of ['/', '/index.html', '/src/main.js', '/src/config.js', '/assets/unknown.js', '/storage/v1/object/memory-media/user/photo.jpg']) {
+  for (const pathname of ['/', '/index.html', '/src/main.js', '/src/config.js', '/assets/unknown.js', '/assets/panzoom.js', '/assets/panzoom-4.6.3.js', '/assets/PANZOOM-LICENSE.txt', '/storage/v1/object/memory-media/user/photo.jpg']) {
     assert.equal(securityHeaders('', pathname)['Cache-Control'], 'no-store');
   }
   const text = cloudflareHeaders();

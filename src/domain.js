@@ -128,6 +128,7 @@ export function canReadEntry(entry, user) {
 
 export function filterEntries(entries, filters = {}) {
   const query = String(filters.query ?? '').trim().toLocaleLowerCase('zh-CN');
+  const tag = typeof filters.tag === 'string' ? filters.tag.trim() : '';
   return (Array.isArray(entries) ? entries : []).filter(entry => {
     if (filters.trash ? !entry.deletedAt : Boolean(entry.deletedAt)) return false;
     if (filters.type && filters.type !== 'all' && entry.type !== filters.type) return false;
@@ -137,10 +138,23 @@ export function filterEntries(entries, filters = {}) {
     if (filters.authorId && filters.authorId !== 'all' && entry.authorId !== filters.authorId) return false;
     if (filters.favoritesOnly && (!filters.userId || !entry.favoriteBy?.includes(filters.userId))) return false;
     if (filters.month && dayKey(entry.occurredAt).slice(0, 7) !== filters.month) return false;
+    if (tag && (!Array.isArray(entry.tags) || !entry.tags.some(value => typeof value === 'string' && value.trim() === tag))) return false;
     if (query && !`${entry.title ?? ''}\n${entry.content ?? ''}\n${(entry.tags ?? []).join(' ')}`.toLocaleLowerCase('zh-CN').includes(query)) return false;
     return true;
   }).sort((a, b) => (instant(b.occurredAt)?.getTime() ?? 0) - (instant(a.occurredAt)?.getTime() ?? 0)
     || (instant(b.createdAt)?.getTime() ?? 0) - (instant(a.createdAt)?.getTime() ?? 0));
+}
+
+/** Collect only published, readable tags; keep options available when one tag is selected. */
+export function collectEntryTags(entries, user, filters = {}) {
+  const visible = (Array.isArray(entries) ? entries : []).filter(entry => canReadEntry(entry, user) && entry.status !== 'draft');
+  const tags = new Set();
+  for (const entry of filterEntries(visible, { ...filters, tag: '' })) {
+    for (const tag of Array.isArray(entry.tags) ? entry.tags : []) {
+      if (typeof tag === 'string' && tag.trim()) tags.add(tag.trim());
+    }
+  }
+  return [...tags].sort((a, b) => a.localeCompare(b, 'zh-CN') || (a < b ? -1 : a > b ? 1 : 0));
 }
 
 export function computeStats(entries, options = {}) {

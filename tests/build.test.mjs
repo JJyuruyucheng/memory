@@ -34,6 +34,10 @@ test('Supabase 构建仅发送公共配置，验证 SDK 完整性，默认关闭
     assert.ok(files.includes(path.join('assets', 'SORTABLE-LICENSE.txt')));
     assert.ok(files.includes(path.join('assets', 'embla-carousel-8.6.0.js')));
     assert.ok(files.includes(path.join('assets', 'EMBLA-LICENSE.txt')));
+    assert.ok(files.includes(path.join('assets', 'panzoom-4.6.2.js')));
+    assert.ok(files.includes(path.join('assets', 'PANZOOM-LICENSE.txt')));
+    assert.equal(await readFile(path.join(output, 'assets', 'panzoom-4.6.2.js'), 'utf8'), await readFile(path.join(fixture, 'public', 'assets', 'panzoom-4.6.2.js'), 'utf8'));
+    assert.equal(await readFile(path.join(output, 'assets', 'PANZOOM-LICENSE.txt'), 'utf8'), await readFile(path.join(fixture, 'public', 'assets', 'PANZOOM-LICENSE.txt'), 'utf8'));
     assert.ok(files.includes(path.join('src', 'boot.js')));
     assert.ok(!files.includes(path.join('assets', 'photo-coffee.jpg')));
     assert.ok(!files.includes(path.join('src', 'sample-data.js')));
@@ -57,6 +61,14 @@ test('Supabase 构建仅发送公共配置，验证 SDK 完整性，默认关闭
     await assert.rejects(build({ rootDir: fixture, env, quiet: true }), /轮播组件完整性检查失败/);
     assert.equal(await readFile(path.join(fixture, 'dist', 'keep.txt'), 'utf8'), 'last-good-build');
     await writeFile(carouselFile, carouselBytes);
+    for (const filename of ['panzoom-4.6.2.js', 'PANZOOM-LICENSE.txt']) {
+      const file = path.join(fixture, 'public', 'assets', filename);
+      const bytes = await readFile(file);
+      await writeFile(file, 'tampered');
+      await assert.rejects(build({ rootDir: fixture, env, quiet: true }), /图片缩放组件完整性检查失败/);
+      assert.equal(await readFile(path.join(fixture, 'dist', 'keep.txt'), 'utf8'), 'last-good-build');
+      await writeFile(file, bytes);
+    }
     await writeFile(path.join(fixture, 'public', 'assets', 'supabase-client-2.119.0.js'), 'tampered');
     await assert.rejects(build({ rootDir: fixture, env, quiet: true }), /完整性检查失败/);
     assert.equal(await readFile(path.join(fixture, 'dist', 'keep.txt'), 'utf8'), 'last-good-build');

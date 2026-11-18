@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { anniversaryInfo, canReadEntry, computeStats, dayKey, escapeHtml, filterEntries, relationshipDays, toUtcIso, validateEntry } from '../src/domain.js';
+import { anniversaryInfo, canReadEntry, collectEntryTags, computeStats, dayKey, escapeHtml, filterEntries, relationshipDays, toUtcIso, validateEntry } from '../src/domain.js';
 import { createSampleData } from '../src/sample-data.js';
 
 const valid = (extra = {}) => ({ type: 'note', title: '', content: '把今天记下来。', occurredAt: '2026-11-01T16:10:00.000Z', mood: null, tags: [], media: [], ...extra });
@@ -61,6 +61,71 @@ test('filters combine Shanghai months, per-person favorites, text, mood and tras
   assert.deepEqual(filterEntries(entries, { trash: true, mood: 'unset' }).map(item => item.id), ['2']);
   assert.equal(filterEntries(entries, { month: '2026-10' }).length, 0);
   assert.deepEqual(entries, snapshot);
+});
+
+test('tag filters match complete labels and combine with existing filters independently of text search', () => {
+  const entries = [
+    saved('exact', { tags: ['感悟', 'all'], type: 'event', title: '散步', mood: 'happy', favoriteBy: ['a'] }),
+    saved('longer', { tags: ['生活感悟'], title: '感悟', type: 'event', mood: 'happy', favoriteBy: ['a'] }),
+    saved('text-only', { content: '今天的感悟', mood: 'happy' }),
+    saved('other-mood', { tags: ['感悟'], type: 'event', title: '散步', mood: 'sad', favoriteBy: ['a'] }),
+    saved('case', { tags: ['ALL'] }),
+  ];
+  const snapshot = structuredClone(entries);
+  assert.deepEqual(filterEntries(entries, { tag: '感悟' }).map(entry => entry.id), ['exact', 'other-mood']);
+  assert.deepEqual(filterEntries(entries, { tag: '感悟', query: '散步', type: 'event', mood: 'happy', favoritesOnly: true, userId: 'a', month: '2026-11' }).map(entry => entry.id), ['exact']);
+  assert.deepEqual(filterEntries(entries, { tag: 'all' }).map(entry => entry.id), ['exact']);
+  assert.equal(filterEntries(entries, { tag: '' }).length, entries.length);
+  assert.deepEqual(entries, snapshot);
+});
+
+test('tag options are deduplicated, sorted and retained across tag selection without mutating records', () => {
+  const entries = [
+    saved('first', { tags: ['总结', '感悟', '  ', '', '感悟'] }),
+    saved('second', { tags: ['旅行', '总结', ' 感悟 '] }),
+  ];
+  const snapshot = structuredClone(entries);
+  assert.deepEqual(collectEntryTags(entries, { id: 'a' }, { tag: '感悟' }), ['感悟', '旅行', '总结']);
+  assert.deepEqual(collectEntryTags([...entries].reverse(), { id: 'a' }), ['感悟', '旅行', '总结']);
+  assert.deepEqual(filterEntries(entries, { tag: ' 感悟 ' }).map(entry => entry.id), ['first', 'second']);
+  assert.deepEqual(entries, snapshot);
+});
+
+test('tag options respect member and administrator visibility and exclude every unpublished draft', () => {
+  const entries = [
+    saved('shared', { tags: ['共同'] }),
+    saved('a-secret', { type: 'whisper', tags: ['甲的私密'] }),
+    saved('b-secret', { type: 'whisper', authorId: 'b', tags: ['乙的私密'] }),
+    saved('a-draft', { status: 'draft', tags: ['甲的草稿'] }),
+    saved('b-draft', { status: 'draft', authorId: 'b', tags: ['乙的草稿'] }),
+    saved('admin-draft', { status: 'draft', authorId: 'admin', tags: ['管理员草稿'] }),
+    saved('removed', { deletedAt: '2026-11-03T00:00:00Z', tags: ['回收站'] }),
+  ];
+  const a = collectEntryTags(entries, { id: 'a', role: 'member' });
+  const b = collectEntryTags(entries, { id: 'b', role: 'member' });
+  const admin = collectEntryTags(entries, { id: 'admin', role: 'admin' });
+  assert.deepEqual(new Set(a), new Set(['共同', '甲的私密']));
+  assert.deepEqual(new Set(b), new Set(['共同', '乙的私密']));
+  assert.deepEqual(new Set(admin), new Set(['共同', '甲的私密', '乙的私密']));
+  assert.deepEqual(collectEntryTags(entries, null), []);
+  assert.deepEqual(collectEntryTags(entries, {}), []);
+  assert.deepEqual(collectEntryTags(null, { id: 'a' }), []);
+  assert.deepEqual(collectEntryTags(entries, { id: 'a' }, { trash: true }), ['回收站']);
+});
+
+test('tag options preserve the current event, favorite and other filter scope while ignoring the selected tag', () => {
+  const entries = [
+    saved('target', { type: 'event', title: '夜晚散步', tags: ['旅行'], mood: 'happy', favoriteBy: ['a'] }),
+    saved('second', { type: 'event', title: '夜晚散步', tags: ['感悟'], mood: 'happy', favoriteBy: ['a'] }),
+    saved('note', { tags: ['随记标签'], favoriteBy: ['a'] }),
+    saved('not-favorite', { type: 'event', tags: ['未收藏'] }),
+    saved('other-person-favorite', { type: 'event', tags: ['对方收藏'], favoriteBy: ['b'] }),
+    saved('other-author', { type: 'event', authorId: 'b', title: '夜晚散步', tags: ['对方作者'], mood: 'happy', favoriteBy: ['a'] }),
+  ];
+  const scope = { type: 'event', favoritesOnly: true, userId: 'a', authorId: 'a', mood: 'happy', month: '2026-11', query: '散步', tag: '旅行' };
+  assert.deepEqual(collectEntryTags(entries, { id: 'a' }, scope), ['感悟', '旅行']);
+  assert.deepEqual(filterEntries(entries, scope).map(entry => entry.id), ['target']);
+  assert.deepEqual(collectEntryTags(entries, { id: 'a' }, { favoritesOnly: true }), []);
 });
 
 test('validation prevents empty, impossible-date, invalid-mood and unsupported uploads', () => {

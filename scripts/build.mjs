@@ -197,6 +197,24 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
     if (createHash('sha256').update(bytes).digest('hex') !== item.sha256) throw new Error('轮播组件完整性检查失败。');
     carouselAssets.push({ file: item.file, bytes });
   }
+  const zoomLock = JSON.parse(await readFile(new URL('../vendor/panzoom.lock.json', import.meta.url), 'utf8'));
+  if (zoomLock.name !== '@panzoom/panzoom' || zoomLock.version !== '4.6.2' || zoomLock.license !== 'MIT'
+    || zoomLock.archive !== 'https://registry.npmjs.org/@panzoom/panzoom/-/panzoom-4.6.2.tgz'
+    || zoomLock.registryIntegrity !== 'sha512-Zn3B5/hwa6eYIPRSKX0xf2clv8nviTX8AnAU5kU/EugiTDhG41ya2wlBqYrZJYCWQROr/5XkWObZhIkepi89qw=='
+    || !Array.isArray(zoomLock.files) || zoomLock.files.length !== 2) throw new Error('图片缩放组件锁定清单不匹配。');
+  const zoomHashes = new Map([
+    ['public/assets/panzoom-4.6.2.js', '3ce354ef7b493efb62a4d4acaaf86fa2d6027eb629857a4e144041de1a112c1e'],
+    ['public/assets/PANZOOM-LICENSE.txt', 'db74524b3ab3853bcfc7300dade1f5e0176e59ed3c0cff43848a2c300091a22c'],
+  ]);
+  const zoomAssets = [];
+  for (const item of zoomLock.files) {
+    if (!zoomHashes.has(item.file)) throw new Error('图片缩放组件路径不在白名单。');
+    if (item.sha256 !== zoomHashes.get(item.file)) throw new Error('图片缩放组件锁定摘要不匹配。');
+    zoomHashes.delete(item.file);
+    const bytes = await readFile(await requireFile(root, item.file));
+    if (createHash('sha256').update(bytes).digest('hex') !== item.sha256) throw new Error('图片缩放组件完整性检查失败。');
+    zoomAssets.push({ file: item.file, bytes });
+  }
 
   // Validate before touching a previous build, so failed source checks preserve it.
   await preflight(root, excluded);
@@ -230,6 +248,7 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
   for (const item of pickerAssets) await writeFile(path.join(dist, 'assets', path.basename(item.file)), item.bytes);
   for (const item of sorterAssets) await writeFile(path.join(dist, 'assets', path.basename(item.file)), item.bytes);
   for (const item of carouselAssets) await writeFile(path.join(dist, 'assets', path.basename(item.file)), item.bytes);
+  for (const item of zoomAssets) await writeFile(path.join(dist, 'assets', path.basename(item.file)), item.bytes);
   if (sdk) {
     await writeFile(path.join(dist, 'assets', 'supabase-client-2.119.0.js'), sdk);
     await writeFile(path.join(dist, 'assets', 'SUPABASE-LICENSE.txt'), await readFile(path.join(root, 'vendor', 'SUPABASE-LICENSE')));

@@ -111,6 +111,7 @@ select pg_temp.review_ok((select count(*)=0 from public.profiles),'guard hides p
 select pg_temp.review_ok((select count(*)=0 from public.entries),'guard hides entries');
 select pg_temp.review_ok((select count(*)=0 from public.media),'guard hides media registrations');
 select pg_temp.review_ok((select count(*)=0 from public.settings),'guard hides settings');
+select pg_temp.review_rows($q$update public.settings set subtitle='guard must block this' where id=1$q$,0,'guard blocks shared settings update');
 select pg_temp.review_error($q$insert into public.entries(title,content) values ('隔离验证','guard closed')$q$,array['42501'],'guard blocks entry creation');
 select pg_temp.review_error($q$select public.reserve_media((select id from pg_temp.memory_review_ids where label='entry_a'),'a.jpg','image/jpeg',1)$q$,array['42501'],'guard blocks reservation RPC');
 select pg_temp.review_error($q$select public.publish_entry((select id from pg_temp.memory_review_ids where label='entry_a'),'{}'::uuid[],null)$q$,array['42501'],'guard blocks publish RPC');
@@ -127,6 +128,7 @@ do $$ declare table_name text; begin
   end loop;
 end; $$;
 select pg_temp.review_error($q$select public.publish_entry((select id from pg_temp.memory_review_ids where label='entry_a'),'{}'::uuid[],null)$q$,array['42501'],'anonymous publish denied');
+select pg_temp.review_error($q$update public.settings set subtitle='anonymous must not write' where id=1$q$,array['42501'],'anonymous shared settings update denied');
 reset role;
 
 set local role authenticated;
@@ -134,6 +136,7 @@ select pg_temp.review_actor('outsider');
 select pg_temp.review_ok((select count(*)=0 from public.profiles),'unlisted authenticated user sees no profiles');
 select pg_temp.review_ok((select count(*)=0 from public.entries),'unlisted authenticated user sees no entries');
 select pg_temp.review_ok((select count(*)=0 from public.settings),'unlisted authenticated user sees no settings');
+select pg_temp.review_rows($q$update public.settings set subtitle='outsider must not write' where id=1$q$,0,'unlisted authenticated user cannot edit shared settings');
 select pg_temp.review_error($q$insert into public.entries(title) values ('未授权')$q$,array['42501'],'unlisted authenticated user cannot create entries');
 select pg_temp.review_error($q$select public.reserve_media((select id from pg_temp.memory_review_ids where label='entry_a'),'a.jpg','image/jpeg',1)$q$,array['42501'],'unlisted authenticated user cannot reserve media');
 select pg_temp.review_error($q$update public.profiles set role='admin' where id=(select id from pg_temp.memory_review_actors where label='outsider')$q$,array['42501'],'unlisted authenticated user cannot self-enroll as admin');
@@ -195,7 +198,14 @@ select pg_temp.review_rows($q$update public.entries set "deletedAt"=null where i
 select pg_temp.review_rows($q$update public.entries set content='管理员维护记录' where id=(select id from pg_temp.memory_review_ids where label='entry_a')$q$,1,'admin can maintain published entry');
 select pg_temp.review_rows($q$update public.settings set subtitle='隔离验证，事务结束会回滚' where id=1$q$,1,'admin can edit common settings');
 select pg_temp.review_actor('a');
-select pg_temp.review_rows($q$update public.settings set subtitle='不应生效' where id=1$q$,0,'ordinary member cannot edit common settings');
+select pg_temp.review_rows($q$update public.settings set "spaceName"='事务测试共同空间',subtitle='成员可以共同维护',"startDate"='2024-01-01',anniversaries='[{"id":"settings-review-a","title":"初见","date":"2024-01-01","yearly":true}]'::jsonb where id=1$q$,1,'first member can edit all four shared settings fields');
+select pg_temp.review_error($q$update public.settings set id=2 where id=1$q$,array['42501'],'member cannot change singleton settings identity');
+select pg_temp.review_error($q$update public.settings set "updatedAt"=now() where id=1$q$,array['42501'],'member cannot forge settings update timestamp');
+select pg_temp.review_actor('b');
+select pg_temp.review_ok((select "spaceName"='事务测试共同空间' and "startDate"=date '2024-01-01' and anniversaries->0->>'title'='初见' from public.settings where id=1),'second member sees settings saved by first member');
+select pg_temp.review_rows($q$update public.settings set subtitle='第二位成员已修改',anniversaries='[{"id":"settings-review-b","title":"旅行","date":"2024-05-20","yearly":false}]'::jsonb where id=1$q$,1,'second member can maintain shared settings and anniversaries');
+select pg_temp.review_actor('a');
+select pg_temp.review_ok((select subtitle='第二位成员已修改' and anniversaries->0->>'title'='旅行' from public.settings where id=1),'first member sees settings saved by second member');
 select pg_temp.review_error($q$update public.profiles set role='admin' where id=auth.uid()$q$,array['42501'],'ordinary member cannot change whitelist role');
 
 select pg_temp.review_error($q$update public.entries set title='',content='' where id=(select id from pg_temp.memory_review_ids where label='entry_a')$q$,array['23514'],'published record cannot be patched to empty');

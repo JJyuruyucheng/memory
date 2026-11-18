@@ -286,7 +286,6 @@ export function createSupabaseProvider(config = {}) {
   async function exportData(scope, expected) {
     const user = requireUser(expected);
     if (!['all', 'mine'].includes(scope)) throw new SupabaseProviderError('导出范围无效。', 'VALIDATION');
-    if (scope === 'all' && user.role !== 'admin') throw new SupabaseProviderError('完整档案由维护账号导出。', 'FORBIDDEN', 403);
     await loadState(expected, user.id);
     const entries = clone(state.entries.filter(value => scope === 'all' || value.authorId === user.id));
     for (const entry of entries) for (const media of entry.media) {
@@ -397,7 +396,7 @@ export function createSupabaseProvider(config = {}) {
       await loadState(expected, user.id); return state.entries.find(value => value.id === entryId)?.comments.find(value => value.id === saved.id);
     }),
     saveSettings: value => enqueue(async expected => {
-      const user = requireUser(expected); if (user.role !== 'admin') throw new SupabaseProviderError('只有维护账号可以修改共同设置。', 'FORBIDDEN', 403);
+      requireUser(expected);
       const settings = checkedSettings(value);
       const saved = await result(query(client.from('settings').update(settings).eq('id', 1).select('*').single()), expected);
       requireUser(expected); Object.assign(state.settings, checkedSettings(saved)); return state.settings;

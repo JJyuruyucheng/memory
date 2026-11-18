@@ -211,7 +211,7 @@ test('an HTML reverse-proxy fallback is detected instead of treated as empty dat
   await assert.rejects(provider.login('one', 'password', 'verified-test-token'), error => error.code === 'INVALID_RESPONSE');
 });
 
-test('ordinary members get an explicit common-settings permission error', async () => {
+test('legacy Memos retains its native admin-only space settings boundary without elevating members', async () => {
   const { provider, calls } = fixture(); const state = await provider.login('one', 'password', 'verified-test-token');
   await assert.rejects(provider.saveSettings(state.settings), error => error.status === 403);
   assert.ok(!calls.some(call => call.method === 'PATCH'));

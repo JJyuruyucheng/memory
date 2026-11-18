@@ -92,7 +92,7 @@ test('official Memos 26.11.1: accounts, SPACE, media, comments, reactions, expor
     const comment = await second.addComment(entry.id, '一起记下来 <b>不是 HTML</b>');
     assert.equal(comment.authorId, 'users/test-two');
     const refreshed = await first.init(); assert.equal(refreshed, state); assert.equal(refreshed.entries[0].comments.length, 1);
-    await assert.rejects(first.saveSettings(state.settings), error => error.status === 403);
+    await assert.rejects(first.saveSettings(state.settings), error => error.status === 403); // Legacy Memos space ACL is intentionally unchanged; production uses Supabase.
     await first.deleteEntry(entry.id); assert.ok(state.entries[0].deletedAt);
     const rawStillExists = await second.init(); assert.ok(rawStillExists.entries[0].deletedAt);
     await first.restoreEntry(entry.id); assert.equal(state.entries[0].deletedAt, null);

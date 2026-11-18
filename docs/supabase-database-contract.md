@@ -26,13 +26,13 @@
 | comments | `id uuid, entryId uuid, authorId uuid, content, createdAt`。 |
 | reactions | `entryId uuid, userId uuid, createdAt`，二元主键；一个用户对一帖最多一个爱心。 |
 | favorites | 与 reactions 相同，独立表；收藏按人保存，当前共享契约也允许成员看到收藏人列表。 |
-| settings | 单例 `id=1, spaceName, subtitle, startDate:date, anniversaries:jsonb[], updatedAt`；仅业务 admin 可更新。 |
+| settings | 单例 `id=1, spaceName, subtitle, startDate:date, anniversaries:jsonb[], updatedAt`；受邀成员与管理员均可更新四个业务字段，不能改 `id` / `updatedAt`。 |
 
 数据库生成 UUID 和创建时间。记录的 id、authorId、createdAt 不能通过客户端改动，管理员也不能重新归属文章；updatedAt 由数据库更新，可保留微秒。Provider 的乐观并发比较必须使用 REST 原始时间字符串，不要经过 JavaScript Date 丢失精度。
 
 标题最多 120 字符、正文最多 20000、回应非空且最多 5000；事件必须有标题。tags 最多 20 个、单项 1–40 字符、不能空、重复或包含首尾空白。日期有限且在 1000–9999 年范围；settings 名称 1–60、副标题最多 300、纪念日最多 100 个，日期必须是真实日期。SQL 字符长度与 JavaScript UTF-16 长度不完全相同，前端可更严格，不能因此放宽数据库。
 
-所有 public 业务表启用 RLS，同时显式授最小权限；anon 没有业务表或公开 RPC 权限。authenticated 仅可读取允许的行，entries 插入/列级更新、comments 插入、自己的 reactions/favorites 插入与删除、管理员 settings 列级更新。没有 entries 物理 DELETE、profiles 写权限、media 直接写权限或评论更新权限。trusted service_role 拥有业务表维护权限，不能交给前端。对未来新增表仍必须单独审查授权，当前草案不保证未来默认权限安全。
+所有 public 业务表启用 RLS，同时显式授最小权限；anon 没有业务表或记录附件 RPC 权限（登录页公开轮播使用独立的受限读取接口）。authenticated 仅可读取允许的行，entries 插入/列级更新、comments 插入、自己的 reactions/favorites 插入与删除、受邀成员 settings 列级更新。没有 entries 物理 DELETE、profiles 写权限、media 直接写权限或评论更新权限。trusted service_role 拥有业务表维护权限，不能交给前端。对未来新增表仍必须单独审查授权，当前草案不保证未来默认权限安全。
 
 ## REST 与草稿发布
 
@@ -54,7 +54,9 @@ Provider 禁止在同一次保存中把 whisper 改成共享类型并移除旧�
 
 排序迁移为 `supabase/migrations/20261116112257_attachment_order.sql`（文件名与云端实际迁移版本一致）。`publish_entry` 的 `p_media_ids` 从集合升级为有序集合；保留原授权、并发检查、真实对象与数量校验，在同一事务内按该顺序分配连续 `position=0..n-1`。未选中的暂存/retired 附件排在其后。为兼容立即唯一约束，持锁后先整体移到未使用的正序号范围，再压缩；序号溢出会拒绝并回滚，不放开客户端直接写 position。已在生产应用并完成真实文件顺序验证，详见 `docs/release-v0.5.0.md`。
 
-评论 POST comments 的 `entryId,content`；authorId 默认当前用户，不能冒充他人。爱心/收藏 POST `entryId`，DELETE 时按 entryId 与当前 userId 定位。仅 published 且未删除的记录可新增回应、爱心、收藏；移除自己的爱心/收藏仍允许。settings PATCH 仅管理员通过 RLS 生效。
+评论 POST comments 的 `entryId,content`；authorId 默认当前用户，不能冒充他人。爱心/收藏 POST `entryId`，DELETE 时按 entryId 与当前 userId 定位。仅 published 且未删除的记录可新增回应、爱心、收藏；移除自己的爱心/收藏仍允许。settings PATCH 允许 `memory_private.member_role()` 返回非空的受邀成员与管理员，运行开关关闭时仍拒绝；仅四列业务设置可写。`exportData('all')` 表示导出当前账号全部可见记录，不提升悄悄话或草稿权限，普通成员无法导出对方悄悄话。
+
+成员共同设置迁移为 `supabase/migrations/20261118022125_member_settings.sql`，文件名已对齐正式项目的实际迁移版本 `20261118022125`。它仅调整 `settings_update` 的行级检查，保留四列 UPDATE 授权、受邀白名单与运行开关，不改变 profiles、记录或媒体权限。完整 `supabase/verify-isolation.sql` 已在正式项目单事务执行通过并 ROLLBACK，最终临时 Auth 用户残留计数为 0；该 SQL 模拟验证不等同真实用户 JWT 验证。共同设置的具体范围与 Memos 模式差异见 [成员权限说明](shared-settings.md)。
 
 ### 媒体与原子选图协议
 

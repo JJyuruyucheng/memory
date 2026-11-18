@@ -1,5 +1,9 @@
 # Third-party notices
 
+## Panzoom
+
+The attachment image viewer uses [Panzoom 4.6.2](https://github.com/timmywil/panzoom/tree/4.6.2) under the MIT license. Its original minified UMD bundle is vendored locally without modification. [The original copyright and license](public/assets/PANZOOM-LICENSE.txt) and [the official npm archive URL, registry integrity and file checksums](vendor/panzoom.lock.json) are preserved. The archive was verified before extracting these two files; no package installation scripts or remote CDN are used.
+
 ## Embla Carousel
 
 The login photo carousel uses [Embla Carousel 8.6.0](https://github.com/davidjerleke/embla-carousel/tree/v8.6.0) under the MIT license. Its original UMD bundle is vendored locally without modification. [The license](public/assets/EMBLA-LICENSE.txt) and [the archive integrity and file checksums](vendor/embla.lock.json) are preserved. No remote CDN is required at runtime.

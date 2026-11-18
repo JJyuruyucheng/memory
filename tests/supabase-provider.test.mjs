@@ -13,7 +13,7 @@ const ok = data => ({ data, error: null });
 
 // A narrow SDK boundary fixture, not a second provider. It enforces server
 // ownership, immutable fields and reservation/upload/finalization sequencing.
-function fixture({ before = async () => {}, author = U1, initialMedia = false, profiles: customProfiles, onSessionChanged, initialSessionUserId = null } = {}) {
+function fixture({ before = async () => {}, author = U1, initialMedia = false, profiles: customProfiles, onSessionChanged, initialSessionUserId = null, denySettings = false, enforceEntryVisibility = false } = {}) {
   const calls = [], listeners = new Set(), urls = [], revoked = [];
   let session = initialSessionUserId ? { access_token: 'never-export-restored-jwt', user: { id: initialSessionUserId } } : null, serial = 10, tick = 0;
   const generated = prefix => `${prefix}0000000-0000-4000-8000-${String(++serial).padStart(12, '0')}`;
@@ -54,6 +54,7 @@ function fixture({ before = async () => {}, author = U1, initialMedia = false, p
       const call = { kind: 'table', table: this.table, action: this.action, payload: this.payload, filters: [...this.filters], signal: this.signal, offset: this.offset }; calls.push(call); await before(call);
       if (!user()) return { data: null, error: { status: 401 } };
       let selected = tables[this.table].filter(row => this.filters.every(([field, value]) => row[field] === value));
+      if (enforceEntryVisibility && this.table === 'entries') selected = selected.filter(row => row.status === 'draft' ? row.authorId === user() : row.type !== 'whisper' || row.authorId === user() || isAdmin());
       if (this.action === 'insert') {
         const payload = structuredClone(this.payload);
         if (['profiles', 'media'].includes(this.table)) return { data: null, error: { code: '42501', status: 403 } };
@@ -64,8 +65,9 @@ function fixture({ before = async () => {}, author = U1, initialMedia = false, p
         else selected = [{ ...payload, userId: user(), createdAt: NOW }];
         tables[this.table].push(...selected);
       } else if (this.action === 'update') {
-        if (this.table === 'entries' && selected.some(row => !owns(row.id)) || this.table === 'settings' && !isAdmin()) return { data: null, error: { code: '42501', status: 403 } };
+        if (this.table === 'entries' && selected.some(row => !owns(row.id)) || this.table === 'settings' && (denySettings || !tables.profiles.some(row => row.id === user()))) return { data: null, error: { code: '42501', status: 403 } };
         if (this.table === 'entries') assert.ok(Object.keys(this.payload).every(key => ['type', 'title', 'content', 'occurredAt', 'mood', 'tags', 'deletedAt'].includes(key)), 'no immutable entry field is sent');
+        if (this.table === 'settings') assert.deepEqual(Object.keys(this.payload).sort(), ['anniversaries', 'spaceName', 'startDate', 'subtitle'], 'settings writes stay within the existing column grant');
         selected.forEach(row => Object.assign(row, this.payload, { updatedAt: new Date(Date.parse(NOW) + ++tick * 1000).toISOString() }));
       } else if (this.action === 'delete') {
         assert.ok(['reactions', 'favorites'].includes(this.table), 'records are never physically deleted');
@@ -460,10 +462,51 @@ test('invalid media order rejects before writes and same-set whisper reordering 
   assert.equal(shared.type, 'note'); assert.equal(shared.media[1].id, MEDIA);
 });
 
-test('member ownership is enforced before mutation; admin settings and soft delete preserve row identity', async () => {
+test('both invited members and admin save shared settings without gaining record ownership or profile writes', async () => {
+  for (const username of ['xbl', 'll', 'memory-admin']) {
+    const f = fixture(), state = await f.signIn(username);
+    const settings = { ...state.settings, id: 88, updatedAt: '1900-01-01T00:00:00Z', role: 'admin', spaceName: '  一起的小世界  ', subtitle: '共同维护', startDate: '2024-05-20', anniversaries: [{ id: 'our-day', title: ' 初见 ', date: '2024-05-20', yearly: true }] };
+    await f.provider.saveSettings(settings);
+    assert.deepEqual(state.settings, { spaceName: '一起的小世界', subtitle: '共同维护', startDate: '2024-05-20', anniversaries: [{ id: 'our-day', title: '初见', date: '2024-05-20', yearly: true }] });
+    assert.equal(f.tables.settings[0].id, 1);
+    assert.equal(state.currentUser.role, username === 'memory-admin' ? 'admin' : 'member');
+    assert.ok(!f.calls.some(call => call.kind === 'table' && call.action !== 'select' && call.table !== 'settings'));
+    await assert.rejects(f.provider.saveSettings({ ...state.settings, startDate: '2026-02-30' }), error => error.code === 'VALIDATION');
+    f.provider.dispose();
+  }
+});
+
+test('shared settings and all-visible export remain blocked when signed out and respect a server rejection', async () => {
+  const f = fixture(); await f.provider.init();
+  const start = f.calls.length;
+  await assert.rejects(f.provider.saveSettings(f.tables.settings[0]), error => error.code === 'UNAUTHENTICATED');
+  await assert.rejects(f.provider.exportData('all'), error => error.code === 'UNAUTHENTICATED');
+  assert.equal(f.calls.length, start, 'anonymous operations never reach a business table');
+  const denied = fixture({ denySettings: true }), state = await denied.signIn();
+  const previous = structuredClone(state.settings);
+  await assert.rejects(denied.provider.saveSettings({ ...state.settings, spaceName: 'must not claim saved' }), error => error.code === 'FORBIDDEN');
+  assert.deepEqual(state.settings, previous);
+  await denied.provider.logout();
+  await assert.rejects(denied.provider.saveSettings(previous), error => error.code === 'UNAUTHENTICATED');
+});
+
+test('all-visible export is available to both members while their partner whispers remain excluded', async () => {
+  for (const [username, expectedAuthors] of [['xbl', [U1]], ['ll', [U2]], ['memory-admin', [U1, U2]]]) {
+    const f = fixture({ enforceEntryVisibility: true });
+    for (const [index, authorId] of [U1, U2].entries()) f.tables.entries.push({ ...f.tables.entries[0], id: `10000000-0000-4000-8000-00000000000${index + 2}`, type: 'whisper', authorId, content: `${authorId}-private-whisper` });
+    await f.signIn(username);
+    const exported = JSON.parse(await (await f.provider.exportData('all')).text());
+    assert.equal(exported.scope, 'all');
+    assert.ok(exported.entries.some(entry => entry.id === ENTRY));
+    assert.deepEqual(exported.entries.filter(entry => entry.type === 'whisper').map(entry => entry.authorId).sort(), expectedAuthors);
+    assert.ok(!/test-password|never-export/.test(JSON.stringify(exported)));
+    f.provider.dispose();
+  }
+});
+
+test('member ownership is enforced before mutation and admin soft deletion preserves row identity', async () => {
   const f = fixture({ author: U2 }); await f.signIn();
   await assert.rejects(f.provider.deleteEntry(ENTRY), error => error.status === 403);
-  await assert.rejects(f.provider.saveSettings(f.tables.settings[0]), error => error.status === 403);
   assert.ok(!f.calls.some(value => value.kind === 'table' && value.action !== 'select'));
   await f.provider.logout(); const state = await f.signIn('memory-admin'), entries = state.entries;
   await f.provider.deleteEntry(ENTRY); assert.equal(state.entries[0].deletedAt, NOW);

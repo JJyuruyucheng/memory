@@ -8,14 +8,16 @@ import { mountAttachmentSorter, destroyAttachmentSorter } from './attachment-sor
 import { mountLoginCarousel } from './login-carousel.js';
 import { loginPhotoEditorMarkup, mountLoginPhotoEditor } from './login-photo-editor.js';
 import { prepareLoginPhoto } from './login-photo-image.js';
-import { escapeHtml as esc, filterEntries, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
+import { mediaViewerMarkup, mountMediaViewer } from './media-viewer.js';
+import { escapeHtml as esc, filterEntries, collectEntryTags, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
 
 const app = document.querySelector('#app');
 const modalRoot = document.querySelector('#modal-root');
-let provider, loginVerification, loginPhotos, loginCarousel, loginPhotoEditor;
+let provider, loginVerification, loginPhotos, loginCarousel, loginPhotoEditor, mediaViewer;
 const moodNames = { happy: '微笑', neutral: '一般', sad: '难受', unset: '未填写' };
 const moodIcons = { happy: 'smile', neutral: 'neutral', sad: 'sad' };
-const filters = { query: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all', favoritesOnly: false, trash: false };
+const filters = { query: '', tag: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all', favoritesOnly: false, trash: false };
+let tagFilterIdentity = null;
 let state = { currentUser: null, users: [], entries: [], settings: {} }, loginPending = false, bootPending = true;
 let reconnectPending = false, reconnectError = null, reconnectAttempt, recoveryEpoch = 0;
 let searchTimer, toastTimer, dialogReturnFocus, draftTimer;
@@ -23,7 +25,7 @@ let editorAttachments = [], editorId = null, previewUrls = [];
 let calendarCursor = dayKey(new Date()).slice(0, 7), selectedDay = '';
 const route = () => location.hash.slice(1).split('?')[0] || 'timeline';
 const user = id => state.users.find(u => u.id === id) || { id, name: '已离开的作者', color: 'sage' };
-const dateLabel = (value, full = false) => new Intl.DateTimeFormat('zh-CN', { timeZone: CONFIG.timeZone, ...(full ? { year: 'numeric' } : {}), month: 'long', day: 'numeric' }).format(new Date(value));
+const dateLabel = (value, full = false, withTime = false) => new Intl.DateTimeFormat('zh-CN', { timeZone: CONFIG.timeZone, ...(full ? { year: 'numeric' } : {}), month: 'long', day: 'numeric', ...(withTime ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } : {}) }).format(new Date(value));
 const avatar = (u, small = false) => `<span class="avatar ${u.color === 'rose' || state?.users?.filter(person => person.role !== 'admin').findIndex(person => person.id === u.id) === 1 ? 'rose' : u.role === 'admin' ? 'stone' : 'sage'} ${small ? 'small' : ''}" aria-label="${esc(u.name)}">${esc((u.name || '我').slice(0, 1))}</span>`;
 const canEdit = entry => state.currentUser && (state.currentUser.role === 'admin' || state.currentUser.id === entry.authorId);
 const visibleEntries = () => state.entries.filter(entry => entry.type !== 'whisper' || state.currentUser?.role === 'admin' || entry.authorId === state.currentUser?.id);
@@ -48,12 +50,19 @@ const navItems = [['timeline', 'book', '时光线'], ['album', 'photo', '我们�
 function navLink(item) { const [id, symbol, label] = item; return `<a href="#${id}" class="nav-link ${route() === id ? 'active' : ''}" ${route() === id ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${label}</span></a>`; }
 
 function render() {
+  const identity = state?.currentUser?.id || null;
+  if (identity !== tagFilterIdentity) { filters.tag = ''; tagFilterIdentity = identity; }
+  if (!identity) { delete app.dataset.scrollView; delete app.dataset.feedFilterKey; document.body.classList.remove('has-feed-layout'); }
   if (!state?.currentUser && (reconnectPending || reconnectError)) return renderReconnect(reconnectError);
   document.body.classList.toggle('is-login', !state?.currentUser && CONFIG.mode !== 'demo');
+  document.body.classList.toggle('has-feed-layout', Boolean(state?.currentUser) && ['timeline', 'events', 'favorites'].includes(route()));
   if (!state?.currentUser) return renderLogin();
   loginVerification?.destroy(); loginVerification = null;
   loginCarousel?.destroy(); loginCarousel = null;
   const active = document.activeElement?.id, selection = document.activeElement?.selectionStart;
+  const scrollView = `${state.currentUser.id}:${route()}`;
+  const feedFilterKey = JSON.stringify({ ...filters, selectedDay });
+  const scrollPositions = app.dataset.scrollView === scrollView ? ['.feed-column', '.right-rail'].map(selector => [selector, selector === '.feed-column' && app.dataset.feedFilterKey !== feedFilterKey ? 0 : app.querySelector(selector)?.scrollTop || 0]) : [];
   const current = state.currentUser, stats = computeStats(visibleEntries());
   app.innerHTML = `
     <aside class="sidebar" aria-label="主导航">
@@ -72,11 +81,16 @@ function render() {
       <footer class="page-footer"><button class="text-button" data-action="updates">系统更新信息 <span>${esc(releaseHistory[0]?.version || '')}</span></button>${CONFIG.mode === 'demo' ? '<span>演示内容为虚构，勿上传私密资料</span>' : '<button class="text-button" data-action="about-mode">可见范围</button>'}</footer>
     </div>
     <nav class="mobile-nav" aria-label="手机导航">${[['timeline', 'book', '时光'], ['album', 'photo', '相册']].map(navLink).join('')}<button class="mobile-compose" data-action="new" aria-label="记录这一刻">${icon('plus')}</button>${[['stats', 'chart', '统计'], ['us', 'settings', '我们']].map(navLink).join('')}</nav>`;
+  app.dataset.scrollView = scrollView;
+  app.dataset.feedFilterKey = feedFilterKey;
+  for (const [selector, top] of scrollPositions) { const region = app.querySelector(selector); if (region) region.scrollTop = top; }
   if (active) { const el = document.getElementById(active); if (el) { el.focus({ preventScroll: true }); if (typeof selection === 'number' && el.setSelectionRange) el.setSelectionRange(selection, selection); } }
   mountDatePickers(app);
 }
 function heading(title, subtitle, action = true) {
-  return `<header class="page-heading"><div><h1>${title}</h1><p>${subtitle}</p></div>${action ? `<button class="primary" data-action="new">${icon('plus')}<span>记录这一刻</span></button>` : ''}</header>`;
+  const searchable = action && ['timeline', 'events', 'favorites'].includes(route());
+  const compose = action ? `<button class="primary" data-action="new">${icon('plus')}<span>记录这一刻</span></button>` : '';
+  return `<header class="page-heading ${searchable ? 'feed-heading' : ''}"><div><h1>${title}</h1><p>${subtitle}</p></div>${searchable ? `<div class="page-heading-actions"><form id="search-form" class="compact-search" role="search"><label class="sr-only" for="search">搜索回忆</label><input id="search" name="query" type="search" value="${esc(filters.query)}" placeholder="搜索回忆…" autocomplete="off" /><button type="submit" aria-label="搜索回忆">${icon('search')}</button></form>${compose}</div>` : compose}</header>`;
 }
 function renderView(stats) {
   switch (route()) {
@@ -90,16 +104,19 @@ function renderView(stats) {
       const view = route();
       const title = view === 'events' ? '那些重要的时刻' : view === 'favorites' ? '舍不得忘的小事' : '把日子，慢慢收藏。';
       return `${heading(title, view === 'favorites' ? '你标记过的片段，都在这里。' : view === 'events' ? '第一次、纪念日，还有一起经历的每一个特别。' : `${dateLabel(new Date(), true)} · ${esc(state.settings.subtitle || '平凡的小事，也值得被记住。')}`)}
-        <div class="home-grid"><section class="feed-column" aria-label="我们的时光线">
-        <button class="quick-compose" data-action="new">${avatar(state.currentUser, true)}<span>今天，有什么想和 TA 一起记住？</span>${icon('edit')}</button>
-        ${renderFilters()}<div class="feed-summary"><span>${selectedDay ? `${esc(selectedDay)} · ` : ''}共 ${filtered().length} 条${view === 'favorites' ? '收藏' : '回忆'}</span>${selectedDay || filters.query || filters.mood !== 'all' || filters.authorId !== 'all' || filters.type !== 'all' || filters.month ? '<button class="text-button" data-action="clear-filters">清除筛选</button>' : '<span>按发生时间排列</span>'}</div>
-        ${renderFeed(filtered())}</section><aside class="right-rail">${renderTogether(stats)}${renderCalendar()}${renderUpcoming()}</aside></div>`;
+        <div class="home-grid"><section class="feed-column" tabindex="0" aria-label="我们的时光线">
+        ${renderFilters()}<div class="feed-summary"><span>${selectedDay ? `${esc(selectedDay)} · ` : ''}共 ${filtered().length} 条${view === 'favorites' ? '收藏' : '回忆'}</span>${selectedDay || filters.query || filters.tag || filters.mood !== 'all' || filters.authorId !== 'all' || filters.type !== 'all' || filters.month ? '<button class="text-button" data-action="clear-filters">清除筛选</button>' : '<span>按发生时间排列</span>'}</div>
+        ${renderFeed(filtered())}</section><aside class="right-rail" tabindex="0" aria-label="共同空间信息">${renderTogether(stats)}${renderCalendar()}${renderUpcoming()}</aside></div>`;
     }
   }
 }
 function renderFilters() {
-  return `<div class="filters"><label class="search-field"><span class="sr-only">搜索回忆</span><input id="search" type="search" value="${esc(filters.query)}" placeholder="找找那天的小事…" autocomplete="off" />${icon('search')}</label><div class="filter-row">
-    <div class="segmented" aria-label="记录类型">${[['all', '全部'], ['note', '随记'], ['event', '事件'], ['whisper', '悄悄话']].map(([id, label]) => `<button data-action="filter-type" data-value="${id}" aria-pressed="${filters.type === id}" ${route() === 'events' && id !== 'event' ? 'disabled' : ''}>${label}</button>`).join('')}</div>
+  const view = route(), type = view === 'events' ? 'event' : filters.type;
+  const tags = collectEntryTags(visibleEntries(), state.currentUser, { type: view === 'events' ? 'event' : 'all', favoritesOnly: view === 'favorites', userId: state.currentUser.id });
+  if (filters.tag && !tags.includes(filters.tag)) filters.tag = '';
+  return `<div class="filters"><div class="filter-row ${tags.length ? 'has-tag-filters' : ''}">
+    <div class="segmented" aria-label="记录类型">${[['all', '全部'], ['note', '随记'], ['event', '事件'], ['whisper', '悄悄话']].map(([id, label]) => `<button data-action="filter-type" data-value="${id}" aria-pressed="${type === id}" ${view === 'events' && id !== 'event' ? 'disabled' : ''}>${label}</button>`).join('')}</div>
+    ${tags.length ? `<div class="tag-filter-list" role="group" aria-label="按小标签筛选"><button id="filter-tag-all" class="tag-filter" data-action="filter-tag" data-value="" aria-pressed="${!filters.tag}">全部标签</button>${tags.map(tag => `<button id="filter-tag-value-${esc(encodeURIComponent(tag))}" class="tag-filter" data-action="filter-tag" data-value="${esc(tag)}" aria-pressed="${filters.tag === tag}"># ${esc(tag)}</button>`).join('')}</div>` : ''}
     <label class="select-field"><span class="sr-only">按作者筛选</span><select id="filter-author"><option value="all">所有作者</option>${state.users.map(u => `<option value="${esc(u.id)}" ${filters.authorId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>
     <label class="select-field"><span class="sr-only">按心情筛选</span><select id="filter-mood"><option value="all">所有心情</option>${Object.entries(moodNames).map(([id, label]) => `<option value="${id}" ${filters.mood === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div></div>`;
 }
@@ -111,7 +128,7 @@ function renderFeed(rows, trash = false) {
 function renderEntry(entry, trash = false) {
   const author = user(entry.authorId), liked = entry.reactionBy?.includes(state.currentUser.id), saved = entry.favoriteBy?.includes(state.currentUser.id);
   return `<article class="memory-card ${entry.type === 'event' ? 'event-card' : entry.type === 'whisper' ? 'whisper-card' : ''}">
-    <div class="memory-meta">${avatar(author, true)}<div><strong>${esc(author.name)}</strong><time datetime="${esc(entry.occurredAt)}">${dateLabel(entry.occurredAt)}${entry.createdAt && dayKey(entry.createdAt) !== dayKey(entry.occurredAt) ? ' · 补记' : ''}</time></div><span class="entry-kind" ${entry.type === 'whisper' ? 'title="仅作者和管理员可见"' : ''}>${entry.type === 'event' ? `${icon('calendar')}事件` : entry.type === 'whisper' ? `${icon('lock')}悄悄话` : '随记'}</span>${canEdit(entry) && !trash ? `<button class="icon-button" data-action="edit" data-id="${esc(entry.id)}" aria-label="编辑${esc(entry.title || '这条回忆')}">${icon('edit')}</button>` : ''}</div>
+    <div class="memory-meta">${avatar(author, true)}<div><strong>${esc(author.name)}</strong><time datetime="${esc(entry.occurredAt)}">${dateLabel(entry.occurredAt, false, true)}${entry.createdAt && dayKey(entry.createdAt) !== dayKey(entry.occurredAt) ? ' · 补记' : ''}</time></div><span class="entry-kind" ${entry.type === 'whisper' ? 'title="仅作者和管理员可见"' : ''}>${entry.type === 'event' ? `${icon('calendar')}事件` : entry.type === 'whisper' ? `${icon('lock')}悄悄话` : '随记'}</span>${canEdit(entry) && !trash ? `<button class="icon-button" data-action="edit" data-id="${esc(entry.id)}" aria-label="编辑${esc(entry.title || '这条回忆')}">${icon('edit')}</button>` : ''}</div>
     ${entry.title ? `<h2>${esc(entry.title)}</h2>` : ''}<p class="memory-text">${esc(entry.content)}</p>
     ${renderEntryMedia(entry, safeUrl)}
     ${entry.mood || entry.tags?.length ? `<div class="entry-tags">${entry.mood ? `<span class="mood-tag ${entry.mood}">${icon(moodIcons[entry.mood])}${moodNames[entry.mood] || '未填写'}</span>` : ''}${(entry.tags || []).map(tag => `<button class="tag" data-action="search-tag" data-value="${esc(tag)}"># ${esc(tag)}</button>`).join('')}</div>` : ''}
@@ -136,7 +153,7 @@ function renderAlbum() {
   const entries = filtered().filter(e => !e.deletedAt), allMedia = entries.flatMap(entry => entry.media.map((file, index) => ({ ...file, entry, index })));
   const media = allMedia.filter(file => filters.mediaType === 'all' || file.type === filters.mediaType);
   const counts = { all: allMedia.length, image: allMedia.filter(file => file.type !== 'video').length, video: allMedia.filter(file => file.type === 'video').length };
-  const items = media.map(file => `<button class="album-item" data-action="${file.unavailable ? 'retry-media' : 'media'}" data-id="${esc(file.entry.id)}" data-index="${file.index}">${file.unavailable ? `<span class="media-unavailable">附件暂时无法加载<small>${esc(file.error || '检查网络后重试')}</small><span>点击重新加载</span></span>` : file.type === 'video' ? `<video src="${safeUrl(file.url)}" preload="metadata"></video><span class="video-label">${icon('video')} 视频</span>` : `<img src="${safeUrl(file.url)}" alt="${esc(file.name || file.entry.title)}" loading="lazy" />`}<span class="album-caption"><strong>${esc(file.entry.title || '日常的一帧')}</strong><time>${dateLabel(file.entry.occurredAt)}</time></span></button>`).join('');
+  const items = media.map(file => `<button class="album-item" data-action="${file.unavailable ? 'retry-media' : 'media'}" data-id="${esc(file.entry.id)}" data-index="${file.index}">${file.unavailable ? `<span class="media-unavailable">附件暂时无法加载<small>${esc(file.error || '检查网络后重试')}</small><span>点击重新加载</span></span>` : file.type === 'video' ? `<video src="${safeUrl(file.url)}" preload="metadata"></video><span class="video-label">${icon('video')} 视频</span>` : `<img src="${safeUrl(file.url)}" alt="${esc(file.name || file.entry.title)}" loading="lazy" />`}<span class="album-caption"><strong>${esc(file.entry.title || '日常的一帧')}</strong><time>${dateLabel(file.entry.occurredAt, false, true)}</time></span></button>`).join('');
   return `${heading('光影里的我们', `${media.length} 个${filters.mediaType === 'video' ? '视频' : filters.mediaType === 'image' ? '照片' : '片段'}，把那天再看一遍。`)}<div class="album-toolbar"><div class="segmented" aria-label="附件类型">${[['all', '全部'], ['image', '图片'], ['video', '视频']].map(([id, name]) => `<button data-action="filter-media" data-value="${id}" aria-pressed="${filters.mediaType === id}">${name}<span class="filter-count num">${counts[id]}</span></button>`).join('')}</div><label class="select-field">月份 <input id="filter-month" type="month" value="${esc(filters.month)}" /></label><button class="text-button" data-action="clear-filters">显示全部</button></div>${media.length ? `<div class="album-grid">${items}</div>` : `<div class="empty-state"><h2>${allMedia.length ? '这个分类里还没有片段' : '照片会慢慢装满这里'}</h2><p>${allMedia.length ? '试试其他附件类型，或者记录一个新片段。' : '记录时选一张喜欢的照片或一段短视频吧。'}</p><button class="secondary" data-action="new">记录一个片段</button></div>`}`;
 }
 function renderStats() {
@@ -175,13 +192,12 @@ function loadOptionalLoginPhotos(create) {
   }).catch(() => {}); // Keep the original login story and ordinary settings when the optional feature fails.
 }
 function renderSettings() {
-  const editable = state.currentUser.role === 'admin';
   return `${heading('我们与这个小世界', '把喜欢的称呼，和故事的开头留在这里。', false)}<nav class="settings-shortcuts" aria-label="更多回忆入口">${navLink(['favorites', 'bookmark', '我的收藏'])}${navLink(['anniversaries', 'heart', '纪念日'])}${navLink(['trash', 'trash', '回收站'])}${state.currentUser.role === 'admin' ? navLink(['admin', 'shield', '管理小屋']) : ''}</nav><form id="settings-form" class="settings-form">
-    <section class="settings-section"><div><h2>共同空间</h2><p>会显示在首页，也会和回忆一起导出。</p>${!editable ? `<p class="permission-note" id="shared-permission">${icon('lock')}仅管理员可修改 · 当前可查看</p>` : ''}</div><fieldset ${!editable ? 'disabled aria-describedby="shared-permission"' : ''}><label>空间名字<input name="spaceName" value="${esc(state.settings.spaceName)}" maxlength="30" required /></label><label>一句喜欢的话<input name="subtitle" value="${esc(state.settings.subtitle || '')}" maxlength="80" /></label><label>故事开始的那天<input name="startDate" type="date" value="${esc(state.settings.startDate)}" required /></label></fieldset></section>
-    <section class="settings-section"><div><h2>纪念日</h2><p>每年重复的日子，会自动计算下一次相遇。</p>${!editable ? `<p class="permission-note" id="anniversary-permission">${icon('lock')}仅管理员可修改 · 当前可查看</p>` : ''}</div><fieldset ${!editable ? 'disabled aria-describedby="anniversary-permission"' : ''}><div id="anniversary-fields">${(state.settings.anniversaries || []).map(a => anniversaryFields(a)).join('')}</div><button type="button" class="text-button" data-action="add-anniversary">${icon('plus')}加一个日子</button></fieldset></section>
-    ${editable ? '<div class="settings-submit"><button type="submit" class="primary">保存我们的小世界</button></div>' : ''}</form>
+    <section class="settings-section"><div><h2>共同空间</h2><p>会显示在首页，也会和回忆一起导出。</p></div><fieldset><label>空间名字<input name="spaceName" value="${esc(state.settings.spaceName)}" maxlength="30" required /></label><label>一句喜欢的话<input name="subtitle" value="${esc(state.settings.subtitle || '')}" maxlength="80" /></label><label>故事开始的那天<input name="startDate" type="date" value="${esc(state.settings.startDate)}" required /></label></fieldset></section>
+    <section class="settings-section"><div><h2>纪念日</h2><p>每年重复的日子，会自动计算下一次相遇。</p></div><fieldset><div id="anniversary-fields">${(state.settings.anniversaries || []).map(a => anniversaryFields(a)).join('')}</div><button type="button" class="text-button" data-action="add-anniversary">${icon('plus')}加一个日子</button></fieldset></section>
+    <div class="settings-submit"><button type="submit" class="primary">保存我们的小世界</button></div></form>
     ${renderLoginPhotoSettings()}
-    <section class="settings-section"><div><h2>数据与账号</h2><p>${CONFIG.mode === 'demo' ? '试写记录保存在此浏览器；清理网站数据会丢失它们。' : '导出含回忆和媒体，请妥善保存。'}</p></div><div class="settings-actions"><button class="secondary" data-action="export-mine">${icon('download')}导出我写的回忆</button>${state.currentUser.role === 'admin' || CONFIG.mode === 'demo' ? '<button class="secondary" data-action="export-all">导出完整共同档案</button>' : ''}${CONFIG.mode === 'demo' ? '<button class="text-button danger" data-action="reset-demo">恢复初始演示内容</button>' : '<button class="text-button" data-action="logout">退出当前账号</button>'}</div></section>`;
+    <section class="settings-section"><div><h2>数据与账号</h2><p>${CONFIG.mode === 'demo' ? '试写记录保存在此浏览器；清理网站数据会丢失它们。' : '导出仅包含当前账号可见的回忆和媒体，请妥善保存。'}</p></div><div class="settings-actions"><button class="secondary" data-action="export-mine">${icon('download')}导出我写的回忆</button><button class="secondary" data-action="export-all">导出可见共同档案</button>${CONFIG.mode === 'demo' ? '<button class="text-button danger" data-action="reset-demo">恢复初始演示内容</button>' : '<button class="text-button" data-action="logout">退出当前账号</button>'}</div></section>`;
 }
 function anniversaryFields(a = {}) { return `<div class="anniversary-fields" data-anniversary="${esc(a.id || crypto.randomUUID())}"><label><span class="sr-only">纪念日名字</span><input name="ann-title" placeholder="例如：第一次见面" value="${esc(a.title || '')}" maxlength="40" required /></label><label><span class="sr-only">纪念日期</span><input name="ann-date" type="date" value="${esc(a.date || '')}" required /></label><label class="checkbox-label"><input name="ann-yearly" type="checkbox" ${a.yearly ? 'checked' : ''} />每年</label><button type="button" class="icon-button" data-action="remove-anniversary" aria-label="移除纪念日">${icon('close')}</button></div>`; }
 function renderAdmin(stats) {
@@ -204,6 +220,7 @@ function closeModal(saveDraft = true) {
   if (saveDraft && loginPhotoEditor?.isSaving) { toast('照片正在保存，请稍候。'); return; }
   if (saveDraft) persistDraft();
   loginPhotoEditor?.destroy(); loginPhotoEditor = null;
+  mediaViewer?.destroy(); mediaViewer = null;
   destroyDatePickers(modalRoot);
   destroyAttachmentSorter(modalRoot);
   clearTimeout(draftTimer); modalRoot.querySelector('dialog')?.close(); modalRoot.innerHTML = '';
@@ -223,7 +240,7 @@ function openEditor(entry) {
     <div class="editor-side"><div class="form-two"><label>记录类型<select name="type"><option value="note" ${!['event', 'whisper'].includes(data.type) ? 'selected' : ''}>日常随记</option><option value="event" ${data.type === 'event' ? 'selected' : ''}>重要事件</option><option value="whisper" ${data.type === 'whisper' ? 'selected' : ''}>悄悄话</option></select></label><label>发生在<input name="occurredAt" type="datetime-local" value="${dateTimeInput(data.occurredAt)}" required /></label></div>
     <fieldset class="mood-options"><legend>心情</legend>${['happy', 'neutral', 'sad'].map(m => `<label class="mood-option mood-${m}"><input type="radio" name="mood" value="${m}" ${data.mood === m ? 'checked' : ''} />${icon(moodIcons[m])}<span>${moodNames[m]}</span>${icon('check', 'mood-check')}</label>`).join('')}<label class="mood-option no-mood"><input type="radio" name="mood" value="" ${!data.mood ? 'checked' : ''} /><span>未填写</span>${icon('check', 'mood-check')}</label></fieldset>
     <label>小标签 <span class="optional">用逗号隔开</span><input name="tags" value="${esc((data.tags || []).join('，'))}" placeholder="日常，旅行，一起做饭" maxlength="180" /></label>
-    <section class="editor-attachments" aria-label="照片与视频"><div class="upload-row"><label class="upload-control">${icon('photo')}<span>添加照片或短视频</span><input id="media-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif,video/mp4,video/webm,video/quicktime" multiple /></label></div><small class="upload-hint">最多 9 张图片 · 最多 10 个附件 · 单个 ${CONFIG.mode === 'supabase' ? '50 MB' : '50 MiB'}</small><div id="editor-previews" class="editor-previews"></div></section></div></div>
+    <section class="editor-attachments" aria-label="照片与视频"><div class="upload-row"><label class="upload-control">${icon('photo')}<span>添加照片或短视频</span><input id="media-input" type="file" accept="image/*,video/*" multiple /></label></div><small class="upload-hint">最多 9 张图片 · 最多 10 个附件 · 单个 ${CONFIG.mode === 'supabase' ? '50 MB' : '50 MiB'}</small><div id="editor-previews" class="editor-previews"></div></section></div></div>
     <p id="form-error" class="form-error" role="alert"></p><div class="dialog-footer"><div>${entry && canEdit(entry) ? `<button type="button" class="text-button danger delete-entry" data-action="delete" data-id="${esc(entry.id)}">移到回收站</button>` : ''}<span id="draft-status" role="status">${!entry && (draft.content || draft.title) ? '已恢复草稿' : ''}</span></div><button type="submit" class="primary">${icon('check')}${entry ? '保存修改' : '收好这一刻'}</button></div></form>`, 'editor-dialog');
   editorAttachments = (entry?.media || []).map(media => ({ key: crypto.randomUUID(), kind: 'media', media }));
   renderEditorPreviews();
@@ -256,12 +273,15 @@ document.addEventListener('keydown', event => {
 });
 function showDetail(id) {
   const entry = visibleEntries().find(e => e.id === id); if (!entry) return;
-  openDialog(`<h2>${esc(entry.title || (entry.type === 'whisper' ? '给自己的一页' : '日常的一页'))}</h2><p class="dialog-description">${esc(user(entry.authorId).name)} · ${dateLabel(entry.occurredAt, true)}${entry.type === 'whisper' ? ' · 仅作者和管理员可见' : ''}</p><p class="detail-body">${esc(entry.content)}</p><section class="comments"><h3>${entry.type === 'whisper' ? '留在这一页的话' : '在这段回忆里说两句'}</h3>${entry.comments?.map(c => `<div class="comment-row">${avatar(user(c.authorId), true)}<div><strong>${esc(user(c.authorId).name)}</strong><p>${esc(c.content)}</p><time>${dateLabel(c.createdAt)}</time></div></div>`).join('') || '<p class="muted">还没有留言，写下你的感受吧。</p>'}</section><form id="comment-form" data-id="${esc(id)}"><label>${entry.type === 'whisper' ? '想留在这里的话' : '想对 TA 说'}<textarea name="content" rows="2" maxlength="2000" required placeholder="看到这段回忆，想起了什么？"></textarea></label><button class="primary" type="submit">留在这一页</button><p class="form-error" role="alert"></p></form>`, 'detail-dialog');
+  openDialog(`<h2>${esc(entry.title || (entry.type === 'whisper' ? '给自己的一页' : '日常的一页'))}</h2><p class="dialog-description">${esc(user(entry.authorId).name)} · ${dateLabel(entry.occurredAt, true, true)}${entry.type === 'whisper' ? ' · 仅作者和管理员可见' : ''}</p><p class="detail-body">${esc(entry.content)}</p>${entry.comments?.length ? `<section class="comments" aria-label="留言">${entry.comments.map(c => `<div class="comment-row">${avatar(user(c.authorId), true)}<div><strong>${esc(user(c.authorId).name)}</strong><p>${esc(c.content)}</p><time datetime="${esc(c.createdAt)}">${dateLabel(c.createdAt, true, true)}</time></div></div>`).join('')}</section>` : ''}<form id="comment-form" data-id="${esc(id)}"><label class="sr-only" for="comment-content">留言内容</label><textarea id="comment-content" name="content" rows="2" maxlength="2000" required placeholder="看到这段回忆，想起了什么？"></textarea><button class="primary" type="submit">留在这一页</button><p class="form-error" role="alert"></p></form>`, 'detail-dialog');
 }
 function showMedia(id, index = 0) {
   const entry = visibleEntries().find(e => e.id === id), file = entry?.media[index]; if (!file) return;
   if (file.unavailable) { toast('这份附件暂时无法加载，请刷新页面重试。', true); return; }
-  openDialog(`<div class="lightbox-stage">${file.type === 'video' ? `<video controls playsinline src="${safeUrl(file.url)}"></video>` : `<img src="${safeUrl(file.url)}" alt="${esc(file.name || entry.title)}" />`}</div><div class="lightbox-caption"><div><strong>${esc(entry.title || '日常的一帧')}</strong><small>${dateLabel(entry.occurredAt, true)} · ${index + 1} / ${entry.media.length}</small></div><div>${index > 0 ? `<button class="icon-button previous" data-action="media" data-id="${esc(id)}" data-index="${index - 1}" aria-label="上一张">${icon('chevron')}</button>` : ''}${index < entry.media.length - 1 ? `<button class="icon-button" data-action="media" data-id="${esc(id)}" data-index="${index + 1}" aria-label="下一张">${icon('chevron')}</button>` : ''}</div></div>`, 'lightbox');
+  openDialog(mediaViewerMarkup({ file, title: entry.title, date: dateLabel(entry.occurredAt, true, true), index, count: entry.media.length, entryId: id }), 'media-viewer');
+  const dialog = modalRoot.querySelector('dialog');
+  dialog.setAttribute('aria-label', `${file.type === 'video' ? '视频' : '图片'}预览`);
+  mediaViewer = mountMediaViewer(dialog);
 }
 function info(title, text) { openDialog(`<h2>${title}</h2><div class="prose">${text}</div>`, 'info-dialog'); }
 function showUpdates() {
@@ -286,9 +306,10 @@ document.addEventListener('click', async event => {
       case 'edit': openEditor(state.entries.find(e => e.id === id)); break;
       case 'close': closeModal(); break;
       case 'filter-type': filters.type = value; render(); break;
+      case 'filter-tag': filters.tag = filters.tag === value ? '' : value; render(); break;
       case 'filter-media': filters.mediaType = value; render(); break;
-      case 'clear-filters': Object.assign(filters, { query: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all' }); selectedDay = ''; render(); break;
-      case 'search-tag': filters.query = value; filters.type = 'all'; selectedDay = ''; if (route() !== 'timeline') history.pushState(null, '', '#timeline'); render(); break;
+      case 'clear-filters': clearTimeout(searchTimer); Object.assign(filters, { query: '', tag: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all' }); selectedDay = ''; render(); break;
+      case 'search-tag': clearTimeout(searchTimer); filters.tag = value; filters.query = ''; filters.type = 'all'; selectedDay = ''; if (route() !== 'timeline') history.pushState(null, '', '#timeline'); render(); break;
       case 'reaction': button.disabled = true; await provider.toggleReaction(id); render(); break;
       case 'favorite': button.disabled = true; await provider.toggleFavorite(id); render(); break;
       case 'detail': showDetail(id); break;
@@ -350,8 +371,10 @@ function persistDraft() {
   } catch {}
 }
 
+function updateSearch(input) { filters.query = input.value; clearTimeout(searchTimer); searchTimer = setTimeout(render, 250); }
+document.addEventListener('compositionend', event => { if (event.target.id === 'search') updateSearch(event.target); });
 document.addEventListener('input', event => {
-  if (event.target.id === 'search' && !event.isComposing) { clearTimeout(searchTimer); searchTimer = setTimeout(() => { filters.query = event.target.value; render(); }, 250); }
+  if (event.target.id === 'search' && !event.isComposing) updateSearch(event.target);
   if (event.target.closest('#entry-form') && !editorId && event.target.type !== 'file') {
     clearTimeout(draftTimer); draftTimer = setTimeout(persistDraft, 250);
   }
@@ -373,7 +396,9 @@ document.addEventListener('change', async event => {
   } catch (error) { toast(error.message, true); }
 });
 document.addEventListener('submit', async event => {
-  const form = event.target; if (!['entry-form', 'settings-form', 'comment-form', 'login-form'].includes(form.id)) return;
+  const form = event.target;
+  if (form.id === 'search-form') { event.preventDefault(); clearTimeout(searchTimer); filters.query = form.querySelector('#search').value; render(); return; }
+  if (!['entry-form', 'settings-form', 'comment-form', 'login-form'].includes(form.id)) return;
   event.preventDefault();
   if (form.id === 'login-form' && loginPending) return;
   const submit = form.querySelector('[type="submit"]'); if (submit) submit.disabled = true;
@@ -386,7 +411,7 @@ document.addEventListener('submit', async event => {
       const saved = await provider.saveEntry({ ...previous, title: data.title.trim(), content: data.content.trim(), type: data.type, occurredAt: `${data.occurredAt}:00+08:00`, mood: data.mood || null, tags: (data.tags || '').split(/[,，]/).map(s => s.trim()).filter(Boolean), media: editorAttachments.filter(item => item.kind === 'media').map(item => item.media), mediaOrder }, editorAttachments.filter(item => item.kind === 'file').map(item => item.file));
       sessionStorage.removeItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`); closeModal(false); render(); toast(saved?.cleanupWarning || (editorId ? '细节已经好好收好了。' : '这一刻，已经留住了。'));
     } else if (form.id === 'settings-form') {
-      if (state.currentUser.role !== 'admin') throw new Error('共同设置仅管理员可以修改。');
+      if (!state.currentUser) throw new Error('请先登录。');
       const anniversaries = [...form.querySelectorAll('[data-anniversary]')].map(row => ({ id: row.dataset.anniversary, title: row.querySelector('[name="ann-title"]').value.trim(), date: row.querySelector('[name="ann-date"]').value, yearly: row.querySelector('[name="ann-yearly"]').checked }));
       await provider.saveSettings({ ...state.settings, spaceName: data.spaceName.trim(), subtitle: data.subtitle.trim(), startDate: data.startDate, anniversaries }); render(); toast('我们的小世界，已更新。');
     } else if (form.id === 'comment-form') { await provider.addComment(form.dataset.id, data.content.trim()); const id = form.dataset.id; render(); showDetail(id); toast('你的话，留在这段回忆里了。'); }
@@ -408,7 +433,7 @@ document.addEventListener('submit', async event => {
   } catch (error) { if (!state.currentUser && form.id !== 'login-form') { clearDrafts(); closeModal(false); render(); toast('登录已失效，请重新登录。', true); } else { const target = form.id === 'login-form' ? document.querySelector('#login-form .form-error') : form.querySelector('.form-error'); if (target) target.textContent = error.message; else toast(error.message, true); } }
   finally { if (submit?.isConnected) submit.disabled = form.id === 'login-form' ? !loginVerification?.getToken() : false; }
 });
-window.addEventListener('hashchange', () => { if (bootPending || (!provider && CONFIG.mode !== 'preview')) return; selectedDay = ''; filters.query = ''; filters.type = route() === 'events' ? 'event' : 'all'; render(); window.scrollTo({ top: 0 }); });
+window.addEventListener('hashchange', () => { if (bootPending || (!provider && CONFIG.mode !== 'preview')) return; clearTimeout(searchTimer); selectedDay = ''; filters.query = ''; filters.tag = ''; filters.type = route() === 'events' ? 'event' : 'all'; render(); window.scrollTo({ top: 0 }); });
 window.addEventListener('memory:session-ended', () => {
   recoveryEpoch++; reconnectAttempt = null; reconnectError = null; reconnectPending = false; bootPending = true;
   provider?.dispose?.(); state.currentUser = null; clearDrafts(); closeModal(false);

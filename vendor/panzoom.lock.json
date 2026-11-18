@@ -1,0 +1,18 @@
+{
+  "name": "@panzoom/panzoom",
+  "version": "4.6.2",
+  "license": "MIT",
+  "source": "https://github.com/timmywil/panzoom/tree/4.6.2",
+  "archive": "https://registry.npmjs.org/@panzoom/panzoom/-/panzoom-4.6.2.tgz",
+  "registryIntegrity": "sha512-Zn3B5/hwa6eYIPRSKX0xf2clv8nviTX8AnAU5kU/EugiTDhG41ya2wlBqYrZJYCWQROr/5XkWObZhIkepi89qw==",
+  "files": [
+    {
+      "file": "public/assets/panzoom-4.6.2.js",
+      "sha256": "3ce354ef7b493efb62a4d4acaaf86fa2d6027eb629857a4e144041de1a112c1e"
+    },
+    {
+      "file": "public/assets/PANZOOM-LICENSE.txt",
+      "sha256": "db74524b3ab3853bcfc7300dade1f5e0176e59ed3c0cff43848a2c300091a22c"
+    }
+  ]
+}
