@@ -23,10 +23,13 @@ test('Supabase 构建仅发送公共配置，验证 SDK 完整性，默认关闭
       SERVICE_ROLE_KEY: 'must-not-ship', TURNSTILE_SECRET: 'must-not-ship',
     };
     const output = path.join(temporary, 'cloudflare');
-    await build({ rootDir: fixture, outDir: output, env, quiet: true });
+    const supabaseCapacity = { databaseBytes: 524288000, storageBytes: 1073741824, databaseDiskGB: 2 };
+    await build({ rootDir: fixture, outDir: output, env, quiet: true, supabaseCapacity: { ...supabaseCapacity, secret: 'must-not-ship' } });
     const config = await readFile(path.join(output, 'src', 'config.js'), 'utf8');
     assert.match(config, /"authReady": false/);
     assert.match(config, /"maxFileBytes": 50000000/);
+    const built = JSON.parse(config.slice(config.indexOf('{'), config.lastIndexOf('}') + 1));
+    assert.deepEqual(built.resourceCapacity, supabaseCapacity);
     assert.ok(!config.includes('must-not-ship'));
     const files = await readdir(output, { recursive: true });
     assert.ok(files.includes(path.join('assets', 'supabase-client-2.119.0.js')));
@@ -47,6 +50,7 @@ test('Supabase 构建仅发送公共配置，验证 SDK 完整性，默认关闭
     await assert.rejects(build({ rootDir: fixture, env: { ...env, MEMORY_TARGET: 'pages' }, quiet: true }), /Pages 只允许/);
     await assert.rejects(build({ rootDir: fixture, env: { ...env, MEMORY_SUPABASE_PUBLISHABLE_KEY: 'sb_secret_wrong' }, quiet: true }), /publishable/);
     await assert.rejects(build({ rootDir: fixture, env: { ...env, MEMORY_AUTH_READY: 'true', MEMORY_TURNSTILE_SITE_KEY: '1x00000000000000000000AA' }, quiet: true }), /不能使用测试密钥/);
+    await assert.rejects(build({ rootDir: fixture, env, quiet: true, supabaseCapacity: { ...supabaseCapacity, storageBytes: 0 } }), /容量配置必须为正整数/);
     await mkdir(path.join(fixture, 'dist'));
     await writeFile(path.join(fixture, 'dist', 'keep.txt'), 'last-good-build');
     const sortableFile = path.join(fixture, 'public', 'assets', 'sortable-1.15.7.js');

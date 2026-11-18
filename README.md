@@ -4,7 +4,7 @@
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
-当前产品版本 **v0.9.0**。管理小屋支持账号活动和托管资源统计。首页日期筛选显示全年月份，标签过多时可展开。登记弹窗支持选择小标签、从桌面拖入附件、用手机长按缩略图排序，以及自动调整正文高度。图片预览支持缩放和拖拽，图片与视频可下载。详见 [修改日志](CHANGELOG.md)、[v0.7.0 验证记录](docs/release-v0.7.0.md) 和 [照片协议](docs/login-photos.md)。
+当前产品版本 **v0.9.1**。管理小屋支持账号活动、存储额度和用量统计。首页日期筛选显示全年月份，标签过多时可展开。登记弹窗支持选择小标签、从桌面拖入附件、用手机长按缩略图排序，以及自动调整正文高度。图片预览支持缩放和拖拽，图片与视频可下载。详见 [修改日志](CHANGELOG.md)、[v0.7.0 验证记录](docs/release-v0.7.0.md) 和 [照片协议](docs/login-photos.md)。
 
 **[Cloudflare 正式入口：朝夕](https://memory-awv.pages.dev/)** 已上线；用户已确认使用 `xbl` 完成真实 Turnstile 与口令登录并进入时间线。原生 Auth 已拒绝缺失和伪造验证码，真实用户 JWT 下的记录与私有图片权限探针也已通过。真实验证码 token 的过期与重放拒绝仍待专项验收。[GitHub Pages](https://jjyuruyucheng.github.io/memory/) 继续作为 `preview`：不加载记录、不提交真实口令，也没有跳过登录入口。
 
@@ -50,7 +50,7 @@ node scripts/serve.mjs --source
 
 ## 构建模式
 
-免费模式使用 `MEMORY_MODE=supabase`；当前 Cloudflare 构建命令为 `node scripts/build-cloudflare.mjs`，读取 [公共部署配置](deploy/cloudflare.public.json)，产物目录为 `dist`。它只接收项目 URL、publishable 公共密钥及 Turnstile Site Key；`authReady` 由维护者在受控验收或正式开放时启用，不能替代后端授权。SDK 版本固定为 2.119.0，构建校验 SHA-256 并本地打包，带出原 MIT 许可证和 Cloudflare CSP 响应头。私有资料、示例记录、后台密钥和口令均不进入此产物。环境变量入口仍见 [cloudflare.env.example](deploy/cloudflare.env.example)，正式配置与验收进度见 [免费托管指南](docs/hosting-free.md)。
+免费模式使用 `MEMORY_MODE=supabase`；当前 Cloudflare 构建命令为 `node scripts/build-cloudflare.mjs`，读取 [公共部署配置](deploy/cloudflare.public.json)，产物目录为 `dist`。配置包含项目 URL、publishable 公共密钥、Turnstile Site Key 和用于管理面板的容量数值。`authReady` 由维护者在受控验收或正式开放时启用，不能替代后端授权。SDK 版本固定为 2.119.0，构建校验 SHA-256 并本地打包，带出原 MIT 许可证和 Cloudflare CSP 响应头。私有资料、示例记录、后台密钥和口令均不进入此产物。环境变量入口仍见 [cloudflare.env.example](deploy/cloudflare.env.example)，正式配置与验收进度见 [免费托管指南](docs/hosting-free.md)。
 
 `MEMORY_MODE` 支持 `demo`、`preview`、`live`、`supabase`，默认 `demo`。构建先对全部 `src` JavaScript 执行 `node --check`，核对入口、静态/动态模块、样式和素材署名依赖，再复制白名单资源并重新生成 `dist/src/config.js`。唯一复制的 JSON 是 `assets/credits.json`；`.env`、部署配置、数据库、备份和文档不进入产物。`apiBase` 固定为空字符串供 Memos 使用；Supabase 的 HTTPS 项目 URL 另由构建校验，不能通过 URL 参数替换后端。
 

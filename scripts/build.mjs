@@ -134,7 +134,7 @@ async function preflight(root, excluded) {
 
 // Tests may build an isolated fixture or a new temporary output. Existing custom
 // outputs are never recursively deleted; only this source root's own dist is replaceable.
-export async function build({ rootDir = ROOT, outDir, env = process.env, quiet = false } = {}) {
+export async function build({ rootDir = ROOT, outDir, env = process.env, quiet = false, supabaseCapacity } = {}) {
   const root = path.resolve(rootDir);
   const dist = path.resolve(outDir ?? path.join(root, 'dist'));
   const defaultOutput = path.join(root, 'dist');
@@ -162,6 +162,13 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
       turnstileSiteKey: siteKey, authReady, bucket: 'memory-media',
       loginIdentities: { xbl: 'xbl@memory.invalid', ll: 'll@memory.invalid', 'memory-admin': 'memory-admin@memory.invalid' },
     });
+    if (supabaseCapacity !== undefined) {
+      const { databaseBytes, storageBytes, databaseDiskGB } = supabaseCapacity ?? {};
+      if (![databaseBytes, storageBytes, databaseDiskGB].every(value => Number.isSafeInteger(value) && value > 0)) {
+        throw new Error('Supabase 容量配置必须为正整数。');
+      }
+      supabase.resourceCapacity = { databaseBytes, storageBytes, databaseDiskGB };
+    }
     const lock = JSON.parse(await readFile(await requireFile(root, 'vendor/supabase.lock.json'), 'utf8'));
     if (lock.version !== '2.119.0' || lock.file !== 'public/assets/supabase-client-2.119.0.js'
       || lock.sha256 !== 'a867edbcfb029370aeec7223dd6180b560b621fbe3bc64c6584fb0369d1b7bce') throw new Error('Supabase SDK 锁定清单不匹配。');

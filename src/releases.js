@@ -2,6 +2,13 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 13, date: '2026-11-18', version: 'v0.9.1', title: '查看存储额度和余量',
+    changes: [
+      '管理小屋显示数据库和媒体的已用空间、套餐额度、参考余量及使用进度。',
+      '服务资源列出数据库磁盘容量，并提供 Supabase 磁盘实时用量入口。',
+    ],
+  },
+  {
     number: 12, date: '2026-11-18', version: 'v0.9.0', title: '管理统计与手机登记体验',
     changes: [
       '管理小屋新增两个成员的登录、发帖、留言、修改、删除和恢复统计，支持按时间筛选并查看最近操作。',

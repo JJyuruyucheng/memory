@@ -257,7 +257,7 @@ function renderAdmin(stats) {
   if (state.currentUser.role !== 'admin') return `${heading('这扇门留给维护账号', '日常记录不需要管理员权限。', false)}<a href="#timeline" class="secondary inline-button">回到时光线</a>`;
   const bytes = state.entries.flatMap(e => e.media).reduce((sum, m) => sum + (Number(m.size) || 0), 0);
   const activity = provider?.loadAdminActivity
-    ? renderAdminActivity(adminActivity, { avatar, dateLabel, supabaseUrl: CONFIG.supabaseUrl })
+    ? renderAdminActivity(adminActivity, { avatar, dateLabel, supabaseUrl: CONFIG.supabaseUrl, resourceCapacity: CONFIG.resourceCapacity })
     : '<p class="info-line">正式版管理小屋提供账号活动和服务资源统计。</p>';
   return `${heading('管理小屋', '查看账号活动、服务资源和备份。', false)}${activity}<div class="stats-strip"><div><span>回忆总数</span><strong class="num">${stats.total}<small>条</small></strong></div><div><span>记录附件大小</span><strong class="num">${(bytes / 1024 / 1024).toFixed(1)}<small>MiB</small></strong></div><div><span>回收站</span><strong class="num">${state.entries.filter(e => e.deletedAt).length}<small>条</small></strong></div></div><div class="settings-section"><div><h2>备份与恢复</h2><p>导出档案方便带走内容；完整系统恢复还需数据库、媒体与配置备份。</p></div><div class="settings-actions"><button class="secondary" data-action="export-all">${icon('download')}导出完整共同档案</button><a class="secondary inline-button" href="#trash">${icon('restore')}查看回收站</a><button class="text-button" data-action="backup-help">了解备份范围</button></div></div>`;
 }
