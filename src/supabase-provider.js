@@ -1,3 +1,4 @@
+import { BGM_BUCKET, MUSIC_UUID, audioFileType, musicState } from './background-music-data.js';
 import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, toUtcIso, validateEntry } from './domain.js';
 import { planAttachmentOrder, resolveAttachmentOrder } from './attachment-order.js';
 import { MAX_PROFILE_NAME, validAvatarJpeg } from './profile.js';
@@ -320,10 +321,46 @@ export function createSupabaseProvider(config = {}) {
     else if (event === 'INITIAL_SESSION' && authIdentity === null && UUID.test(session?.user?.id ?? '')) authIdentity = session.user.id;
   });
   return {
+    async loadMusic({ signal, revision } = {}) {
+      const expected = generation;
+      requireUser(expected);
+      const requestSignal = signal ? AbortSignal.any([sessionController.signal, signal]) : sessionController.signal;
+      const lookup = client.from('background_music').select('revision,current_id,tracks').eq('id', 1);
+      const staleOnly = Number.isSafeInteger(revision);
+      const value = await result((staleOnly ? lookup.gt('revision', revision).maybeSingle() : lookup.single()).abortSignal(requestSignal), expected, { allowNull: staleOnly });
+      return value ? musicState(value) : null;
+    },
+    saveMusic: (value, version) => enqueue(async expected => {
+      const { current_id, tracks } = musicState(value);
+      const saved = await result(query(client.from('background_music').update({ current_id, tracks }).eq('id', 1)
+        .eq('revision', version).select('revision,current_id,tracks').maybeSingle()), expected, { allowNull: true });
+      if (!saved) throw new SupabaseProviderError('另一位成员刚更新了歌单，请重试。', 'CONFLICT', 409);
+      return musicState(saved);
+    }),
+    async loadMusicFile(id, { signal } = {}) {
+      const expected = generation;
+      requireUser(expected);
+      if (!MUSIC_UUID.test(id)) throw new SupabaseProviderError('音源地址无效。', 'VALIDATION');
+      const requestSignal = signal ? AbortSignal.any([sessionController.signal, signal]) : sessionController.signal;
+      return result(client.storage.from(BGM_BUCKET).download(id, {}, { signal: requestSignal, cache: 'no-store' }), expected);
+    },
+    uploadMusicFile: (file, mime) => enqueue(async expected => {
+      if (!(file instanceof Blob) || !mime || mime !== audioFileType(file)) throw new SupabaseProviderError('请选择受支持的音频文件。', 'VALIDATION');
+      const id = crypto.randomUUID();
+      await result(client.storage.from(BGM_BUCKET).upload(id, file, { contentType: mime, cacheControl: '0', upsert: false }), expected);
+      return id;
+    }),
+    removeMusicFile: id => enqueue(async expected => {
+      if (MUSIC_UUID.test(id)) await result(client.storage.from(BGM_BUCKET).remove([id]), expected);
+    }),
+    async recordActiveMinute() {
+      const expected = generation;
+      if (requireUser(expected).role === 'member') await result(query(client.rpc('record_active_minute')), expected, { allowNull: true });
+    },
     async askAssistant(payload, { signal } = {}) {
       const expected = generation;
       const user = requireUser(expected);
-      const requestSignal = AbortSignal.any([sessionController.signal, AbortSignal.timeout(65000), ...(signal ? [signal] : [])]);
+      const requestSignal = AbortSignal.any([sessionController.signal, AbortSignal.timeout(80000), ...(signal ? [signal] : [])]);
       const { session } = await authResult(client.auth.getSession(), expected);
       requireIdentity(expected, user.id);
       if (session?.user?.id !== user.id || !session.access_token) throw new SupabaseProviderError('登录已失效，请重新登录。', 'UNAUTHENTICATED', 401);

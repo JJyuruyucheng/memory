@@ -49,6 +49,11 @@ export function renderAdminActivity({ days, report, error, pending }, { avatar, 
   if (!report) return `<section class="admin-report" aria-labelledby="admin-activity-title">${heading}${content}</section>`;
 
   const { accounts, recent, resources } = report;
+  const duration = value => {
+    if (!Number.isSafeInteger(value) || value < 0) return '—';
+    const hours = Math.floor(value / 60), minutes = value % 60;
+    return hours ? `${count(hours)} 小时${minutes ? ` ${minutes} 分钟` : ''}` : `${minutes} 分钟`;
+  };
   const project = /^https:\/\/([a-z]{20})\.supabase\.co$/.exec(supabaseUrl || '')?.[1];
   const dashboardUrl = project ? `https://supabase.com/dashboard/project/${project}` : '';
   const storageComplete = Number.isSafeInteger(resources.storageObjects) && resources.measuredObjects === resources.storageObjects;
@@ -60,9 +65,11 @@ export function renderAdminActivity({ days, report, error, pending }, { avatar, 
     <div class="admin-account-grid">${accounts.map(account => `<article class="admin-account">
       <header>${avatar({ slot: account.slot, name: account.name, color: account.slot === 2 ? 'rose' : 'sage' }, true)}
         <div><h3>${esc(account.name)}</h3><p>最近登录 ${stamp(account.lastLoginAt)}</p></div></header>
-      <dl class="admin-account-metrics">${metrics.map(([key, label]) => `<div><dt>${label}</dt><dd class="num">${count(account[key])}</dd></div>`).join('')}</dl>
+      <dl class="admin-account-metrics">${metrics.map(([key, label]) => `<div><dt>${label}</dt><dd class="num">${count(account[key])}</dd></div>`).join('')}
+        <div><dt>前台活跃时长</dt><dd class="num">${duration(account.activeMinutes)}</dd></div></dl>
     </article>`).join('')}</div>
     <p class="admin-report-note">登录、修改、删除和恢复从 ${stamp(report.trackedSince)} 开始统计。发帖和留言已纳入现存历史记录。</p>
+    <p class="admin-report-note">使用时长从功能上线后起按前台活跃分钟估算，同一账号的多个标签页合并计时。</p>
   </section>
   <section class="admin-report" aria-labelledby="admin-resources-title">
     <header class="admin-report-heading"><h2 id="admin-resources-title">服务资源</h2><span class="admin-report-note">采集于 ${stamp(report.measuredAt)}</span></header>

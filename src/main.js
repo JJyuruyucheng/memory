@@ -19,13 +19,16 @@ import { renderAdminActivity } from './admin-activity.js';
 import { avatarImageUrl } from './profile.js';
 import { profileEditorMarkup, mountProfileEditor } from './profile-editor.js';
 import { mountAssistant } from './assistant-chat.js';
+import { mountBackgroundMusic } from './background-music.js';
+import { trackActiveUsage } from './active-usage.js';
 import { ALLOWED_FILE_TYPES, escapeHtml as esc, filterEntries, collectEntryTags, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
 
 const app = document.querySelector('#app');
 const modalRoot = document.querySelector('#modal-root');
 const assistantRoot = document.querySelector('#assistant-root');
+const musicRoot = document.querySelector('#bgm-root');
 let provider, loginVerification, loginPhotos, loginCarousel, loginPhotoEditor, mediaViewer, profileEditor;
-let assistant, assistantIdentity;
+let assistant, assistantIdentity, backgroundMusic, stopUsage;
 const moodNames = { happy: '微笑', neutral: '一般', sad: '难受', unset: '未填写' };
 const moodIcons = { happy: 'smile', neutral: 'neutral', sad: 'sad' };
 const filters = { query: '', tag: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all', favoritesOnly: false, trash: false };
@@ -77,9 +80,15 @@ function syncAssistant(locked = false) {
   const identity = locked || reconnectPending || reconnectError ? null : state.currentUser?.id ?? null;
   if (!assistant || assistantIdentity !== identity) {
     assistant?.destroy();
+    backgroundMusic?.destroy();
+    stopUsage?.();
     assistantIdentity = identity;
     assistant = mountAssistant(assistantRoot, identity && provider?.askAssistant);
+    backgroundMusic = identity && provider?.loadMusic && musicRoot ? mountBackgroundMusic(musicRoot, provider) : null;
+    stopUsage = identity && state.currentUser.role === 'member' && provider?.recordActiveMinute ? trackActiveUsage(provider.recordActiveMinute) : null;
+    document.body.classList.toggle('has-bgm', Boolean(backgroundMusic));
   }
+  backgroundMusic?.mountSettings(app.querySelector('#bgm-settings'));
   const article = identity && modalRoot.querySelector('.detail-dialog[open][data-assistant-article]');
   assistant.setContext(article || assistantRoot, article?.dataset.assistantArticle);
 }
@@ -220,12 +229,14 @@ function renderFeed(rows, trash = false) {
 }
 function renderEntry(entry, trash = false) {
   const author = user(entry.authorId), liked = entry.reactionBy?.includes(state.currentUser.id), saved = entry.favoriteBy?.includes(state.currentUser.id);
+  const askButton = provider?.askAssistant && ['note', 'event'].includes(entry.type) && !entry.deletedAt
+    ? `<button class="reaction-button comment-button" data-action="ask-guazi" data-id="${esc(entry.id)}">问瓜子</button>` : '';
   return `<article class="memory-card ${entry.type === 'event' ? 'event-card' : entry.type === 'whisper' ? 'whisper-card' : ''}">
     <div class="memory-meta">${avatar(author, true)}<div><strong>${esc(author.name)}</strong><time datetime="${esc(entry.occurredAt)}">${dateLabel(entry.occurredAt, false, true)}${entry.createdAt && dayKey(entry.createdAt) !== dayKey(entry.occurredAt) ? ' · 补记' : ''}</time></div><span class="entry-kind" ${entry.type === 'whisper' ? 'title="仅作者和管理员可见"' : ''}>${entry.type === 'event' ? `${icon('calendar')}事件` : entry.type === 'whisper' ? `${icon('lock')}悄悄话` : '随记'}</span>${canEdit(entry) && !trash ? `<button class="icon-button" data-action="edit" data-id="${esc(entry.id)}" aria-label="编辑${esc(entry.title || '这条回忆')}">${icon('edit')}</button>` : ''}</div>
     ${entry.title ? `<h2>${esc(entry.title)}</h2>` : ''}${entryPreviewMarkup(entry)}
     ${renderEntryMedia(entry, safeUrl)}
     ${entry.mood || entry.tags?.length ? `<div class="entry-tags">${entry.mood ? `<span class="mood-tag ${entry.mood}">${icon(moodIcons[entry.mood])}${moodNames[entry.mood] || '未填写'}</span>` : ''}${(entry.tags || []).map(tag => `<button class="tag" data-action="search-tag" data-value="${esc(tag)}"># ${esc(tag)}</button>`).join('')}</div>` : ''}
-    <div class="memory-actions">${trash ? `${canEdit(entry) ? `<button class="text-button" data-action="restore" data-id="${esc(entry.id)}">${icon('restore')}恢复这条回忆</button>` : '<span class="muted">由作者恢复</span>'}` : `<button class="reaction-button ${liked ? 'selected' : ''}" data-action="reaction" data-id="${esc(entry.id)}" aria-pressed="${Boolean(liked)}" aria-label="${liked ? '取消喜欢' : '喜欢这条回忆'}">${icon('heart')}<span>${liked ? '已喜欢' : '喜欢'}</span>${entry.reactionBy?.length ? `<span class="action-count num">${entry.reactionBy.length}</span>` : ''}</button><button class="reaction-button comment-button" data-action="detail" data-id="${esc(entry.id)}">${icon('comment')}<span>留言</span>${entry.comments?.length ? `<span class="action-count num">${entry.comments.length}</span>` : ''}</button><button class="bookmark-button ${saved ? 'selected' : ''}" data-action="favorite" data-id="${esc(entry.id)}" aria-label="${saved ? '取消收藏' : '收藏这条回忆'}" aria-pressed="${Boolean(saved)}">${icon('bookmark')}<span>${saved ? '已收藏' : '收藏'}</span></button>`}</div>
+    <div class="memory-actions">${trash ? `${canEdit(entry) ? `<button class="text-button" data-action="restore" data-id="${esc(entry.id)}">${icon('restore')}恢复这条回忆</button>` : '<span class="muted">由作者恢复</span>'}` : `<button class="reaction-button ${liked ? 'selected' : ''}" data-action="reaction" data-id="${esc(entry.id)}" aria-pressed="${Boolean(liked)}" aria-label="${liked ? '取消喜欢' : '喜欢这条回忆'}">${icon('heart')}<span>${liked ? '已喜欢' : '喜欢'}</span>${entry.reactionBy?.length ? `<span class="action-count num">${entry.reactionBy.length}</span>` : ''}</button><button class="reaction-button comment-button" data-action="detail" data-id="${esc(entry.id)}">${icon('comment')}<span>留言</span>${entry.comments?.length ? `<span class="action-count num">${entry.comments.length}</span>` : ''}</button>${askButton}<button class="bookmark-button ${saved ? 'selected' : ''}" data-action="favorite" data-id="${esc(entry.id)}" aria-label="${saved ? '取消收藏' : '收藏这条回忆'}" aria-pressed="${Boolean(saved)}">${icon('bookmark')}<span>${saved ? '已收藏' : '收藏'}</span></button>`}</div>
   </article>`;
 }
 function renderTogether(stats) {
@@ -289,6 +300,7 @@ function renderSettings() {
     <section class="settings-section"><div><h2>纪念日</h2><p>每年重复的日子，会自动计算下一次相遇。</p></div><fieldset><div id="anniversary-fields">${(state.settings.anniversaries || []).map(a => anniversaryFields(a)).join('')}</div><button type="button" class="text-button" data-action="add-anniversary">${icon('plus')}加一个日子</button></fieldset></section>
     <div class="settings-submit"><button type="submit" class="primary">保存我们的小世界</button></div></form>
     ${renderLoginPhotoSettings()}
+    ${provider?.loadMusic ? '<section class="settings-section"><div><h2>背景音乐</h2><p>共同歌单 · 拖动手柄调整播放顺序</p></div><div id="bgm-settings" class="settings-actions"></div></section>' : ''}
     <section class="settings-section"><div><h2>数据与账号</h2><p>${CONFIG.mode === 'demo' ? '试写记录保存在此浏览器；清理网站数据会丢失它们。' : '导出仅包含当前账号可见的回忆和媒体，请妥善保存。'}</p></div><div class="settings-actions"><button class="secondary" data-action="export-mine">${icon('download')}导出我写的回忆</button><button class="secondary" data-action="export-all">导出可见共同档案</button>${CONFIG.mode === 'demo' ? '<button class="text-button danger" data-action="reset-demo">恢复初始演示内容</button>' : '<button class="text-button" data-action="logout">退出当前账号</button>'}</div></section>`;
 }
 function anniversaryFields(a = {}) { return `<div class="anniversary-fields" data-anniversary="${esc(a.id || crypto.randomUUID())}"><label><span class="sr-only">纪念日名字</span><input name="ann-title" placeholder="例如：第一次见面" value="${esc(a.title || '')}" maxlength="40" required /></label><label><span class="sr-only">纪念日期</span><input name="ann-date" type="date" value="${esc(a.date || '')}" required /></label><label class="checkbox-label"><input name="ann-yearly" type="checkbox" ${a.yearly ? 'checked' : ''} />每年</label><button type="button" class="icon-button" data-action="remove-anniversary" aria-label="移除纪念日">${icon('close')}</button></div>`; }
@@ -513,6 +525,11 @@ document.addEventListener('click', async event => {
       case 'reaction': button.disabled = true; await provider.toggleReaction(id); render(); break;
       case 'favorite': button.disabled = true; await provider.toggleFavorite(id); render(); break;
       case 'detail': showDetail(id); break;
+      case 'ask-guazi': {
+        const entry = visibleEntries().find(row => row.id === id && !row.deletedAt && ['note', 'event'].includes(row.type));
+        if (entry) assistant?.openForEntry?.(entry.id, entry.title);
+        break;
+      }
       case 'media': showMedia(id, Number(index)); break;
       case 'retry-media': {
         button.disabled = true; await provider.init(); render();

@@ -75,6 +75,21 @@
 }
 .tabby-header button:disabled { opacity: .52; }
 .tabby-header .icon { width: 15px; height: 15px; }
+.tabby-model {
+  min-width: 0;
+  max-width: 124px;
+  height: 32px;
+  border: 1px solid var(--tabby-rule);
+  border-radius: 8px;
+  background: var(--tabby-panel);
+  color: var(--tabby-ink);
+  padding: 0 4px 0 7px;
+  font-size: 12px;
+}
+.tabby-context { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; border-radius: 8px; padding: 3px 5px 3px 9px; background: var(--tabby-sage); color: var(--tabby-ink); font-size: 12px; }
+.tabby-context span { flex: 1; overflow-wrap: anywhere; }
+.tabby-context button { display: grid; place-items: center; width: 30px; height: 30px; flex: none; color: var(--tabby-muted); }
+.tabby-context .icon { width: 14px; height: 14px; }
 .tabby-header button:hover:enabled { background: var(--tabby-panel); }
 .tabby-conversation { overflow-y: auto; overscroll-behavior: contain; padding: 14px; }
 .tabby-empty { display: grid; justify-items: center; padding: 19px 10px 10px; text-align: center; }
@@ -105,6 +120,8 @@
 .tabby-message-user { justify-self: end; background: var(--tabby-sage); border-radius: 13px 4px 13px 13px; }
 .tabby-message p { margin: 0; white-space: pre-wrap; }
 .tabby-message small { display: block; margin-top: 5px; color: var(--tabby-muted); }
+.tabby-message time { display: block; margin-top: 4px; color: var(--tabby-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.tabby-message-user time { text-align: right; }
 .tabby-sources { margin: 8px 0 0; padding: 7px 0 0 20px; border-top: 1px solid var(--tabby-rule); font-size: 12px; }
 .tabby-sources a { color: var(--tabby-accent); text-decoration: underline; text-underline-offset: 2px; }
 .tabby-status { display: flex; gap: 8px; align-items: center; margin-top: 9px; font-size: 13px; color: var(--tabby-muted); }
@@ -152,6 +169,7 @@
 
 @media (max-width: 760px) {
   .tabby-header button { min-width: 40px; height: 40px; }
+  .tabby-header .tabby-clear span { display: none; }
   .tabby-quick button { min-height: 38px; }
 }
 @media (prefers-color-scheme: dark) {

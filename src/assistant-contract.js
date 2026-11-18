@@ -5,6 +5,7 @@ export const MAX_REPLY_LENGTH = 12000;
 export const MAX_HISTORY_LENGTH = 9;
 export const MAX_HISTORY_CHARS = 12000;
 export const ARTICLE_SLUG = /^[A-Za-z0-9_-]{1,96}$/;
+export const MODEL_ID = /^[a-z0-9][a-z0-9._:-]{0,100}$/i;
 
 export function requestHistory(transcript, current) {
   const messages = [{ role: 'user', content: current }];

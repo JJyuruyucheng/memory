@@ -1,8 +1,48 @@
 import { ARTICLE_SLUG } from '../src/assistant-contract.js';
 
-// Add a source here only when its content has been approved for public release.
-// The shared timeline, whispers and drafts do not provide records to this index.
 export const publicArticles = Object.freeze([]);
+export const ENTRY_UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
+
+const normalize = value => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+const published = row => row?.status === 'published' && ['note', 'event'].includes(row.type)
+  && row.deletedAt === null && typeof row.id === 'string' && ENTRY_UUID.test(row.id);
+const quotedTitles = question => [...question.matchAll(/《([^》]{1,120})》/gu)].map(match => normalize(match[1]));
+export const asksAboutRecords = question => quotedTitles(question).length > 0
+  || /站内|朝夕.{0,6}(?:随记|记录|文章|帖子)|发的|发过|这篇|那篇|这[条段]|哪篇|记录[里中]|帖子[里中]|发表的|发布的|共享记录|(?:查找|搜索|找找|解读|分析|总结).{0,32}(?:文章|帖子|随记|记录|事件)/u.test(question);
+
+export function sharedEntrySources(rows, ids) {
+  const byId = new Map(rows.filter(published).map(row => [row.id, row]));
+  let budget = 12_000;
+  return ids.flatMap(id => {
+    const row = byId.get(id);
+    if (!row || !budget) return [];
+    const content = typeof row.content === 'string' ? row.content.trim() : '';
+    const excerpt = content.slice(0, Math.min(8000, budget));
+    budget -= excerpt.length;
+    const day = String(row.occurredAt || '').slice(0, 10);
+    return [{ slug: id, title: row.title?.trim() || (day ? `${day} 的随记` : '随记'), author: row.author?.name?.slice(0, 60),
+      day, excerpt, truncated: excerpt.length < content.length, href: `#timeline?entry=${id}` }];
+  });
+}
+
+export function matchSharedEntries(rows, question, memberId) {
+  const phrase = normalize(question), named = quotedTitles(question);
+  const available = rows.filter(published);
+  const names = [...new Set(available.map(row => normalize(row.author?.name)))].filter(name => name.length >= 2 && phrase.includes(name));
+  const own = /我(?:发|写|记)的/u.test(question);
+  const matches = [];
+  for (const row of available) {
+    const author = normalize(row.author?.name);
+    if ((own && row.authorId !== memberId) || (!own && names.length && !names.includes(author))) continue;
+    const title = normalize(row.title);
+    const exact = named.length ? named.includes(title) : title.length >= 2 && phrase.includes(title);
+    if (named.length && !exact) continue;
+    const tag = Array.isArray(row.tags) && row.tags.map(normalize).some(value => value.length >= 2 && phrase.includes(value));
+    const searchByAuthor = (own || names.length) && /(?:总结|汇总|最近|哪些|所有|找|发过)/u.test(question);
+    if (exact || tag || searchByAuthor) matches.push({ id: row.id, score: exact ? 100 + title.length : tag ? 20 : 10 });
+  }
+  return matches.sort((a, b) => b.score - a.score).slice(0, 3).map(match => match.id);
+}
 
 function terms(value) {
   const text = value.normalize('NFKC').toLowerCase();

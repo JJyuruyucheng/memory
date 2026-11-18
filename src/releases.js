@@ -2,6 +2,16 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 18, date: '2026-11-18', version: 'v0.13.0', title: '瓜子读记录、共同歌单与使用时长',
+    changes: [
+      '瓜子可按标题、作者或标签查找已发布的共享记录，记录旁也能直接点「问瓜子」。',
+      '对话增加模型选择、实时城市天气和消息时分。',
+      '右上角加入背景音乐，设置页支持为两人共同歌单补音源、添加、删除、拖动排序和切换当前曲目。',
+      '管理员可分别查看两位成员的前台活跃时长。',
+      '浏览器标签页与安卓桌面应用采用瓜子的头像。',
+    ],
+  },
+  {
     number: 17, date: '2026-11-18', version: 'v0.12.0', title: '会跳跃和打瞌睡的瓜子',
     changes: [
       '点击瓜子时会轻跳回应，等待回复时会回头，闲置后会蜷睡并轻轻呼吸，睡眠符号渐隐渐现。',

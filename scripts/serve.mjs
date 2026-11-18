@@ -15,7 +15,7 @@ const MIME = {
   '.avif': 'image/avif', '.ico': 'image/x-icon', '.mp4': 'video/mp4', '.webm': 'video/webm',
   '.mov': 'video/quicktime', '.woff': 'font/woff', '.woff2': 'font/woff2',
   '.ttf': 'font/ttf', '.otf': 'font/otf', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav',
-  '.json': 'application/json; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
+  '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
 };
 const SOURCE_EXTENSIONS = new Set(['.js', '.css']);
 const SPA_ROUTES = new Set(['timeline', 'calendar', 'albums', 'album', 'stats', 'statistics', 'settings', 'admin', 'login', 'entry', 'memories', 'new']);
@@ -59,7 +59,7 @@ async function isRegularUnlinkedFile(file, boundary) {
   return (await lstat(file)).isFile();
 }
 
-export async function startServer({ port = 5173, source = false, env = process.env, fetchOpenAI, fetchSupabase, articles } = {}) {
+export async function startServer({ port = 5173, source = false, env = process.env, fetchOpenAI, fetchSupabase, fetchWeather, articles } = {}) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('端口须为 1–65535 的整数。');
   const hasDist = await access(path.join(ROOT, 'dist', 'index.html')).then(() => true, () => false);
   const built = !source && hasDist;
@@ -71,7 +71,7 @@ export async function startServer({ port = 5173, source = false, env = process.e
   const supabasePublishableKey = /"supabasePublishableKey":\s*"(sb_publishable_[A-Za-z0-9_-]{20,200})"/.exec(configText)?.[1];
   const handleAssistant = supabaseOrigin && supabasePublishableKey && createAssistantHandler({
     authorize: createSupabaseAssistantAuthorization({ supabaseUrl: supabaseOrigin, supabasePublishableKey,
-      authReady: /"authReady":\s*true\b/.test(configText) }, fetchSupabase), fetchOpenAI, articles,
+      authReady: /"authReady":\s*true\b/.test(configText) }, fetchSupabase), fetchOpenAI, fetchWeather, articles,
   });
 
   const server = createServer(async (request, response) => {
@@ -108,6 +108,9 @@ export async function startServer({ port = 5173, source = false, env = process.e
         || (SPA_ROUTES.has(segments[0]) && segments.every((segment) => !segment.includes('.')))) {
         boundary = base;
         file = path.join(base, 'index.html');
+      } else if (decoded === '/site.webmanifest') {
+        boundary = base;
+        file = path.join(boundary, 'site.webmanifest');
       } else if (segments[0] === 'src' && segments.length > 1
         && SOURCE_EXTENSIONS.has(path.extname(decoded).toLowerCase())) {
         boundary = path.join(base, 'src');
@@ -116,7 +119,7 @@ export async function startServer({ port = 5173, source = false, env = process.e
         boundary = built ? path.join(base, 'assets') : path.join(ROOT, 'public', 'assets');
         file = path.join(boundary, segments.at(-1));
       } else if (segments[0] === 'assets' && segments.length > 1
-        && MIME[path.extname(decoded).toLowerCase()] && !['.html', '.js', '.css', '.json', '.txt'].includes(path.extname(decoded).toLowerCase())) {
+        && MIME[path.extname(decoded).toLowerCase()] && !['.html', '.js', '.css', '.json', '.webmanifest', '.txt'].includes(path.extname(decoded).toLowerCase())) {
         boundary = built ? path.join(base, 'assets') : path.join(ROOT, 'public', 'assets');
         file = path.join(boundary, ...segments.slice(1));
       } else {

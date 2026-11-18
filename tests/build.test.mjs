@@ -16,6 +16,7 @@ test('Supabase 构建仅发送公共配置，验证 SDK 完整性，默认关闭
   try {
     for (const directory of ['src', 'public', 'vendor']) await cp(path.join(ROOT, directory), path.join(fixture, directory), { recursive: true });
     await cp(path.join(ROOT, 'index.html'), path.join(fixture, 'index.html'));
+    await cp(path.join(ROOT, 'site.webmanifest'), path.join(fixture, 'site.webmanifest'));
     await writeFile(path.join(fixture, 'package.json'), '{"type":"module"}');
     const env = {
       MEMORY_MODE: 'supabase', MEMORY_SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co',
@@ -92,6 +93,7 @@ test('构建保留素材授权、限制 JSON，并在坏入口覆盖旧产物前
     await cp(path.join(ROOT, 'src'), path.join(fixture, 'src'), { recursive: true });
     await cp(path.join(ROOT, 'public'), path.join(fixture, 'public'), { recursive: true });
     await cp(path.join(ROOT, 'index.html'), path.join(fixture, 'index.html'));
+    await cp(path.join(ROOT, 'site.webmanifest'), path.join(fixture, 'site.webmanifest'));
     await writeFile(path.join(fixture, 'package.json'), '{"type":"module"}');
     await writeFile(path.join(fixture, 'public', 'assets', 'metadata.json'), '{"token":"must-not-ship"}');
     await writeFile(path.join(fixture, 'src', '.env'), 'SECRET=must-not-ship');
@@ -104,6 +106,7 @@ test('构建保留素材授权、限制 JSON，并在坏入口覆盖旧产物前
     assert.equal(await readFile(path.join(output, 'src', 'components.css'), 'utf8'), await readFile(path.join(fixture, 'src', 'components.css'), 'utf8'));
     const files = await readdir(output, { recursive: true });
     assert.deepEqual(files.filter((file) => file.endsWith('.json')), [path.join('assets', 'credits.json')]);
+    assert.deepEqual(JSON.parse(await readFile(path.join(output, 'site.webmanifest'), 'utf8')).icons.map(icon => icon.sizes), ['192x192', '512x512']);
     assert.ok(files.every((file) => !file.includes('.env')));
     assert.match(await readFile(path.join(output, 'src', 'config.js'), 'utf8'), /"mode": "demo"/);
 
@@ -157,6 +160,7 @@ test('Pages 仅接受 preview；preview/live 在复制阶段排除演示模块�
     await cp(path.join(ROOT, 'src'), path.join(fixture, 'src'), { recursive: true });
     await cp(path.join(ROOT, 'public'), path.join(fixture, 'public'), { recursive: true });
     await cp(path.join(ROOT, 'index.html'), path.join(fixture, 'index.html'));
+    await cp(path.join(ROOT, 'site.webmanifest'), path.join(fixture, 'site.webmanifest'));
     await writeFile(path.join(fixture, 'package.json'), '{"type":"module"}');
     // The fixture isolates packaging policy from the UI's independent login tests.
     await writeFile(path.join(fixture, 'src', 'login-controller.js'), 'export const loginFixture = true;\n');

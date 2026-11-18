@@ -5,6 +5,7 @@ const paths = {
   calendar: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 11h18m-13 5h2m4 0h2"/>',
   chart: '<path d="M4 3v18h17M8 16v-4m5 4V6m5 10V9"/>',
   heart: '<path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 22l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/>',
+  music: '<path d="M9 18V5l12-2v13M9 9l12-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="18" cy="16" rx="3" ry="2"/>',
   settings: '<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/>',
   shield: '<path d="m12 3 9 4v5c0 5-5 8-9 10-4-2-9-5-9-10V7Z"/><path d="m8 12 3 3 5-6"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',

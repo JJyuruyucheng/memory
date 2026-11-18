@@ -28,7 +28,7 @@ function respond(reply = '好呀。') {
   return Response.json({ status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: reply }] }] });
 }
 
-function setup({ account = 200, profiles = [ { id } ], ...overrides } = {}) {
+function setup({ account = 200, profiles = [ { id } ], entries = [], ...overrides } = {}) {
   const verified = [], upstream = [];
   const authorize = createSupabaseAssistantAuthorization(project, async (url, options) => {
     const target = new URL(url);
@@ -40,11 +40,23 @@ function setup({ account = 200, profiles = [ { id } ], ...overrides } = {}) {
     assert.equal(options.cache, undefined);
     verified.push(target.pathname);
     if (target.pathname === '/auth/v1/user') return Response.json({ id }, { status: account });
+    if (target.pathname === '/rest/v1/entries') {
+      assert.equal(target.searchParams.get('status'), 'eq.published');
+      assert.equal(target.searchParams.get('type'), 'in.(note,event)');
+      assert.equal(target.searchParams.get('deletedAt'), 'is.null');
+      const selected = target.searchParams.get('id');
+      if (selected) return Response.json(entries.filter(row => selected.includes(row.id)));
+      assert.ok(!target.searchParams.get('select').includes('content'));
+      return Response.json(entries.map(({ content, ...row }) => row));
+    }
     assert.equal(target.pathname, '/rest/v1/profiles');
     assert.equal(target.searchParams.get('id'), `eq.${id}`);
     return Response.json(profiles);
   });
   const handle = createAssistantHandler({ authorize, articles, fetchOpenAI: async (url, options) => {
+    if (url === 'https://api.openai.com/v1/models') {
+      return Response.json({ data: [{ id: 'gpt-6.1-terra' }, { id: 'gpt-5-mini' }, { id: 'other-private-model' }] });
+    }
     assert.equal(url, 'https://api.openai.com/v1/responses');
     assert.equal(options.headers.Authorization, 'Bearer test-key');
     assert.equal(options.redirect, 'manual');
@@ -79,10 +91,10 @@ test('访客、跨来源请求及失效会话在联系模型之前被拒绝', as
 test('经成员认证后才返回公开索引和回复，历史和来源经过限定', async () => {
   const { handle, upstream } = setup();
   const catalog = await handle(request({ method: 'GET', site: null }), env);
-  assert.deepEqual(await catalog.json(), { articleSlugs: ['demo-coffee', 'demo-sea'] });
+  assert.deepEqual(await catalog.json(), { articleSlugs: ['demo-coffee', 'demo-sea'], defaultModel: 'gpt-6.1-terra', models: ['gpt-6.1-terra', 'gpt-5-mini'] });
   const result = await handle(request({ body: { ...payload, articleSlug: 'demo-coffee' } }), env);
   assert.equal(result.headers.get('Cache-Control'), 'no-store');
-  assert.deepEqual(await result.json(), { reply: '好呀。', incomplete: false, sources: [
+  assert.deepEqual(await result.json(), { reply: '好呀。', incomplete: false, model: 'gpt-6.1-terra', sources: [
     { title: '清晨的咖啡', href: '#timeline?entry=demo-coffee' }, { title: '海边散步', href: '#timeline?entry=demo-sea' },
   ] });
   assert.equal(upstream[0].model, 'gpt-6.1-terra');
@@ -96,7 +108,7 @@ test('经成员认证后才返回公开索引和回复，历史和来源经过�
   assert.deepEqual((await privateRequest.json()).sources, []);
   assert.deepEqual(upstream[1].input, followUp);
   assert.equal(upstream[1].model, 'test-model');
-  assert.equal(upstream[1].instructions, upstream[0].instructions);
+  assert.match(upstream[1].instructions, /test-model/);
 });
 
 test('拒绝客户端指定角色、模型、文章内容及越界输入', async () => {
@@ -164,4 +176,45 @@ test('成员服务返回重定向时停止校验，不联系模型', async () =>
   assert.equal((await result.json()).error.code, 'MEMBER_CHECK_UNAVAILABLE');
   assert.deepEqual(verified, ['/auth/v1/user']);
   assert.deepEqual(upstream, []);
+});
+
+test('按作者和标题读取共享记录，不发送悄悄话、草稿、回收站或附件', async () => {
+  const row = (index, fields = {}) => ({ id: `20000000-0000-4000-8000-00000000000${index}`,
+    authorId: id, title: '阴天', author: { name: 'Bunny' }, occurredAt: '2026-11-18T00:00:00Z',
+    status: 'published', type: 'note', deletedAt: null, tags: ['心情'], content: '可分析的共享文字。', ...fields });
+  const selected = row(1, { media: [{ name: 'irrelevant-private-media' }] });
+  const entries = [selected, row(2, { author: { name: '另一个人' }, content: 'wrong-author' }),
+    row(3, { type: 'whisper', content: 'private-whisper' }), row(4, { status: 'draft', content: 'unfinished-draft' }),
+    row(5, { deletedAt: '2026-11-18T11:00:00Z', content: 'deleted-text' })];
+  const { handle, upstream, verified } = setup({ entries });
+  const body = { messages: [{ role: 'user', content: '帮我分析 Bunny 发的这篇阴天的文章' }], model: 'gpt-5-mini' };
+  const value = await (await handle(request({ body }), env)).json();
+  assert.deepEqual(value.sources, [{ title: '阴天', href: `#timeline?entry=${selected.id}` }]);
+  assert.equal(upstream[0].model, 'gpt-5-mini');
+  const input = JSON.stringify(upstream[0].input);
+  assert.match(input, /可分析的共享文字/u);
+  assert.doesNotMatch(input, /wrong-author|private-whisper|unfinished-draft|deleted-text|irrelevant-private-media/);
+  assert.deepEqual(verified.slice(-2), ['/rest/v1/entries', '/rest/v1/entries']);
+  const hidden = await handle(request({ body: { ...body, articleSlug: entries[2].id } }), env);
+  assert.deepEqual((await hidden.json()).sources, []);
+  assert.equal(upstream.length, 1);
+});
+
+test('实时天气只向天气服务查询城市和坐标，无需发送聊天记录', async () => {
+  const hosts = [];
+  const { handle, upstream } = setup({ fetchWeather: async value => {
+    const url = new URL(value);
+    hosts.push(url.hostname);
+    assert.ok(!url.search.includes('private-context'));
+    if (url.pathname === '/v1/search') {
+      assert.equal(url.searchParams.get('name'), '福州');
+      return Response.json({ results: [{ name: '福州', admin1: '福建省', latitude: 26.08, longitude: 119.29 }] });
+    }
+    return Response.json({ daily: { temperature_2m_min: [16], temperature_2m_max: [24], weather_code: [3], precipitation_probability_max: [20] }, current: { temperature_2m: 20 } });
+  } });
+  const body = { messages: [{ role: 'user', content: 'private-context' }, { role: 'assistant', content: '之前的信息' }, { role: 'user', content: '今天福州天气怎么样' }] };
+  const result = await (await handle(request({ body }), env)).json();
+  assert.match(result.reply, /福建省·福州今天 阴，16–24℃/u);
+  assert.deepEqual(hosts, ['geocoding-api.open-meteo.com', 'api.open-meteo.com']);
+  assert.equal(upstream.length, 0);
 });

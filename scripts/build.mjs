@@ -225,6 +225,18 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
 
   // Validate before touching a previous build, so failed source checks preserve it.
   await preflight(root, excluded);
+  const html = await readFile(path.join(root, 'index.html'), 'utf8');
+  const manifest = html.includes('./site.webmanifest')
+    ? await readFile(await requireFile(root, 'site.webmanifest')) : null;
+  if (manifest) {
+    let icons;
+    try { ({ icons } = JSON.parse(manifest)); } catch { throw new Error('应用图标清单格式无效。'); }
+    if (!Array.isArray(icons) || !icons.length) throw new Error('应用图标清单为空。');
+    for (const icon of icons) {
+      if (typeof icon?.src !== 'string' || !/^\.\/assets\/[a-z0-9-]+\.png$/i.test(icon.src)) throw new Error('应用图标路径无效。');
+      await requireFile(root, path.join('public', icon.src));
+    }
+  }
   const resolvedRoot = await realpath(root);
   const resolvedParent = await realpath(path.dirname(dist));
   const canonicalOutput = path.join(resolvedParent, path.basename(dist));
@@ -247,7 +259,8 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
   }
   if (previous) await rm(dist, { recursive: true });
   await mkdir(dist);
-  await writeFile(path.join(dist, 'index.html'), await readFile(path.join(root, 'index.html')));
+  await writeFile(path.join(dist, 'index.html'), html);
+  if (manifest) await writeFile(path.join(dist, 'site.webmanifest'), manifest);
   await copyWhitelistedDirectory(path.join(root, 'src'), path.join(dist, 'src'), SOURCE_EXTENSIONS, root, excluded);
   await copyWhitelistedDirectory(path.join(root, 'public', 'assets'), path.join(dist, 'assets'), ASSET_EXTENSIONS, root, excluded);
   // This one attribution manifest is the only JSON allowed into the static site.
