@@ -34,8 +34,9 @@ function loadTurnstile() {
   return scriptPromise;
 }
 
-export function mountLoginVerification(root, { isBusy = () => false, getConfig } = {}) {
-  const form = root.querySelector('#login-form');
+export function mountLoginVerification(root, {
+  form = root.querySelector('#login-form'), isBusy = () => false, getConfig, busyMessage = '正在登录，请稍候…', size = 'flexible',
+} = {}) {
   const submit = form.querySelector('[type="submit"]');
   const status = root.querySelector('#verification-status');
   const retry = root.querySelector('#verification-retry');
@@ -65,8 +66,8 @@ export function mountLoginVerification(root, { isBusy = () => false, getConfig }
       if (widget !== undefined) api.remove(widget);
       message('请完成下方安全验证。');
       widget = api.render(root.querySelector('#login-captcha'), {
-        sitekey: config.siteKey, action: 'login', theme: 'light', size: 'flexible', language: 'zh-cn',
-        callback(value) { if (destroyed) return; token = value; submit.disabled = isBusy(); message(isBusy() ? '正在登录，请稍候…' : '安全验证已完成。'); },
+        sitekey: config.siteKey, action: 'login', theme: 'light', size, language: 'zh-cn',
+        callback(value) { if (destroyed) return; token = value; submit.disabled = isBusy(); message(isBusy() ? busyMessage : '安全验证已完成。'); },
         'expired-callback'() { invalidate('验证已过期，请重新完成验证。', true); },
         'error-callback'(code) { invalidate(verificationErrorMessage(code), true); },
         'timeout-callback'() { invalidate('验证操作已超时，请重新加载后完成验证。', true); },

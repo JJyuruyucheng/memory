@@ -108,6 +108,7 @@ update memory_private.runtime_guard set "authReady"=false where id=1;
 set local role authenticated;
 select pg_temp.review_actor('a');
 select pg_temp.review_ok((select count(*)=0 from public.profiles),'guard hides profiles');
+select pg_temp.review_rows($q$update public.profiles set name='guard must block this' where id=auth.uid()$q$,0,'guard blocks personal profile update');
 select pg_temp.review_ok((select count(*)=0 from public.entries),'guard hides entries');
 select pg_temp.review_ok((select count(*)=0 from public.media),'guard hides media registrations');
 select pg_temp.review_ok((select count(*)=0 from public.settings),'guard hides settings');
@@ -129,6 +130,7 @@ do $$ declare table_name text; begin
 end; $$;
 select pg_temp.review_error($q$select public.publish_entry((select id from pg_temp.memory_review_ids where label='entry_a'),'{}'::uuid[],null)$q$,array['42501'],'anonymous publish denied');
 select pg_temp.review_error($q$update public.settings set subtitle='anonymous must not write' where id=1$q$,array['42501'],'anonymous shared settings update denied');
+select pg_temp.review_error($q$update public.profiles set "avatarJpeg"=null$q$,array['42501'],'anonymous profile update denied');
 reset role;
 
 set local role authenticated;
@@ -137,6 +139,7 @@ select pg_temp.review_ok((select count(*)=0 from public.profiles),'unlisted auth
 select pg_temp.review_ok((select count(*)=0 from public.entries),'unlisted authenticated user sees no entries');
 select pg_temp.review_ok((select count(*)=0 from public.settings),'unlisted authenticated user sees no settings');
 select pg_temp.review_rows($q$update public.settings set subtitle='outsider must not write' where id=1$q$,0,'unlisted authenticated user cannot edit shared settings');
+select pg_temp.review_rows($q$update public.profiles set name='outsider must not write'$q$,0,'unlisted authenticated user cannot edit a personal profile');
 select pg_temp.review_error($q$insert into public.entries(title) values ('未授权')$q$,array['42501'],'unlisted authenticated user cannot create entries');
 select pg_temp.review_error($q$select public.reserve_media((select id from pg_temp.memory_review_ids where label='entry_a'),'a.jpg','image/jpeg',1)$q$,array['42501'],'unlisted authenticated user cannot reserve media');
 select pg_temp.review_error($q$update public.profiles set role='admin' where id=(select id from pg_temp.memory_review_actors where label='outsider')$q$,array['42501'],'unlisted authenticated user cannot self-enroll as admin');
@@ -207,6 +210,16 @@ select pg_temp.review_rows($q$update public.settings set subtitle='第二位成�
 select pg_temp.review_actor('a');
 select pg_temp.review_ok((select subtitle='第二位成员已修改' and anniversaries->0->>'title'='旅行' from public.settings where id=1),'first member sees settings saved by second member');
 select pg_temp.review_error($q$update public.profiles set role='admin' where id=auth.uid()$q$,array['42501'],'ordinary member cannot change whitelist role');
+select pg_temp.review_error($q$update public.profiles set username='other-login-name' where id=auth.uid()$q$,array['42501'],'member cannot change the login username');
+select pg_temp.review_rows($q$update public.profiles set name='事务头像测试',"avatarJpeg"='/9j/4AA=' where id=auth.uid()$q$,1,'member can update own name and avatar');
+select pg_temp.review_error($q$update public.profiles set "avatarJpeg"='aW52YWxpZA==' where id=auth.uid()$q$,array['23514'],'non-JPEG avatar data is rejected');
+select pg_temp.review_error($q$update public.profiles set "avatarJpeg"='/9j/' || repeat('A',65536) where id=auth.uid()$q$,array['23514'],'oversized avatar data is rejected');
+select pg_temp.review_rows($q$update public.profiles set name='另一个账号',"avatarJpeg"=null where id=(select id from pg_temp.memory_review_actors where label='b')$q$,0,'member cannot update another profile');
+select pg_temp.review_actor('b');
+select pg_temp.review_ok((select name='事务头像测试' and "avatarJpeg"='/9j/4AA=' from public.profiles where slot=1),'partner sees new nickname and avatar');
+select pg_temp.review_actor('admin');
+select pg_temp.review_rows($q$update public.profiles set name='管理员不能代改昵称' where slot=1$q$,0,'admin cannot use own profile UI to edit member profile');
+select pg_temp.review_actor('a');
 
 select pg_temp.review_error($q$update public.entries set title='',content='' where id=(select id from pg_temp.memory_review_ids where label='entry_a')$q$,array['23514'],'published record cannot be patched to empty');
 select pg_temp.review_error($q$select public.publish_entry((select id from pg_temp.memory_review_ids where label='entry_a'),null,null)$q$,array['22023'],'null media selection rejected');

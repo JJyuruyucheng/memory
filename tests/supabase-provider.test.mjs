@@ -11,6 +11,22 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
 const file = (name = 'photo.png', body = 'picture', type = 'image/png') => new File([body], name, { type });
 const ok = data => ({ data, error: null });
 
+test('个人资料只更新自己可编辑的字段，并同步当前账号与作者资料', async () => {
+  const f = fixture();
+  const state = await f.signIn();
+  await f.provider.saveProfile({ name: '  新昵称  ', avatarJpeg: '/9j/4AA=' });
+  assert.equal(state.currentUser.name, '新昵称');
+  assert.equal(state.currentUser.avatarJpeg, '/9j/4AA=');
+  assert.equal(state.currentUser, state.users.find(user => user.id === U1));
+  assert.equal(state.users.find(user => user.id === U2).name, '晚晚');
+  const change = f.calls.find(call => call.kind === 'table' && call.table === 'profiles' && call.action === 'update');
+  assert.deepEqual(change.filters, [['id', U1]]);
+  assert.deepEqual(change.payload, { name: '新昵称', avatarJpeg: '/9j/4AA=' });
+  await assert.rejects(f.provider.saveProfile({ name: '新昵称', avatarJpeg: 'not-jpeg' }), /头像格式/);
+  await f.provider.saveProfile({ name: '另一个展示昵称' });
+  assert.equal(state.currentUser.avatarJpeg, '/9j/4AA=');
+});
+
 // A narrow SDK boundary fixture, not a second provider. It enforces server
 // ownership, immutable fields and reservation/upload/finalization sequencing.
 function fixture({ before = async () => {}, author = U1, initialMedia = false, profiles: customProfiles, onSessionChanged, initialSessionUserId = null, denySettings = false, enforceEntryVisibility = false } = {}) {
@@ -68,6 +84,10 @@ function fixture({ before = async () => {}, author = U1, initialMedia = false, p
         if (this.table === 'entries' && selected.some(row => !owns(row.id)) || this.table === 'settings' && (denySettings || !tables.profiles.some(row => row.id === user()))) return { data: null, error: { code: '42501', status: 403 } };
         if (this.table === 'entries') assert.ok(Object.keys(this.payload).every(key => ['type', 'title', 'content', 'occurredAt', 'mood', 'tags', 'deletedAt'].includes(key)), 'no immutable entry field is sent');
         if (this.table === 'settings') assert.deepEqual(Object.keys(this.payload).sort(), ['anniversaries', 'spaceName', 'startDate', 'subtitle'], 'settings writes stay within the existing column grant');
+        if (this.table === 'profiles') {
+          assert.ok(Object.keys(this.payload).every(key => ['name', 'avatarJpeg'].includes(key)));
+          selected = selected.filter(row => row.id === user());
+        }
         selected.forEach(row => Object.assign(row, this.payload, { updatedAt: new Date(Date.parse(NOW) + ++tick * 1000).toISOString() }));
       } else if (this.action === 'delete') {
         assert.ok(['reactions', 'favorites'].includes(this.table), 'records are never physically deleted');

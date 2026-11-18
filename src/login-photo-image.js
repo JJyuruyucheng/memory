@@ -1,3 +1,5 @@
+import { MAX_AVATAR_JPEG_LENGTH, validAvatarJpeg } from './profile.js';
+
 export const LOGIN_PHOTO_LIMITS = Object.freeze({ maxInputBytes: 15_000_000, maxOutputBytes: 5_000_000, maxPixels: 50_000_000, maxEdge: 1920 });
 const invalid = message => { const error = new Error(message); error.code = 'VALIDATION'; return error; };
 
@@ -53,11 +55,19 @@ function loadImage(blob) {
   });
 }
 
-export async function prepareLoginPhoto(file, { decode = loadImage, createCanvas = () => document.createElement('canvas'), randomId = () => crypto.randomUUID() } = {}) {
+async function decodePhoto(file, decode) {
   if (!(file instanceof Blob) || !file.size || file.size > LOGIN_PHOTO_LIMITS.maxInputBytes) throw invalid('请选择不超过 15 MB 的照片。');
   const bytes = new Uint8Array(await file.arrayBuffer()), source = inspectLoginPhoto(bytes);
   if (file.type && file.type !== source.mime) throw invalid('图片格式与文件内容不符，请重新选择。');
-  const bitmap = await decode(new Blob([bytes], { type: source.mime }));
+  return decode(new Blob([bytes], { type: source.mime }));
+}
+
+const encodeJpeg = (canvas, quality) => new Promise((resolve, reject) => {
+  canvas.toBlob(blob => blob ? resolve(blob) : reject(invalid('照片优化失败，请换一张重试。')), 'image/jpeg', quality);
+});
+
+export async function prepareLoginPhoto(file, { decode = loadImage, createCanvas = () => document.createElement('canvas'), randomId = () => crypto.randomUUID() } = {}) {
+  const bitmap = await decodePhoto(file, decode);
   const canvas = createCanvas();
   try {
     const width = bitmap.width || bitmap.naturalWidth, height = bitmap.height || bitmap.naturalHeight;
@@ -66,9 +76,33 @@ export async function prepareLoginPhoto(file, { decode = loadImage, createCanvas
     canvas.width = Math.max(1, Math.round(width * ratio)); canvas.height = Math.max(1, Math.round(height * ratio));
     const context = canvas.getContext('2d'); if (!context) throw invalid('浏览器暂时无法处理照片。');
     context.fillStyle = '#f7f8f5'; context.fillRect(0, 0, canvas.width, canvas.height); context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const encode = quality => new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(invalid('照片优化失败，请换一张重试。')), 'image/jpeg', quality));
-    let blob = await encode(.86); if (blob.size > 1_500_000) blob = await encode(.72);
+    let blob = await encodeJpeg(canvas, .86);
+    if (blob.size > 1_500_000) blob = await encodeJpeg(canvas, .72);
     if (!blob.size || blob.size > LOGIN_PHOTO_LIMITS.maxOutputBytes || blob.type !== 'image/jpeg') throw invalid('照片优化后仍过大，请先缩小图片。');
     return new File([blob], `login-photo-${randomId()}.jpg`, { type: 'image/jpeg' });
+  } finally { bitmap.close?.(); canvas.width = 1; canvas.height = 1; }
+}
+
+export async function prepareProfileAvatar(file) {
+  const bitmap = await decodePhoto(file, loadImage);
+  const canvas = document.createElement('canvas');
+  try {
+    const width = bitmap.width || bitmap.naturalWidth;
+    const height = bitmap.height || bitmap.naturalHeight;
+    const square = Math.min(width, height);
+    if (!square || width * height > LOGIN_PHOTO_LIMITS.maxPixels) throw invalid('图片尺寸无法读取。');
+    const edge = Math.min(square, 256);
+    canvas.width = edge; canvas.height = edge;
+    const context = canvas.getContext('2d');
+    if (!context) throw invalid('浏览器暂时无法处理头像。');
+    context.fillStyle = '#f7f8f5'; context.fillRect(0, 0, edge, edge);
+    context.drawImage(bitmap, (width - square) / 2, (height - square) / 2, square, square, 0, 0, edge, edge);
+    const maxBytes = MAX_AVATAR_JPEG_LENGTH * 3 / 4;
+    let jpeg = await encodeJpeg(canvas, .86);
+    if (jpeg.size > maxBytes) jpeg = await encodeJpeg(canvas, .65);
+    if (jpeg.size > maxBytes || jpeg.type !== 'image/jpeg') throw invalid('头像过大，请换一张照片。');
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(await jpeg.arrayBuffer())));
+    if (!validAvatarJpeg(base64)) throw invalid('无法生成头像，请换一张照片。');
+    return base64;
   } finally { bitmap.close?.(); canvas.width = 1; canvas.height = 1; }
 }

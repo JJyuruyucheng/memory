@@ -58,7 +58,7 @@ export function renderAdminActivity({ days, report, error, pending }, { avatar, 
   return `<section class="admin-report" aria-labelledby="admin-activity-title">
     ${heading}${content}
     <div class="admin-account-grid">${accounts.map(account => `<article class="admin-account">
-      <header>${avatar({ name: account.name, color: account.slot === 2 ? 'rose' : 'sage' }, true)}
+      <header>${avatar({ slot: account.slot, name: account.name, color: account.slot === 2 ? 'rose' : 'sage' }, true)}
         <div><h3>${esc(account.name)}</h3><p>最近登录 ${stamp(account.lastLoginAt)}</p></div></header>
       <dl class="admin-account-metrics">${metrics.map(([key, label]) => `<div><dt>${label}</dt><dd class="num">${count(account[key])}</dd></div>`).join('')}</dl>
     </article>`).join('')}</div>

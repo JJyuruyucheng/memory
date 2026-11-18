@@ -1,5 +1,6 @@
 import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, toUtcIso, validateEntry } from './domain.js';
 import { planAttachmentOrder, resolveAttachmentOrder } from './attachment-order.js';
+import { MAX_PROFILE_NAME, validAvatarJpeg } from './profile.js';
 
 // Inject the official supabase-js client with detectSessionInUrl:false; bounded
 // session persistence belongs to its storage adapter, not this data provider.
@@ -54,6 +55,11 @@ export function createSupabaseProvider(config = {}) {
   let loginAttempt = null, logoutPromise = null, initAttempt = null, disposed = false, mayRestore = true, authIdentity = null;
   const now = () => toUtcIso(config.now?.() ?? new Date());
 
+  function loginEmail(username) {
+    const identity = config.loginIdentities?.[['xbl', 'll'].includes(username) ? username : 'memory-admin'];
+    const email = typeof identity === 'string' ? identity : identity?.email;
+    return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+  }
   function requireSession(expected) {
     if (disposed || expected !== generation) throw new SupabaseProviderError('会话已改变，旧操作结果已忽略；重新登录后请刷新核对。', 'AUTH_CANCELLED', 401);
   }
@@ -124,7 +130,9 @@ export function createSupabaseProvider(config = {}) {
   }
   function profile(raw) {
     if (!raw || ![1, 2, 3].includes(raw.slot) || !['member', 'admin'].includes(raw.role) || (raw.slot === 3) !== (raw.role === 'admin') || typeof raw.username !== 'string' || !USERNAME.test(raw.username) || (raw.slot === 1 && raw.username !== 'xbl') || (raw.slot === 2 && raw.username !== 'll') || (raw.slot === 3 && ['xbl', 'll'].includes(raw.username)) || typeof raw.name !== 'string') throw invalid();
-    return { id: id(raw.id), username: raw.username, name: raw.name, role: raw.role, color: String(raw.color || (raw.slot === 2 ? 'rose' : raw.slot === 3 ? 'stone' : 'sage')) };
+    return { id: id(raw.id), slot: raw.slot, username: raw.username, name: raw.name, role: raw.role,
+      color: String(raw.color || (raw.slot === 2 ? 'rose' : raw.slot === 3 ? 'stone' : 'sage')),
+      avatarJpeg: validAvatarJpeg(raw.avatarJpeg) ? raw.avatarJpeg : null };
   }
   function mediaRow(raw, entry, knownUsers) {
     if (!raw || id(raw.entryId) !== entry.id || id(raw.authorId) !== entry.authorId || !knownUsers.has(id(raw.uploadedBy)) || !['pending', 'ready', 'retired'].includes(raw.status) || typeof raw.attached !== 'boolean' || !Number.isInteger(raw.position) || raw.position < 0 || !ALLOWED_FILE_TYPES[raw.mimeType] || ALLOWED_FILE_TYPES[raw.mimeType] !== raw.type || !Number.isSafeInteger(raw.size) || raw.size <= 0 || raw.size > MAX_FILE_BYTES || raw.storagePath !== `${entry.authorId}/${entry.id}/${id(raw.id)}` || typeof raw.name !== 'string') throw invalid('服务器返回了无效的私有媒体登记，已停止读取。');
@@ -347,9 +355,8 @@ export function createSupabaseProvider(config = {}) {
       if (!USERNAME.test(loginUsername)) throw new SupabaseProviderError('账号、密码或安全验证未通过。', 'LOGIN_FAILED', 401);
       // The administrator's private login name lives in its protected profile,
       // not in the public build. GoTrue still uses the stable internal email.
-      const identity = config.loginIdentities?.[['xbl', 'll'].includes(loginUsername) ? loginUsername : 'memory-admin'];
-      const email = typeof identity === 'string' ? identity : identity?.email;
-      if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new SupabaseProviderError('账号、密码或安全验证未通过。', 'LOGIN_FAILED', 401);
+      const email = loginEmail(loginUsername);
+      if (!email) throw new SupabaseProviderError('账号、密码或安全验证未通过。', 'LOGIN_FAILED', 401);
       client.memorySession?.beginSignIn();
       mayRestore = false; clearLocal(); const attempt = { generation }; loginAttempt = attempt;
       try {
@@ -385,6 +392,40 @@ export function createSupabaseProvider(config = {}) {
       return pending.finally(() => { if (logoutPromise === pending) logoutPromise = null; });
     },
     saveEntry: (input, files = []) => enqueue(expected => saveEntry(input, files, expected)),
+    saveProfile: ({ name, avatarJpeg }) => enqueue(async expected => {
+      const user = requireUser(expected);
+      if (typeof name !== 'string' || !name.trim() || name.trim().length > MAX_PROFILE_NAME) {
+        throw new SupabaseProviderError('请输入 1 至 60 个字符的展示昵称。', 'VALIDATION');
+      }
+      if (avatarJpeg !== undefined && avatarJpeg !== null && !validAvatarJpeg(avatarJpeg)) {
+        throw new SupabaseProviderError('头像格式不正确，请重新选择。', 'VALIDATION');
+      }
+      const patch = {};
+      if (name.trim() !== user.name) patch.name = name.trim();
+      if (avatarJpeg !== undefined && avatarJpeg !== user.avatarJpeg) patch.avatarJpeg = avatarJpeg;
+      if (!Object.keys(patch).length) return user;
+      const saved = await result(query(client.from('profiles').update(patch).eq('id', user.id).select('*').maybeSingle()), expected,
+        { allowNull: true, fallback: '个人资料未能保存，请检查连接后重试。' });
+      if (!saved || saved.id !== user.id) throw new SupabaseProviderError('当前账号无法修改这份个人资料。', 'FORBIDDEN', 403);
+      const updated = profile(saved);
+      const index = state.users.findIndex(value => value.id === user.id);
+      state.users[index] = updated;
+      state.currentUser = updated;
+      return updated;
+    }),
+    changePassword: ({ currentPassword, newPassword, captchaToken }) => enqueue(async expected => {
+      const user = requireUser(expected), email = loginEmail(user.username);
+      if (typeof client.memoryChangePassword !== 'function' || !email) {
+        throw new SupabaseProviderError('密码修改服务暂时不可用。', 'CONFIG');
+      }
+      if (typeof currentPassword !== 'string' || !currentPassword || typeof newPassword !== 'string'
+        || newPassword.length < 6 || newPassword.length > 256 || currentPassword === newPassword
+        || typeof captchaToken !== 'string' || !captchaToken) {
+        throw new SupabaseProviderError('请填写当前密码、不同的新密码并完成安全验证。', 'VALIDATION');
+      }
+      await client.memoryChangePassword({ email, userId: user.id, currentPassword, newPassword, captchaToken },
+        () => requireIdentity(expected, user.id));
+    }),
     deleteEntry: entryId => enqueue(expected => setDeleted(entryId, now(), expected)),
     restoreEntry: entryId => enqueue(expected => setDeleted(entryId, null, expected)),
     toggleReaction: entryId => enqueue(expected => toggle(entryId, 'reactions', expected)),

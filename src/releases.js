@@ -2,6 +2,14 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 14, date: '2026-11-18', version: 'v0.10.0', title: '长文阅读与个人资料',
+    changes: [
+      '每日热点速览的编号小标题加粗，正文紧跟对应小标题，条目之间保留间距。',
+      '长正文默认收起一部分，预览底部以渐隐提示下文，可以展开全文或重新收起。',
+      '桌面左下角和手机顶部的头像可打开个人资料，编辑头像和展示昵称，或验证当前密码后更新登录密码。',
+    ],
+  },
+  {
     number: 13, date: '2026-11-18', version: 'v0.9.1', title: '查看存储额度和余量',
     changes: [
       '管理小屋显示数据库和媒体的已用空间、套餐额度、参考余量及使用进度。',
