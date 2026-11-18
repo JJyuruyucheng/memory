@@ -17,13 +17,14 @@ let provider, loginVerification, loginPhotos, loginCarousel, loginPhotoEditor, m
 const moodNames = { happy: '微笑', neutral: '一般', sad: '难受', unset: '未填写' };
 const moodIcons = { happy: 'smile', neutral: 'neutral', sad: 'sad' };
 const filters = { query: '', tag: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all', favoritesOnly: false, trash: false };
-let tagFilterIdentity = null;
+let filterIdentity = null;
 let state = { currentUser: null, users: [], entries: [], settings: {} }, loginPending = false, bootPending = true;
 let reconnectPending = false, reconnectError = null, reconnectAttempt, recoveryEpoch = 0;
 let searchTimer, toastTimer, dialogReturnFocus, draftTimer;
 let editorAttachments = [], editorId = null, previewUrls = [];
 let calendarCursor = dayKey(new Date()).slice(0, 7), selectedDay = '';
 const route = () => location.hash.slice(1).split('?')[0] || 'timeline';
+const isFeedView = view => ['timeline', 'events', 'favorites'].includes(view);
 const user = id => state.users.find(u => u.id === id) || { id, name: '已离开的作者', color: 'sage' };
 const dateLabel = (value, full = false, withTime = false) => new Intl.DateTimeFormat('zh-CN', { timeZone: CONFIG.timeZone, ...(full ? { year: 'numeric' } : {}), month: 'long', day: 'numeric', ...(withTime ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } : {}) }).format(new Date(value));
 const avatar = (u, small = false) => `<span class="avatar ${u.color === 'rose' || state?.users?.filter(person => person.role !== 'admin').findIndex(person => person.id === u.id) === 1 ? 'rose' : u.role === 'admin' ? 'stone' : 'sage'} ${small ? 'small' : ''}" aria-label="${esc(u.name)}">${esc((u.name || '我').slice(0, 1))}</span>`;
@@ -44,26 +45,37 @@ function dateTimeInput(value) {
 function filtered() {
   const view = route();
   const rows = filterEntries(visibleEntries(), { ...filters, userId: state.currentUser?.id, type: view === 'events' ? 'event' : filters.type, favoritesOnly: view === 'favorites', trash: view === 'trash' });
-  return selectedDay && ['timeline', 'events', 'favorites'].includes(view) ? rows.filter(row => dayKey(row.occurredAt) === selectedDay) : rows;
+  return selectedDay && isFeedView(view) ? rows.filter(row => dayKey(row.occurredAt) === selectedDay) : rows;
 }
 const navItems = [['timeline', 'book', '时光线'], ['album', 'photo', '我们的相册'], ['events', 'calendar', '重要时刻'], ['stats', 'chart', '时光统计']];
 function navLink(item) { const [id, symbol, label] = item; return `<a href="#${id}" class="nav-link ${route() === id ? 'active' : ''}" ${route() === id ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${label}</span></a>`; }
 
 function render() {
   const identity = state?.currentUser?.id || null;
-  if (identity !== tagFilterIdentity) { filters.tag = ''; tagFilterIdentity = identity; }
+  if (identity !== filterIdentity) {
+    clearTimeout(searchTimer);
+    Object.assign(filters, { query: '', tag: '', month: '', authorId: 'all' });
+    calendarCursor = dayKey(new Date()).slice(0, 7);
+    selectedDay = '';
+    filterIdentity = identity;
+  }
   if (!identity) { delete app.dataset.scrollView; delete app.dataset.feedFilterKey; document.body.classList.remove('has-feed-layout'); }
   if (!state?.currentUser && (reconnectPending || reconnectError)) return renderReconnect(reconnectError);
+  const feedView = isFeedView(route());
   document.body.classList.toggle('is-login', !state?.currentUser && CONFIG.mode !== 'demo');
-  document.body.classList.toggle('has-feed-layout', Boolean(state?.currentUser) && ['timeline', 'events', 'favorites'].includes(route()));
+  document.body.classList.toggle('has-feed-layout', Boolean(state?.currentUser) && feedView);
   if (!state?.currentUser) return renderLogin();
   loginVerification?.destroy(); loginVerification = null;
   loginCarousel?.destroy(); loginCarousel = null;
   const active = document.activeElement?.id, selection = document.activeElement?.selectionStart;
   const scrollView = `${state.currentUser.id}:${route()}`;
+  const current = state.currentUser;
+  const content = renderView(computeStats(visibleEntries()));
   const feedFilterKey = JSON.stringify({ ...filters, selectedDay });
   const scrollPositions = app.dataset.scrollView === scrollView ? ['.feed-column', '.right-rail'].map(selector => [selector, selector === '.feed-column' && app.dataset.feedFilterKey !== feedFilterKey ? 0 : app.querySelector(selector)?.scrollTop || 0]) : [];
-  const current = state.currentUser, stats = computeStats(visibleEntries());
+  const footerNotice = CONFIG.mode === 'demo'
+    ? '<span>演示内容为虚构，勿上传私密资料</span>'
+    : current.role === 'admin' ? '<button class="text-button" data-action="about-mode">可见范围</button>' : '';
   app.innerHTML = `
     <aside class="sidebar" aria-label="主导航">
       <a class="wordmark" href="#timeline"><img src="./assets/mark.svg" alt="" width="43" height="43" /><span>朝夕<small>我们的记忆</small></span></a>
@@ -75,10 +87,15 @@ function render() {
       <div class="sidebar-utilities"><button class="credits-link" data-action="updates">系统更新信息</button><button class="credits-link" data-action="credits">关于朝夕与素材</button></div></div>
     </aside>
     <div class="workspace">
-      <header class="mobile-header"><a href="#timeline"><img src="./assets/mark.svg" alt="" width="30" height="30" /><strong>朝夕</strong></a><span>${esc(state.settings.spaceName)}</span>${CONFIG.mode === 'demo' ? `<label class="mobile-account">${avatar(current, true)}${icon('down')}<span class="sr-only">切换示例视角</span><select id="mobile-user-switch">${state.users.map(u => `<option value="${esc(u.id)}" ${u.id === current.id ? 'selected' : ''}>${esc(u.name)}${u.role === 'admin' ? '（管理员）' : ''}</option>`).join('')}</select></label>` : `<button class="icon-button" data-action="logout" aria-label="退出登录">${icon('logout')}</button>`}</header>
+      <header class="mobile-header">
+        <a href="#timeline"><img src="./assets/mark.svg" alt="" width="30" height="30" /><strong>朝夕</strong></a>
+        <span class="mobile-space-name">${esc(state.settings.spaceName)}</span>
+        ${feedView ? `<button type="button" id="mobile-search-button" class="icon-button mobile-search-button${filters.query ? ' is-active' : ''}" data-action="open-search" aria-label="${filters.query ? '搜索回忆，已应用关键词' : '搜索回忆'}" aria-haspopup="dialog">${icon('search')}</button>` : ''}
+        ${CONFIG.mode === 'demo' ? `<label class="mobile-account">${avatar(current, true)}${icon('down')}<span class="sr-only">切换示例视角</span><select id="mobile-user-switch">${state.users.map(u => `<option value="${esc(u.id)}" ${u.id === current.id ? 'selected' : ''}>${esc(u.name)}${u.role === 'admin' ? '（管理员）' : ''}</option>`).join('')}</select></label>` : `<button class="icon-button" data-action="logout" aria-label="退出登录">${icon('logout')}</button>`}
+      </header>
       ${CONFIG.mode === 'demo' ? `<div class="mode-note">${icon('info')}<span>演示空间 · 示例内容与试写仅保存在当前浏览器</span><button data-action="about-mode">了解演示</button></div>` : ''}
-      <main id="main-content" class="canvas" tabindex="-1">${renderView(stats)}</main>
-      <footer class="page-footer"><button class="text-button" data-action="updates">系统更新信息 <span>${esc(releaseHistory[0]?.version || '')}</span></button>${CONFIG.mode === 'demo' ? '<span>演示内容为虚构，勿上传私密资料</span>' : '<button class="text-button" data-action="about-mode">可见范围</button>'}</footer>
+      <main id="main-content" class="canvas" tabindex="-1">${content}</main>
+      <footer class="page-footer"><button class="text-button" data-action="updates">系统更新信息 <span>${esc(releaseHistory[0]?.version || '')}</span></button>${footerNotice}</footer>
     </div>
     <nav class="mobile-nav" aria-label="手机导航">${[['timeline', 'book', '时光'], ['album', 'photo', '相册']].map(navLink).join('')}<button class="mobile-compose" data-action="new" aria-label="记录这一刻">${icon('plus')}</button>${[['stats', 'chart', '统计'], ['us', 'settings', '我们']].map(navLink).join('')}</nav>`;
   app.dataset.scrollView = scrollView;
@@ -88,9 +105,14 @@ function render() {
   mountDatePickers(app);
 }
 function heading(title, subtitle, action = true) {
-  const searchable = action && ['timeline', 'events', 'favorites'].includes(route());
+  const searchable = action && isFeedView(route());
   const compose = action ? `<button class="primary" data-action="new">${icon('plus')}<span>记录这一刻</span></button>` : '';
-  return `<header class="page-heading ${searchable ? 'feed-heading' : ''}"><div><h1>${title}</h1><p>${subtitle}</p></div>${searchable ? `<div class="page-heading-actions"><form id="search-form" class="compact-search" role="search"><label class="sr-only" for="search">搜索回忆</label><input id="search" name="query" type="search" value="${esc(filters.query)}" placeholder="搜索回忆…" autocomplete="off" /><button type="submit" aria-label="搜索回忆">${icon('search')}</button></form>${compose}</div>` : compose}</header>`;
+  const search = `<form id="search-form" class="compact-search" role="search">
+    <label class="sr-only" for="search">搜索回忆</label>
+    <input id="search" name="query" type="search" value="${esc(filters.query)}" placeholder="搜索回忆…" autocomplete="off" />
+    <button type="submit" aria-label="搜索回忆">${icon('search')}</button>
+  </form>`;
+  return `<header class="page-heading"><div><h1>${title}</h1><p>${subtitle}</p></div>${searchable ? `<div class="page-heading-actions">${search}${compose}</div>` : compose}</header>`;
 }
 function renderView(stats) {
   switch (route()) {
@@ -103,22 +125,45 @@ function renderView(stats) {
     default: {
       const view = route();
       const title = view === 'events' ? '那些重要的时刻' : view === 'favorites' ? '舍不得忘的小事' : '把日子，慢慢收藏。';
+      const filterControls = renderFilters();
+      const rows = filtered();
       return `${heading(title, view === 'favorites' ? '你标记过的片段，都在这里。' : view === 'events' ? '第一次、纪念日，还有一起经历的每一个特别。' : `${dateLabel(new Date(), true)} · ${esc(state.settings.subtitle || '平凡的小事，也值得被记住。')}`)}
         <div class="home-grid"><section class="feed-column" tabindex="0" aria-label="我们的时光线">
-        ${renderFilters()}<div class="feed-summary"><span>${selectedDay ? `${esc(selectedDay)} · ` : ''}共 ${filtered().length} 条${view === 'favorites' ? '收藏' : '回忆'}</span>${selectedDay || filters.query || filters.tag || filters.mood !== 'all' || filters.authorId !== 'all' || filters.type !== 'all' || filters.month ? '<button class="text-button" data-action="clear-filters">清除筛选</button>' : '<span>按发生时间排列</span>'}</div>
-        ${renderFeed(filtered())}</section><aside class="right-rail" tabindex="0" aria-label="共同空间信息">${renderTogether(stats)}${renderCalendar()}${renderUpcoming()}</aside></div>`;
+        ${filterControls}<div class="feed-summary"><span>${selectedDay ? `${esc(selectedDay)} · ` : ''}共 ${rows.length} 条${view === 'favorites' ? '收藏' : '回忆'}</span>${selectedDay || filters.query || filters.tag || filters.mood !== 'all' || filters.authorId !== 'all' || filters.type !== 'all' || filters.month ? '<button class="text-button" data-action="clear-filters">清除筛选</button>' : '<span>按发生时间排列</span>'}</div>
+        ${renderFeed(rows)}</section><aside class="right-rail" tabindex="0" aria-label="共同空间信息">${renderTogether(stats)}${renderCalendar()}${renderUpcoming()}</aside></div>`;
     }
   }
 }
 function renderFilters() {
-  const view = route(), type = view === 'events' ? 'event' : filters.type;
-  const tags = collectEntryTags(visibleEntries(), state.currentUser, { type: view === 'events' ? 'event' : 'all', favoritesOnly: view === 'favorites', userId: state.currentUser.id });
+  const view = route();
+  const type = view === 'events' ? 'event' : filters.type;
+  const scope = { type: view === 'events' ? 'event' : 'all', favoritesOnly: view === 'favorites', userId: state.currentUser.id };
+  const entries = visibleEntries().filter(entry => entry.status !== 'draft');
+  const tags = collectEntryTags(entries, state.currentUser, scope);
+  const months = new Set();
+  for (const entry of filterEntries(entries, scope)) {
+    const month = dayKey(entry.occurredAt).slice(0, 7);
+    if (month) months.add(month);
+  }
+  const authors = state.users.filter(person => person.role !== 'admin');
   if (filters.tag && !tags.includes(filters.tag)) filters.tag = '';
-  return `<div class="filters"><div class="filter-row ${tags.length ? 'has-tag-filters' : ''}">
+  if (filters.month && !months.has(filters.month)) filters.month = '';
+  if (filters.authorId !== 'all' && !authors.some(person => person.id === filters.authorId)) filters.authorId = 'all';
+  const monthOptions = [...months].sort().reverse().map(month => {
+    const label = `${month.slice(0, 4)}年${Number(month.slice(5))}月`;
+    return `<option value="${esc(month)}" ${filters.month === month ? 'selected' : ''}>${label}</option>`;
+  }).join('');
+  return `<div class="filters"><div class="filter-row">
     <div class="segmented" aria-label="记录类型">${[['all', '全部'], ['note', '随记'], ['event', '事件'], ['whisper', '悄悄话']].map(([id, label]) => `<button data-action="filter-type" data-value="${id}" aria-pressed="${type === id}" ${view === 'events' && id !== 'event' ? 'disabled' : ''}>${label}</button>`).join('')}</div>
     ${tags.length ? `<div class="tag-filter-list" role="group" aria-label="按小标签筛选"><button id="filter-tag-all" class="tag-filter" data-action="filter-tag" data-value="" aria-pressed="${!filters.tag}">全部标签</button>${tags.map(tag => `<button id="filter-tag-value-${esc(encodeURIComponent(tag))}" class="tag-filter" data-action="filter-tag" data-value="${esc(tag)}" aria-pressed="${filters.tag === tag}"># ${esc(tag)}</button>`).join('')}</div>` : ''}
-    <label class="select-field"><span class="sr-only">按作者筛选</span><select id="filter-author"><option value="all">所有作者</option>${state.users.map(u => `<option value="${esc(u.id)}" ${filters.authorId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>
-    <label class="select-field"><span class="sr-only">按心情筛选</span><select id="filter-mood"><option value="all">所有心情</option>${Object.entries(moodNames).map(([id, label]) => `<option value="${id}" ${filters.mood === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div></div>`;
+    <div class="feed-selects">
+      <label class="select-field"><span class="sr-only">按作者筛选</span><select id="filter-author"><option value="all">所有作者</option>${authors.map(u => `<option value="${esc(u.id)}" ${filters.authorId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>
+      <label class="select-field"><span class="sr-only">按心情筛选</span><select id="filter-mood"><option value="all">所有心情</option>${Object.entries(moodNames).map(([id, label]) => `<option value="${id}" ${filters.mood === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+      <label class="select-field">
+        <span class="sr-only">按月份筛选</span>
+        <select id="filter-feed-month"><option value="">全部月份</option>${monthOptions}</select>
+      </label>
+    </div></div></div>`;
 }
 function renderFeed(rows, trash = false) {
   if (!rows.length) return `<div class="empty-state">${icon(trash ? 'restore' : 'book')}<h2>${trash ? '这里干干净净' : '这一页，留给新的回忆'}</h2><p>${trash ? '删除的记录会先来到这里。' : '换个筛选条件，或者写下今天的一件小事。'}</p>${!trash ? '<button class="secondary" data-action="new">写下第一笔</button>' : ''}</div>`;
@@ -206,13 +251,14 @@ function renderAdmin(stats) {
   return `${heading('管理小屋', '照顾好这个装着回忆的地方。', false)}<div class="info-line">${CONFIG.mode === 'demo' ? '当前是示例维护视角，操作只影响此浏览器。' : '管理员具有读取、编辑和导出私密内容的权限，请仅在维护时使用。'}</div><div class="stats-strip"><div><span>回忆总数</span><strong class="num">${stats.total}<small>条</small></strong></div><div><span>记录附件大小</span><strong class="num">${(bytes / 1024 / 1024).toFixed(1)}<small>MiB</small></strong></div><div><span>回收站</span><strong class="num">${state.entries.filter(e => e.deletedAt).length}<small>条</small></strong></div></div><div class="settings-section"><div><h2>空间里的账号</h2><p>维护身份与日常身份分开使用。</p></div><div class="member-list">${state.users.map(u => `<div class="member-row">${avatar(u, true)}<strong>${esc(u.name)}</strong><span>${u.role === 'admin' ? '管理员' : '日常成员'}</span></div>`).join('')}</div></div><div class="settings-section"><div><h2>备份与恢复</h2><p>导出档案方便带走内容；完整系统恢复还需数据库、媒体与配置备份。</p></div><div class="settings-actions"><button class="secondary" data-action="export-all">${icon('download')}导出完整共同档案</button><a class="secondary inline-button" href="#trash">${icon('restore')}查看回收站</a><button class="text-button" data-action="backup-help">了解备份范围</button></div></div>`;
 }
 
-function openDialog(content, cls = '') {
-  closeModal(); dialogReturnFocus = document.activeElement;
+function openDialog(content, cls = '', returnFocus = document.activeElement) {
+  closeModal(); dialogReturnFocus = returnFocus;
   modalRoot.innerHTML = `<dialog class="dialog ${cls}">${content}<button class="dialog-close icon-button" data-action="close" aria-label="关闭窗口">${icon('close')}</button></dialog>`;
-  const dialog = modalRoot.querySelector('dialog'); dialog.showModal();
-  mountDatePickers(dialog);
+  const dialog = modalRoot.querySelector('dialog');
   const title = dialog.querySelector('h2');
   if (title) { title.id = 'dialog-title'; dialog.setAttribute('aria-labelledby', title.id); }
+  dialog.showModal();
+  mountDatePickers(dialog);
   dialog.addEventListener('cancel', e => { e.preventDefault(); closeModal(); });
   dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) closeModal(); } });
 }
@@ -226,6 +272,22 @@ function closeModal(saveDraft = true) {
   clearTimeout(draftTimer); modalRoot.querySelector('dialog')?.close(); modalRoot.innerHTML = '';
   previewUrls.forEach(url => URL.revokeObjectURL(url)); previewUrls = [];
   if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus({ preventScroll: true });
+  dialogReturnFocus = null;
+}
+function showMobileSearch(button) {
+  clearTimeout(searchTimer);
+  openDialog(`<h2>搜索回忆</h2>
+    <form id="mobile-search-form" role="search">
+      <label class="sr-only" for="mobile-search-query">搜索关键词</label>
+      <input id="mobile-search-query" name="query" type="search" value="${esc(filters.query)}"
+        placeholder="标题、正文或小标签" autocomplete="off" enterkeyhint="search" autofocus />
+      <button type="submit" class="primary">搜索</button>
+    </form>`, 'search-dialog', button);
+  modalRoot.querySelector('#mobile-search-query').addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || event.isComposing) return;
+    event.preventDefault();
+    closeModal();
+  });
 }
 function openEditor(entry) {
   editorId = entry?.id || null;
@@ -305,6 +367,7 @@ document.addEventListener('click', async event => {
       case 'new': openEditor(); break;
       case 'edit': openEditor(state.entries.find(e => e.id === id)); break;
       case 'close': closeModal(); break;
+      case 'open-search': showMobileSearch(button); break;
       case 'filter-type': filters.type = value; render(); break;
       case 'filter-tag': filters.tag = filters.tag === value ? '' : value; render(); break;
       case 'filter-media': filters.mediaType = value; render(); break;
@@ -322,7 +385,11 @@ document.addEventListener('click', async event => {
       case 'delete': await provider.deleteEntry(id); closeModal(); render(); toast('已移到回收站，可以恢复。'); break;
       case 'restore': await provider.restoreEntry(id); render(); toast('这段回忆已经回来了。'); break;
       case 'remove-media': editorAttachments.splice(Number(index), 1); renderEditorPreviews(); break;
-      case 'calendar-day': selectedDay = selectedDay === value ? '' : value; render(); break;
+      case 'calendar-day':
+        selectedDay = selectedDay === value ? '' : value;
+        if (selectedDay && filters.month !== selectedDay.slice(0, 7)) filters.month = '';
+        render();
+        break;
       case 'calendar-prev': case 'calendar-next': { const [y, m] = calendarCursor.split('-').map(Number), d = new Date(Date.UTC(y, m - 1 + (action === 'calendar-next' ? 1 : -1), 1)); calendarCursor = d.toISOString().slice(0, 7); render(); break; }
       case 'add-anniversary': document.querySelector('#anniversary-fields').insertAdjacentHTML('beforeend', anniversaryFields()); mountDatePickers(app); break;
       case 'remove-anniversary': button.closest('.anniversary-fields').remove(); break;
@@ -348,7 +415,13 @@ document.addEventListener('click', async event => {
         if (failure) toast('本机已退出；网络异常，服务器会话退出尚未确认。', true);
         break;
       }
-      case 'about-mode': info(CONFIG.mode === 'demo' ? '现在是演示空间' : '共同空间的可见范围', CONFIG.mode === 'demo' ? '<p>你看到的称呼、日期和回忆都是示例。可以切换示例视角、试写、添加照片、留言、收藏和导出。</p><p>这些操作只保存在当前浏览器，不会同步到另一台设备。此公开演示不接收真实密码，请使用非私密的测试素材。</p>' : '<p>日常随记和重要事件在共同空间内共享；悄悄话仅作者和管理员可见，对方无法查看。</p><p>管理员可读取和维护全部已发布内容。将共享记录改为悄悄话，无法即时收回此前的副本、缓存和已签发链接。</p><p>文字草稿留在当前会话，退出时清除。</p>'); break;
+      case 'about-mode':
+        if (CONFIG.mode === 'demo') {
+          info('现在是演示空间', '<p>你看到的称呼、日期和回忆都是示例。可以切换示例视角、试写、添加照片、留言、收藏和导出。</p><p>这些操作只保存在当前浏览器，不会同步到另一台设备。此公开演示不接收真实密码，请使用非私密的测试素材。</p>');
+        } else if (state.currentUser?.role === 'admin') {
+          info('共同空间的可见范围', '<p>日常随记和重要事件在共同空间内共享；悄悄话仅作者和管理员可见，对方无法查看。</p><p>管理员可读取和维护全部已发布内容。将共享记录改为悄悄话，无法即时收回此前的副本、缓存和已签发链接。</p><p>文字草稿留在当前会话，退出时清除。</p>');
+        }
+        break;
       case 'backup-help': info('把回忆妥善留住', '<p>内容导出包含文字和媒体，方便离线阅读；它不是服务器的完整备份。</p><p>正式部署还需备份 Memos 数据库、附件卷与配置，保存一份加密异地副本，并实际验证恢复。详细步骤见仓库 docs/deployment.md。</p>'); break;
       case 'credits': { const credits = await fetch('./assets/credits.json').then(r => r.json()); info('关于朝夕', `<p>朝夕，收藏两个人的日常与重要时刻。演示人物与故事均为虚构。</p><p>私密后端基于 <a href="https://github.com/usememos/memos" target="_blank" rel="noopener noreferrer">Memos（MIT）</a>；组件参考和许可记录见仓库文档。</p><h3>演示照片</h3>${credits.map(c => `<p><a href="${esc(c.source)}" target="_blank" rel="noopener noreferrer">${esc(c.title.replace('File:', ''))}</a><br>${esc(c.author)} · ${esc(c.license)}<br><small>${esc(c.changes)}</small></p>`).join('')}`); break; }
       case 'reconnect': await reconnect(); break;
@@ -391,13 +464,29 @@ document.addEventListener('change', async event => {
     if (['user-switch', 'mobile-user-switch'].includes(event.target.id)) { await provider.switchUser(event.target.value); closeModal(); render(); }
     if (event.target.id === 'filter-author') { filters.authorId = event.target.value; render(); }
     if (event.target.id === 'filter-mood') { filters.mood = event.target.value; render(); }
-    if (event.target.id === 'filter-month') { filters.month = event.target.value; render(); }
+    if (event.target.id === 'filter-month' || event.target.id === 'filter-feed-month') {
+      filters.month = event.target.value;
+      if (event.target.id === 'filter-feed-month') {
+        selectedDay = '';
+        if (filters.month) calendarCursor = filters.month;
+      }
+      render();
+    }
     if (event.target.id === 'media-input') { editorAttachments.push(...[...event.target.files].map(file => ({ key: crypto.randomUUID(), kind: 'file', file }))); event.target.value = ''; renderEditorPreviews(); }
   } catch (error) { toast(error.message, true); }
 });
 document.addEventListener('submit', async event => {
   const form = event.target;
-  if (form.id === 'search-form') { event.preventDefault(); clearTimeout(searchTimer); filters.query = form.querySelector('#search').value; render(); return; }
+  if (form.id === 'search-form' || form.id === 'mobile-search-form') {
+    event.preventDefault();
+    clearTimeout(searchTimer);
+    filters.query = new FormData(form).get('query').trim();
+    const mobile = form.id === 'mobile-search-form';
+    if (mobile) closeModal();
+    render();
+    if (mobile) window.scrollTo({ top: 0 });
+    return;
+  }
   if (!['entry-form', 'settings-form', 'comment-form', 'login-form'].includes(form.id)) return;
   event.preventDefault();
   if (form.id === 'login-form' && loginPending) return;
@@ -433,7 +522,15 @@ document.addEventListener('submit', async event => {
   } catch (error) { if (!state.currentUser && form.id !== 'login-form') { clearDrafts(); closeModal(false); render(); toast('登录已失效，请重新登录。', true); } else { const target = form.id === 'login-form' ? document.querySelector('#login-form .form-error') : form.querySelector('.form-error'); if (target) target.textContent = error.message; else toast(error.message, true); } }
   finally { if (submit?.isConnected) submit.disabled = form.id === 'login-form' ? !loginVerification?.getToken() : false; }
 });
-window.addEventListener('hashchange', () => { if (bootPending || (!provider && CONFIG.mode !== 'preview')) return; clearTimeout(searchTimer); selectedDay = ''; filters.query = ''; filters.tag = ''; filters.type = route() === 'events' ? 'event' : 'all'; render(); window.scrollTo({ top: 0 }); });
+window.addEventListener('hashchange', () => {
+  if (bootPending || (!provider && CONFIG.mode !== 'preview')) return;
+  clearTimeout(searchTimer);
+  if (modalRoot.querySelector('.search-dialog')) closeModal();
+  selectedDay = '';
+  Object.assign(filters, { query: '', tag: '', month: '', type: route() === 'events' ? 'event' : 'all' });
+  render();
+  window.scrollTo({ top: 0 });
+});
 window.addEventListener('memory:session-ended', () => {
   recoveryEpoch++; reconnectAttempt = null; reconnectError = null; reconnectPending = false; bootPending = true;
   provider?.dispose?.(); state.currentUser = null; clearDrafts(); closeModal(false);

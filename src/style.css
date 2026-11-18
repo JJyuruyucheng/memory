@@ -61,7 +61,7 @@
 .filters .search-field > input[type=search] { margin: 0; min-height: 44px; border: 0; border-radius: inherit; padding: 10px 44px 10px 14px; background: transparent; font-size: 13px; outline: none; }
 .search-field > .icon { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); pointer-events: none; width: 17px; height: 17px; }
 .search-field:focus-within { border-color: var(--accent); outline: 2px solid #3c66531a; outline-offset: 1px; }
-.filter-row { flex-wrap: wrap; }
+.filter-row { flex-wrap: wrap; align-items: flex-start; gap: 8px 10px; }
 .filter-row .segmented { flex-shrink: 0; }
 .filter-row .segmented button { padding-left: 13px; padding-right: 13px; }
 .page-heading-actions { display: flex; align-items: center; gap: 12px; flex: none; }
@@ -71,35 +71,39 @@
 .compact-search > button .icon { width: 17px; height: 17px; }
 .compact-search:focus-within { border-color: var(--accent); outline: 2px solid #3c66531a; outline-offset: 1px; }
 .compact-search > button:hover { color: var(--accent); }
-.filter-row.has-tag-filters { display: grid; grid-template-columns: max-content minmax(160px, 1fr) max-content max-content; align-items: start; gap: 10px; }
-.filter-row.has-tag-filters > .segmented { margin-right: 0; }
-.tag-filter-list { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; min-width: 0; padding: 2px 0; }
+.feed-selects { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 0; margin-left: auto; }
+.feed-selects > label { min-width: 0; }
+.feed-selects select { width: auto; min-width: 0; max-width: 150px; min-height: 36px; margin: 0; text-overflow: ellipsis; }
+.tag-filter-list { display: flex; flex: 1 1 160px; flex-wrap: wrap; align-items: flex-start; gap: 6px; min-width: 0; padding: 2px 0; }
 .tag-filter { max-width: 100%; min-height: 32px; border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; background: transparent; color: var(--muted); font-size: 12px; line-height: 1.5; text-align: left; overflow-wrap: anywhere; }
 .tag-filter:hover { background: var(--raised); }
 .tag-filter[aria-pressed=true] { border-color: var(--accent); color: var(--accent); background: var(--raised); }
 .tag-filter:focus-visible, .compact-search > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .feed-column > .filters + .feed-summary { margin-top: 12px; }
+.dialog.search-dialog { width: min(440px, calc(100% - 32px)); margin: min(13dvh, 92px) auto auto; padding: 22px; }
+.search-dialog h2 { padding-right: 40px; font-size: 18px; }
+.search-dialog .dialog-close { width: 44px; height: 44px; top: 12px; right: 12px; }
+#mobile-search-form { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 8px; margin-top: 16px; }
+#mobile-search-form input { width: 100%; min-height: 44px; padding: 8px 11px; border: 1px solid var(--control); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 16px; }
+#mobile-search-form .primary { min-height: 44px; }
 @media(max-width:1500px) {
-  .filter-row.has-tag-filters { grid-template-columns: minmax(0, 1fr) max-content max-content; }
-  .tag-filter-list { grid-column: 1 / -1; grid-row: 2; }
-  .filter-row.has-tag-filters > .select-field:nth-last-child(2) { grid-column: 2; grid-row: 1; }
-  .filter-row.has-tag-filters > .select-field:last-child { grid-column: 3; grid-row: 1; }
+  .tag-filter-list { flex-basis: 100%; order: 1; }
 }
 @media(max-width:760px) {
-  .feed-heading { flex-wrap: wrap; }
-  .page-heading-actions { margin-left: auto; }
-  .page-heading-actions > .primary { display: none; }
-  .compact-search { width: 220px; }
-  .compact-search input[type=search], .compact-search > button { min-height: 44px; }
-  .filter-row.has-tag-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .filter-row.has-tag-filters > .segmented { grid-column: 1 / -1; width: 100%; }
-  .filter-row.has-tag-filters > .select-field:nth-last-child(2) { grid-column: 1; grid-row: 3; }
-  .filter-row.has-tag-filters > .select-field:last-child { grid-column: 2; grid-row: 3; }
+  .page-heading-actions { display: none; }
+  .mobile-header { gap: 7px; }
+  .mobile-space-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-header > .icon-button { width: 44px; height: 44px; }
+  .mobile-header .mobile-search-button { color: var(--accent); }
+  .mobile-search-button .icon { width: 20px; height: 20px; }
+  .mobile-search-button.is-active { background: var(--active); }
+  .filter-row { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .filter-row > .segmented { width: 100%; margin: 0; }
+  .filter-row .segmented button { flex: 1; min-height: 44px; padding: 5px 6px; font-size: 12px; }
+  .tag-filter-list { order: 0; padding: 0; }
   .tag-filter { min-height: 44px; }
-}
-@media(max-width:480px) {
-  .feed-heading > .page-heading-actions { width: 100%; justify-content: flex-end; }
-  .compact-search { width: min(260px, 100%); }
+  .feed-selects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(0, 1.25fr); margin: 0; }
+  .feed-selects select { width: 100%; max-width: none; min-height: 44px; padding: 7px 5px; font-size: 13px; }
 }
 .segmented .filter-count { margin-left: 6px; color: var(--faint); font-size: 11px; }
 .album-toolbar { flex-wrap: wrap; gap: 12px; }
@@ -430,12 +434,6 @@
   .canvas { padding-top: 25px; }
   .page-footer { align-items: flex-start; }
   .page-footer > .text-button { min-height: 36px; }
-  .filter-row > .segmented { margin-right: auto; }
-  .filter-row .segmented button { min-height: 36px; padding-left: 12px; padding-right: 12px; font-size: 12px; }
-  .filter-row > .select-field { flex: 1; }
-  .filter-row > .select-field select { width: 100%; max-width: none; font-size: 12px; }
-  .filter-row > .segmented { flex-basis: 100%; width: max-content; flex-grow: 0; }
-  .filter-row > .segmented button { flex: 1; }
   .album-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .album-toolbar { gap: 10px; margin-bottom: 20px; }
   .album-toolbar > .segmented { flex-basis: 100%; margin-right: 0; width: max-content; }

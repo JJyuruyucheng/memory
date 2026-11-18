@@ -2,6 +2,14 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 10, date: '2026-11-18', version: 'v0.7.1', title: '手机顶栏搜索与月份筛选',
+    changes: [
+      '手机上的时光线、重要时刻和收藏通过顶栏放大镜打开搜索弹窗。',
+      '记录列表增加月份筛选，可与类型、小标签、作者、心情和关键词组合使用。',
+      '作者筛选仅列出共同空间成员，页脚的可见范围入口仅向管理员展示。',
+    ],
+  },
+  {
     number: 9, date: '2026-11-18', version: 'v0.7.0', title: '让小标签，串起日常',
     changes: [
       '保留随记、事件和悄悄话三种记录类型，小标签自动汇总为列表筛选条件。',
