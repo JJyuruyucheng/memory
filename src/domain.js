@@ -2,6 +2,8 @@ const DAY_MS = 86400000;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_ZONE = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,9})?)?(?:Z|[+-](?:0\d|1[0-4]):[0-5]\d)$/i;
 const MOODS = ['happy', 'neutral', 'sad'];
+export const MAX_ENTRY_TAGS = 20;
+export const MAX_TAG_LENGTH = 40;
 export const ALLOWED_FILE_TYPES = Object.freeze({
   'image/jpeg': 'image', 'image/png': 'image', 'image/webp': 'image',
   'image/gif': 'image', 'image/avif': 'image',
@@ -115,7 +117,7 @@ export function validateEntry(entry, files = [], config = {}) {
     if (!Number.isFinite(file?.size) || file.size <= 0 || file.size > maxFileBytes) errors.push(`附件“${String(file?.name ?? '未命名文件')}”为空或超过 ${maxFileBytes === 50_000_000 ? '50 MB' : `${Math.floor(maxFileBytes / 1024 / 1024)} MiB`}。`);
   }
   if (images > maxImages) errors.push(`每条记录最多保存 ${maxImages} 张图片。`);
-  if (entry.tags !== undefined && (!Array.isArray(entry.tags) || entry.tags.length > 20 || entry.tags.some(tag => typeof tag !== 'string' || tag.length > 40))) errors.push('标签格式无效，每条最多 20 个标签，每个最多 40 个字符。');
+  if (entry.tags !== undefined && (!Array.isArray(entry.tags) || entry.tags.length > MAX_ENTRY_TAGS || entry.tags.some(tag => typeof tag !== 'string' || tag.length > MAX_TAG_LENGTH))) errors.push(`标签格式无效，每条最多 ${MAX_ENTRY_TAGS} 个标签，每个最多 ${MAX_TAG_LENGTH} 个字符。`);
   return { valid: errors.length === 0, errors: [...new Set(errors)] };
 }
 

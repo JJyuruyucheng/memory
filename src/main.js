@@ -9,6 +9,8 @@ import { mountLoginCarousel } from './login-carousel.js';
 import { loginPhotoEditorMarkup, mountLoginPhotoEditor } from './login-photo-editor.js';
 import { prepareLoginPhoto } from './login-photo-image.js';
 import { mediaViewerMarkup, mountMediaViewer } from './media-viewer.js';
+import { entryTagsMarkup, mountEntryTags } from './entry-tags-editor.js';
+import { calendarGrid, feedDatePickerMarkup, mountFeedDatePicker, shiftCalendarMonth } from './feed-date-picker.js';
 import { escapeHtml as esc, filterEntries, collectEntryTags, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
 
 const app = document.querySelector('#app');
@@ -21,7 +23,7 @@ let filterIdentity = null;
 let state = { currentUser: null, users: [], entries: [], settings: {} }, loginPending = false, bootPending = true;
 let reconnectPending = false, reconnectError = null, reconnectAttempt, recoveryEpoch = 0;
 let searchTimer, toastTimer, dialogReturnFocus, draftTimer;
-let editorAttachments = [], editorId = null, previewUrls = [];
+let editorAttachments = [], editorId = null, editorTags = null, previewUrls = [];
 let calendarCursor = dayKey(new Date()).slice(0, 7), selectedDay = '';
 const route = () => location.hash.slice(1).split('?')[0] || 'timeline';
 const isFeedView = view => ['timeline', 'events', 'favorites'].includes(view);
@@ -134,35 +136,26 @@ function renderView(stats) {
     }
   }
 }
+function feedScope(view) {
+  return { type: view === 'events' ? 'event' : 'all', favoritesOnly: view === 'favorites', userId: state.currentUser.id };
+}
 function renderFilters() {
   const view = route();
   const type = view === 'events' ? 'event' : filters.type;
-  const scope = { type: view === 'events' ? 'event' : 'all', favoritesOnly: view === 'favorites', userId: state.currentUser.id };
-  const entries = visibleEntries().filter(entry => entry.status !== 'draft');
-  const tags = collectEntryTags(entries, state.currentUser, scope);
-  const months = new Set();
-  for (const entry of filterEntries(entries, scope)) {
-    const month = dayKey(entry.occurredAt).slice(0, 7);
-    if (month) months.add(month);
-  }
+  const tags = collectEntryTags(visibleEntries(), state.currentUser, feedScope(view));
   const authors = state.users.filter(person => person.role !== 'admin');
   if (filters.tag && !tags.includes(filters.tag)) filters.tag = '';
-  if (filters.month && !months.has(filters.month)) filters.month = '';
   if (filters.authorId !== 'all' && !authors.some(person => person.id === filters.authorId)) filters.authorId = 'all';
-  const monthOptions = [...months].sort().reverse().map(month => {
-    const label = `${month.slice(0, 4)}年${Number(month.slice(5))}月`;
-    return `<option value="${esc(month)}" ${filters.month === month ? 'selected' : ''}>${label}</option>`;
-  }).join('');
+  const date = selectedDay || filters.month;
+  const dateText = date ? date.replaceAll('-', '/') : '全部日期';
   return `<div class="filters"><div class="filter-row">
     <div class="segmented" aria-label="记录类型">${[['all', '全部'], ['note', '随记'], ['event', '事件'], ['whisper', '悄悄话']].map(([id, label]) => `<button data-action="filter-type" data-value="${id}" aria-pressed="${type === id}" ${view === 'events' && id !== 'event' ? 'disabled' : ''}>${label}</button>`).join('')}</div>
     ${tags.length ? `<div class="tag-filter-list" role="group" aria-label="按小标签筛选"><button id="filter-tag-all" class="tag-filter" data-action="filter-tag" data-value="" aria-pressed="${!filters.tag}">全部标签</button>${tags.map(tag => `<button id="filter-tag-value-${esc(encodeURIComponent(tag))}" class="tag-filter" data-action="filter-tag" data-value="${esc(tag)}" aria-pressed="${filters.tag === tag}"># ${esc(tag)}</button>`).join('')}</div>` : ''}
     <div class="feed-selects">
       <label class="select-field"><span class="sr-only">按作者筛选</span><select id="filter-author"><option value="all">所有作者</option>${authors.map(u => `<option value="${esc(u.id)}" ${filters.authorId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>
       <label class="select-field"><span class="sr-only">按心情筛选</span><select id="filter-mood"><option value="all">所有心情</option>${Object.entries(moodNames).map(([id, label]) => `<option value="${id}" ${filters.mood === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
-      <label class="select-field">
-        <span class="sr-only">按月份筛选</span>
-        <select id="filter-feed-month"><option value="">全部月份</option>${monthOptions}</select>
-      </label>
+      <button type="button" id="filter-feed-date" class="feed-date-trigger" data-action="open-feed-date"
+        aria-label="日期筛选，${esc(dateText)}" aria-haspopup="dialog" ${date ? 'data-active' : ''}>${icon('calendar')}<span>${esc(dateText)}</span></button>
     </div></div></div>`;
 }
 function renderFeed(rows, trash = false) {
@@ -187,9 +180,8 @@ function renderTogether(stats) {
 }
 function renderCalendar() {
   const [year, month] = calendarCursor.split('-').map(Number);
-  const first = new Date(Date.UTC(year, month - 1, 1)), offset = (first.getUTCDay() + 6) % 7, count = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const dates = new Set(visibleEntries().filter(e => !e.deletedAt).map(e => dayKey(e.occurredAt)));
-  return `<section class="calendar-panel"><div class="rail-heading"><h2>${year} 年 ${month} 月</h2><div><button class="icon-button previous" data-action="calendar-prev" aria-label="上个月">${icon('chevron')}</button><button class="icon-button" data-action="calendar-next" aria-label="下个月">${icon('chevron')}</button></div></div><div class="calendar-grid">${['一', '二', '三', '四', '五', '六', '日'].map(d => `<span class="weekday">${d}</span>`).join('')}${Array.from({ length: offset }, () => '<span></span>').join('')}${Array.from({ length: count }, (_, i) => { const key = `${year}-${String(month).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`; return `<button data-action="calendar-day" data-value="${key}" class="calendar-day ${dates.has(key) ? 'has-memory' : ''} ${key === dayKey(new Date()) ? 'today' : ''} ${key === selectedDay ? 'selected' : ''}" aria-label="${key}${dates.has(key) ? '，有回忆' : ''}">${i + 1}</button>`; }).join('')}</div><p class="calendar-caption"><span></span>有记录的日子</p></section>`;
+  const dates = new Set(visibleEntries().filter(entry => !entry.deletedAt && entry.status !== 'draft').map(entry => dayKey(entry.occurredAt)));
+  return `<section class="calendar-panel"><div class="rail-heading"><h2>${year} 年 ${month} 月</h2><div><button class="icon-button previous" data-action="calendar-prev" aria-label="上个月">${icon('chevron')}</button><button class="icon-button" data-action="calendar-next" aria-label="下个月">${icon('chevron')}</button></div></div>${calendarGrid(calendarCursor, { dates, selectedDay })}<p class="calendar-caption"><span></span>有记录的日子</p></section>`;
 }
 function upcoming() { return (state.settings.anniversaries || []).map(a => anniversaryInfo(a, new Date())).filter(a => !a.isPast).sort((a, b) => a.daysUntil - b.daysUntil); }
 function renderUpcoming() { return `<section class="upcoming-panel"><div class="rail-heading"><h2>下一个小期待</h2><a class="small-link" href="#anniversaries">查看全部</a></div>${upcoming().slice(0, 2).map(a => `<div class="upcoming-row"><div><strong>${esc(a.title)}</strong><small>${esc(a.nextDate || a.date)}</small></div><span>${a.isToday ? '就是今天' : `<b class="num">${a.daysUntil}</b> 天后`}</span></div>`).join('') || '<p class="muted">设置一个值得期待的日子吧。</p>'}</section>`; }
@@ -265,6 +257,7 @@ function openDialog(content, cls = '', returnFocus = document.activeElement) {
 function closeModal(saveDraft = true) {
   if (saveDraft && loginPhotoEditor?.isSaving) { toast('照片正在保存，请稍候。'); return; }
   if (saveDraft) persistDraft();
+  editorTags = null;
   loginPhotoEditor?.destroy(); loginPhotoEditor = null;
   mediaViewer?.destroy(); mediaViewer = null;
   destroyDatePickers(modalRoot);
@@ -273,6 +266,12 @@ function closeModal(saveDraft = true) {
   previewUrls.forEach(url => URL.revokeObjectURL(url)); previewUrls = [];
   if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus({ preventScroll: true });
   dialogReturnFocus = null;
+}
+function showFeedDatePicker(button) {
+  const entries = visibleEntries().filter(entry => entry.status !== 'draft');
+  const dates = new Set(filterEntries(entries, feedScope(route())).map(entry => dayKey(entry.occurredAt)).filter(Boolean));
+  openDialog(feedDatePickerMarkup(), 'feed-date-dialog', button);
+  mountFeedDatePicker(modalRoot.querySelector('dialog'), { initialMonth: filters.month || calendarCursor, selectedDay, dates });
 }
 function showMobileSearch(button) {
   clearTimeout(searchTimer);
@@ -290,20 +289,22 @@ function showMobileSearch(button) {
   });
 }
 function openEditor(entry) {
-  editorId = entry?.id || null;
   let draft = {};
   if (!entry) { try { draft = JSON.parse(sessionStorage.getItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`) || '{}'); } catch {} }
   const data = entry || { ...draft, occurredAt: draft.occurredAt || new Date().toISOString() };
   const author = entry ? user(entry.authorId) : state.currentUser;
+  const suggestions = collectEntryTags(state.entries, state.currentUser);
   openDialog(`<form id="entry-form" data-original-type="${esc(entry?.type || '')}"><header class="editor-header"><div><h2>${entry ? '再添一点细节' : '今天，也值得记住'}</h2></div><div class="editor-who">${avatar(author, true)}<div><span>${esc(author.name)}</span><span id="entry-visibility">${icon('lock')}${visibilityLabel(data.type)}</span></div></div></header>
     <div class="editor-layout"><div class="editor-story"><label>给这段回忆起个名字 <span class="optional">随记可不填</span><input name="title" value="${esc(data.title || '')}" placeholder="例如：下班路上，一起看了晚霞" maxlength="120" /></label>
     <p id="whisper-warning" class="privacy-warning" hidden>${icon('info')}改为悄悄话后，对方将不能再查看；此前的副本、缓存和已签发链接无法即时收回。</p>
     <label class="editor-content">想记住的事<textarea name="content" rows="9" placeholder="慢慢写，这里没有字数任务。" maxlength="20000">${esc(data.content || '')}</textarea></label></div>
     <div class="editor-side"><div class="form-two"><label>记录类型<select name="type"><option value="note" ${!['event', 'whisper'].includes(data.type) ? 'selected' : ''}>日常随记</option><option value="event" ${data.type === 'event' ? 'selected' : ''}>重要事件</option><option value="whisper" ${data.type === 'whisper' ? 'selected' : ''}>悄悄话</option></select></label><label>发生在<input name="occurredAt" type="datetime-local" value="${dateTimeInput(data.occurredAt)}" required /></label></div>
     <fieldset class="mood-options"><legend>心情</legend>${['happy', 'neutral', 'sad'].map(m => `<label class="mood-option mood-${m}"><input type="radio" name="mood" value="${m}" ${data.mood === m ? 'checked' : ''} />${icon(moodIcons[m])}<span>${moodNames[m]}</span>${icon('check', 'mood-check')}</label>`).join('')}<label class="mood-option no-mood"><input type="radio" name="mood" value="" ${!data.mood ? 'checked' : ''} /><span>未填写</span>${icon('check', 'mood-check')}</label></fieldset>
-    <label>小标签 <span class="optional">用逗号隔开</span><input name="tags" value="${esc((data.tags || []).join('，'))}" placeholder="日常，旅行，一起做饭" maxlength="180" /></label>
     <section class="editor-attachments" aria-label="照片与视频"><div class="upload-row"><label class="upload-control">${icon('photo')}<span>添加照片或短视频</span><input id="media-input" type="file" accept="image/*,video/*" multiple /></label></div><small class="upload-hint">最多 9 张图片 · 最多 10 个附件 · 单个 ${CONFIG.mode === 'supabase' ? '50 MB' : '50 MiB'}</small><div id="editor-previews" class="editor-previews"></div></section></div></div>
-    <p id="form-error" class="form-error" role="alert"></p><div class="dialog-footer"><div>${entry && canEdit(entry) ? `<button type="button" class="text-button danger delete-entry" data-action="delete" data-id="${esc(entry.id)}">移到回收站</button>` : ''}<span id="draft-status" role="status">${!entry && (draft.content || draft.title) ? '已恢复草稿' : ''}</span></div><button type="submit" class="primary">${icon('check')}${entry ? '保存修改' : '收好这一刻'}</button></div></form>`, 'editor-dialog');
+    ${entryTagsMarkup(suggestions)}
+    <p id="form-error" class="form-error" role="alert"></p><div class="dialog-footer"><div>${entry && canEdit(entry) ? `<button type="button" class="text-button danger delete-entry" data-action="delete" data-id="${esc(entry.id)}">移到回收站</button>` : ''}<span id="draft-status" role="status">${!entry && (draft.content || draft.title || draft.tags?.length || draft.tagText) ? '已恢复草稿' : ''}</span></div><button type="submit" class="primary">${icon('check')}${entry ? '保存修改' : '收好这一刻'}</button></div></form>`, 'editor-dialog');
+  editorId = entry?.id || null;
+  editorTags = mountEntryTags(modalRoot.querySelector('.editor-tags'), { tags: data.tags, tagText: draft.tagText, onChange: scheduleDraft });
   editorAttachments = (entry?.media || []).map(media => ({ key: crypto.randomUUID(), kind: 'media', media }));
   renderEditorPreviews();
 }
@@ -368,6 +369,15 @@ document.addEventListener('click', async event => {
       case 'edit': openEditor(state.entries.find(e => e.id === id)); break;
       case 'close': closeModal(); break;
       case 'open-search': showMobileSearch(button); break;
+      case 'open-feed-date': showFeedDatePicker(button); break;
+      case 'apply-feed-date':
+        filters.month = value.slice(0, 7);
+        selectedDay = value.length === 10 ? value : '';
+        if (filters.month) calendarCursor = filters.month;
+        closeModal();
+        render();
+        window.scrollTo({ top: 0 });
+        break;
       case 'filter-type': filters.type = value; render(); break;
       case 'filter-tag': filters.tag = filters.tag === value ? '' : value; render(); break;
       case 'filter-media': filters.mediaType = value; render(); break;
@@ -387,10 +397,13 @@ document.addEventListener('click', async event => {
       case 'remove-media': editorAttachments.splice(Number(index), 1); renderEditorPreviews(); break;
       case 'calendar-day':
         selectedDay = selectedDay === value ? '' : value;
-        if (selectedDay && filters.month !== selectedDay.slice(0, 7)) filters.month = '';
+        filters.month = value.slice(0, 7);
         render();
         break;
-      case 'calendar-prev': case 'calendar-next': { const [y, m] = calendarCursor.split('-').map(Number), d = new Date(Date.UTC(y, m - 1 + (action === 'calendar-next' ? 1 : -1), 1)); calendarCursor = d.toISOString().slice(0, 7); render(); break; }
+      case 'calendar-prev': case 'calendar-next':
+        calendarCursor = shiftCalendarMonth(calendarCursor, action === 'calendar-next' ? 1 : -1);
+        render();
+        break;
       case 'add-anniversary': document.querySelector('#anniversary-fields').insertAdjacentHTML('beforeend', anniversaryFields()); mountDatePickers(app); break;
       case 'remove-anniversary': button.closest('.anniversary-fields').remove(); break;
       case 'export-mine': button.disabled = true; await exportData('mine'); button.disabled = false; break;
@@ -434,23 +447,26 @@ function clearDrafts() { try { Object.keys(sessionStorage).filter(k => k.startsW
 function persistDraft() {
   try {
     const form = document.querySelector('#entry-form');
-    if (!form || editorId || !state.currentUser) return;
+    if (!form || !editorTags || editorId || !state.currentUser) return;
     const data = Object.fromEntries(new FormData(form));
     data.occurredAt += ':00+08:00';
-    data.tags = (data.tags || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    Object.assign(data, editorTags.draft());
     sessionStorage.setItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`, JSON.stringify(data));
     const status = document.querySelector('#draft-status');
     if (status) status.textContent = '草稿已保存';
   } catch {}
+}
+function scheduleDraft() {
+  if (editorId) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(persistDraft, 250);
 }
 
 function updateSearch(input) { filters.query = input.value; clearTimeout(searchTimer); searchTimer = setTimeout(render, 250); }
 document.addEventListener('compositionend', event => { if (event.target.id === 'search') updateSearch(event.target); });
 document.addEventListener('input', event => {
   if (event.target.id === 'search' && !event.isComposing) updateSearch(event.target);
-  if (event.target.closest('#entry-form') && !editorId && event.target.type !== 'file') {
-    clearTimeout(draftTimer); draftTimer = setTimeout(persistDraft, 250);
-  }
+  if (event.target.closest('#entry-form') && !event.target.closest('.editor-tags') && event.target.type !== 'file') scheduleDraft();
 });
 document.addEventListener('change', async event => {
   try {
@@ -464,14 +480,7 @@ document.addEventListener('change', async event => {
     if (['user-switch', 'mobile-user-switch'].includes(event.target.id)) { await provider.switchUser(event.target.value); closeModal(); render(); }
     if (event.target.id === 'filter-author') { filters.authorId = event.target.value; render(); }
     if (event.target.id === 'filter-mood') { filters.mood = event.target.value; render(); }
-    if (event.target.id === 'filter-month' || event.target.id === 'filter-feed-month') {
-      filters.month = event.target.value;
-      if (event.target.id === 'filter-feed-month') {
-        selectedDay = '';
-        if (filters.month) calendarCursor = filters.month;
-      }
-      render();
-    }
+    if (event.target.id === 'filter-month') { filters.month = event.target.value; render(); }
     if (event.target.id === 'media-input') { editorAttachments.push(...[...event.target.files].map(file => ({ key: crypto.randomUUID(), kind: 'file', file }))); event.target.value = ''; renderEditorPreviews(); }
   } catch (error) { toast(error.message, true); }
 });
@@ -494,10 +503,12 @@ document.addEventListener('submit', async event => {
   try {
     const data = Object.fromEntries(new FormData(form));
     if (form.id === 'entry-form') {
+      const tags = editorTags.validatedTags();
+      if (!tags) return;
       const previous = editorId ? state.entries.find(e => e.id === editorId) : {};
       let fileIndex = 0;
       const mediaOrder = editorAttachments.map(item => item.kind === 'media' ? { id: item.media.id } : { fileIndex: fileIndex++ });
-      const saved = await provider.saveEntry({ ...previous, title: data.title.trim(), content: data.content.trim(), type: data.type, occurredAt: `${data.occurredAt}:00+08:00`, mood: data.mood || null, tags: (data.tags || '').split(/[,，]/).map(s => s.trim()).filter(Boolean), media: editorAttachments.filter(item => item.kind === 'media').map(item => item.media), mediaOrder }, editorAttachments.filter(item => item.kind === 'file').map(item => item.file));
+      const saved = await provider.saveEntry({ ...previous, title: data.title.trim(), content: data.content.trim(), type: data.type, occurredAt: `${data.occurredAt}:00+08:00`, mood: data.mood || null, tags, media: editorAttachments.filter(item => item.kind === 'media').map(item => item.media), mediaOrder }, editorAttachments.filter(item => item.kind === 'file').map(item => item.file));
       sessionStorage.removeItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`); closeModal(false); render(); toast(saved?.cleanupWarning || (editorId ? '细节已经好好收好了。' : '这一刻，已经留住了。'));
     } else if (form.id === 'settings-form') {
       if (!state.currentUser) throw new Error('请先登录。');
@@ -525,7 +536,7 @@ document.addEventListener('submit', async event => {
 window.addEventListener('hashchange', () => {
   if (bootPending || (!provider && CONFIG.mode !== 'preview')) return;
   clearTimeout(searchTimer);
-  if (modalRoot.querySelector('.search-dialog')) closeModal();
+  if (modalRoot.querySelector('.search-dialog, .feed-date-dialog')) closeModal();
   selectedDay = '';
   Object.assign(filters, { query: '', tag: '', month: '', type: route() === 'events' ? 'event' : 'all' });
   render();

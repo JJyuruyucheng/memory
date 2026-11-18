@@ -2,6 +2,14 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 11, date: '2026-11-18', version: 'v0.8.0', title: '小标签与日期筛选',
+    changes: [
+      '登记和编辑记录时至少填写一个小标签，已有标签在弹窗内按整行宽度排列，可直接点选。',
+      '输入中英文逗号即可生成 #标签，按退格可把前一个标签还原为文字继续编辑，草稿会保留已选和未输完的标签。',
+      '时光线、重要时刻和收藏的日期选择器支持筛选整月或具体一天。',
+    ],
+  },
+  {
     number: 10, date: '2026-11-18', version: 'v0.7.1', title: '手机顶栏搜索与月份筛选',
     changes: [
       '手机上的时光线、重要时刻和收藏通过顶栏放大镜打开搜索弹窗。',
