@@ -144,6 +144,7 @@ export function mountAssistant(host, ask) {
       turn = { question, context, previous, node: showMessage('user', question) };
     }
     const attempt = new AbortController();
+    let answered = false;
     const attemptSignal = AbortSignal.any([attempt.signal, signal]);
     const messages = requestHistory(transcript, question);
     pending = attempt;
@@ -158,6 +159,7 @@ export function mountAssistant(host, ask) {
       if (attemptSignal.aborted || pending !== attempt) return;
       transcript.push({ role: 'user', content: question }, { role: 'assistant', content: reply });
       showMessage('assistant', reply, sources, incomplete);
+      answered = true;
       if (sources.length === 1 && sources[0].href.startsWith('#timeline?entry=')) referenceSlug = sources[0].href.slice(16);
       turn = null;
       showStatus(null);
@@ -169,7 +171,7 @@ export function mountAssistant(host, ask) {
     } finally {
       if (pending === attempt) {
         pending = null;
-        motion.setThinking(false);
+        motion.setThinking(false, answered);
         updateControls();
         scrollToLatest();
       }
@@ -192,7 +194,7 @@ export function mountAssistant(host, ask) {
     (mobile ? heading : input).focus({ preventScroll: true });
     scrollToLatest();
   }
-  launcher.addEventListener('click', () => { if (panel.hidden) open(); else close(); }, { signal });
+  launcher.addEventListener('click', () => { if (panel.hidden) open(); else close(); motion.poke(); }, { signal });
   select.addEventListener('change', () => { select.title = select.value; }, { signal });
   reference.querySelector('button').addEventListener('click', () => { selectedRecord = null; updateControls(); input.focus(); }, { signal });
   root.querySelector('.tabby-close').addEventListener('click', close, { signal });

@@ -1,4 +1,4 @@
-import { BGM_BUCKET, MUSIC_UUID, audioFileType, musicState } from './background-music-data.js';
+import { BGM_BUCKET, MUSIC_UUID, musicFileType, musicState } from './background-music-data.js';
 import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, toUtcIso, validateEntry } from './domain.js';
 import { planAttachmentOrder, resolveAttachmentOrder } from './attachment-order.js';
 import { MAX_PROFILE_NAME, validAvatarJpeg } from './profile.js';
@@ -325,15 +325,15 @@ export function createSupabaseProvider(config = {}) {
       const expected = generation;
       requireUser(expected);
       const requestSignal = signal ? AbortSignal.any([sessionController.signal, signal]) : sessionController.signal;
-      const lookup = client.from('background_music').select('revision,current_id,tracks').eq('id', 1);
+      const lookup = client.from('background_music').select('revision,current_id,play_mode,tracks').eq('id', 1);
       const staleOnly = Number.isSafeInteger(revision);
       const value = await result((staleOnly ? lookup.gt('revision', revision).maybeSingle() : lookup.single()).abortSignal(requestSignal), expected, { allowNull: staleOnly });
       return value ? musicState(value) : null;
     },
     saveMusic: (value, version) => enqueue(async expected => {
-      const { current_id, tracks } = musicState(value);
-      const saved = await result(query(client.from('background_music').update({ current_id, tracks }).eq('id', 1)
-        .eq('revision', version).select('revision,current_id,tracks').maybeSingle()), expected, { allowNull: true });
+      const { current_id, play_mode, tracks } = musicState(value);
+      const saved = await result(query(client.from('background_music').update({ current_id, play_mode, tracks }).eq('id', 1)
+        .eq('revision', version).select('revision,current_id,play_mode,tracks').maybeSingle()), expected, { allowNull: true });
       if (!saved) throw new SupabaseProviderError('另一位成员刚更新了歌单，请重试。', 'CONFLICT', 409);
       return musicState(saved);
     }),
@@ -345,7 +345,7 @@ export function createSupabaseProvider(config = {}) {
       return result(client.storage.from(BGM_BUCKET).download(id, {}, { signal: requestSignal, cache: 'no-store' }), expected);
     },
     uploadMusicFile: (file, mime) => enqueue(async expected => {
-      if (!(file instanceof Blob) || !mime || mime !== audioFileType(file)) throw new SupabaseProviderError('请选择受支持的音频文件。', 'VALIDATION');
+      if (!(file instanceof Blob) || !mime || mime !== musicFileType(file)) throw new SupabaseProviderError('请选择音频或 LRC 歌词文件。', 'VALIDATION');
       const id = crypto.randomUUID();
       await result(client.storage.from(BGM_BUCKET).upload(id, file, { contentType: mime, cacheControl: '0', upsert: false }), expected);
       return id;

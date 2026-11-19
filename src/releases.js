@@ -2,6 +2,15 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 19, date: '2026-11-19', version: 'v0.14.0', title: '立体瓜子、圆形播放器与紧凑设置',
+    changes: [
+      '瓜子换成实时 3D 狸花猫，会走、跑、跳、蜷睡和贴边探头。收到回复会开心，连续被戳时会短暂闹脾气。',
+      '音乐入口可拖拽并贴四边收起。圆形播放器支持上一首、下一首、随机和顺序播放，歌单按需打开。',
+      '设置页可上传 LRC 歌词。点「词」后随音乐显示，页面为歌词预留位置。',
+      '「我们与设置」改为紧凑布局，共同空间、纪念日和工具并排，歌单按网格展示。',
+    ],
+  },
+  {
     number: 18, date: '2026-11-18', version: 'v0.13.0', title: '瓜子读记录、共同歌单与使用时长',
     changes: [
       '瓜子可按标题、作者或标签查找已发布的共享记录，记录旁也能直接点「问瓜子」。',

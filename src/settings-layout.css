@@ -1,0 +1,54 @@
+.settings-board { --settings-card-pad: 15px; display: grid; gap: 12px; }
+.settings-title.page-heading { align-items: center; margin-bottom: 14px; }
+.settings-title.page-heading .primary { display: inline-flex; min-height: 38px; padding: 6px 11px; }
+.settings-board .settings-form, .settings-board .settings-utilities {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px;
+}
+.settings-board .settings-section, .settings-board .settings-section:first-child {
+  display: block; min-width: 0; padding: var(--settings-card-pad) 17px; border: 0; border-radius: 12px;
+  background: var(--surface);
+}
+.settings-board .settings-section :is(fieldset, .settings-actions) { padding: 0; border: 0; background: transparent; }
+.settings-board .settings-section h2 { font-size: 15px; font-weight: 650; }
+.settings-board .settings-form section > h2, .settings-card-head { margin-bottom: 8px; }
+.settings-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; }
+.settings-card-head .text-button { min-height: 27px; padding: 2px 0 2px 6px; font-size: 12px; }
+.settings-card-head .icon { width: 15px; height: 15px; }
+.settings-board .settings-space-fields {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px;
+}
+.settings-board .settings-space-fields > label { display: grid; gap: 4px; min-width: 0; margin: 0; font-size: 12px; }
+.settings-board .settings-space-fields > label:last-child { grid-column: 1 / -1; }
+.settings-board input:not([type='checkbox']) { width: 100%; min-width: 0; }
+.settings-board .settings-space-fields input:not([type='hidden']) { margin-top: 0; }
+.settings-board #anniversary-fields:empty { min-height: 12px; }
+.settings-board .anniversary-fields {
+  grid-template-columns: minmax(0, 1fr) minmax(90px, .62fr) auto 30px; align-items: center;
+  gap: 6px; margin: 0 0 6px;
+}
+.settings-board .anniversary-fields :is(label, .icon-button) { margin: 0; }
+.settings-board .anniversary-fields :is(.checkbox-label, .icon-button) { grid-area: auto; }
+.settings-board .anniversary-fields .icon-button { width: 30px; }
+.settings-board .anniversary-fields .date-picker-input { padding-right: 24px !important; background-position: right 4px center !important; background-size: 15px; }
+.settings-board .settings-actions { display: flex; flex-flow: row wrap; align-items: center; gap: 7px; margin-top: 8px; }
+.settings-board .settings-actions > :is(button, a) { width: auto; margin: 0; padding: 5px 10px; min-height: 34px; font-size: 12px; }
+.settings-board .settings-shortcuts { margin: 0; }
+@media (max-width: 950px) {
+  .settings-board .settings-form { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .settings-board { --settings-card-pad: 12px; gap: 9px; }
+  .settings-board :is(.settings-form, .settings-utilities) { gap: 9px; }
+  .settings-board .settings-section, .settings-board .settings-section:first-child { padding-inline: 12px; }
+  .settings-board .settings-space-fields { gap: 6px; }
+  .settings-board .settings-form input:not([type='checkbox'], [type='hidden']) { min-height: 35px; height: 35px; }
+  .settings-board .anniversary-fields { grid-template-columns: minmax(0, 1fr) 104px auto 24px; }
+  .settings-board .anniversary-fields .icon-button { width: 24px; }
+  .settings-board .settings-shortcuts { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; }
+  .settings-board .settings-shortcuts .nav-link { flex: auto; justify-content: center; min-height: 38px; padding: 6px 8px; }
+  .settings-board .settings-shortcuts .icon { width: 15px; height: 15px; }
+  .settings-board .settings-utilities { grid-template-columns: minmax(0, 1fr); }
+  .settings-board .settings-utilities .settings-section { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+  .settings-board .settings-utilities .settings-actions { margin-top: 0; }
+  .settings-board .settings-actions > :is(button, a) { min-height: 38px; }
+}

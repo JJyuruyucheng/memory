@@ -5,6 +5,7 @@
 @import url('./profile-editor.css');
 @import url('./assistant-chat.css');
 @import url('./background-music.css');
+@import url('./settings-layout.css');
 .select-field{white-space:nowrap}
 .media-unavailable{display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:150px;background:var(--raised);color:var(--muted);text-align:center;font-size:12px}.album-item:disabled{cursor:default;opacity:1}
 

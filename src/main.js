@@ -27,6 +27,7 @@ const app = document.querySelector('#app');
 const modalRoot = document.querySelector('#modal-root');
 const assistantRoot = document.querySelector('#assistant-root');
 const musicRoot = document.querySelector('#bgm-root');
+const scrollToPageTop = () => (document.body.classList.contains('has-bgm-lyrics') ? app : window).scrollTo({ top: 0 });
 let provider, loginVerification, loginPhotos, loginCarousel, loginPhotoEditor, mediaViewer, profileEditor;
 let assistant, assistantIdentity, backgroundMusic, stopUsage;
 const moodNames = { happy: '微笑', neutral: '一般', sad: '难受', unset: '未填写' };
@@ -177,7 +178,7 @@ function heading(title, subtitle, action = true) {
     <input id="search" name="query" type="search" value="${esc(filters.query)}" placeholder="搜索回忆…" autocomplete="off" />
     <button type="submit" aria-label="搜索回忆">${icon('search')}</button>
   </form>`;
-  return `<header class="page-heading"><div><h1>${title}</h1><p>${subtitle}</p></div>${searchable ? `<div class="page-heading-actions">${search}${compose}</div>` : compose}</header>`;
+  return `<header class="page-heading"><div><h1>${title}</h1>${subtitle ? `<p>${subtitle}</p>` : ''}</div>${searchable ? `<div class="page-heading-actions">${search}${compose}</div>` : compose}</header>`;
 }
 function renderView(stats) {
   switch (route()) {
@@ -273,7 +274,7 @@ function renderAnniversaries() {
   return `${heading('值得记住的日子', '有些日期，一想到就会嘴角上扬。', false)}<div class="anniversary-grid">${anniversaries.map(a => `<article class="anniversary-card">${icon('calendar')}<h2>${esc(a.title)}</h2><p>${esc(a.date)}${a.yearly ? ' · 每年纪念' : ''}</p><div class="num">${a.isToday ? '今天' : a.isPast ? '已珍藏' : a.daysUntil}<small>${!a.isToday && !a.isPast ? '天后' : ''}</small></div><span>${a.isPast ? '这一页已经成为回忆' : a.isToday ? '把今天也好好记下来' : `下一次：${esc(a.nextDate)}`}</span></article>`).join('') || '<div class="empty-state"><h2>留一个日子，给期待</h2><p>在“我们与设置”中添加纪念日。</p></div>'}</div><a href="#us" class="secondary inline-button">${icon('settings')}管理纪念日</a>`;
 }
 function renderLoginPhotoSettings() {
-  return loginPhotos ? `<section class="settings-section login-photo-settings"><div><h2>登录页照片</h2><p>你们都可以新增、替换和调整顺序。</p></div><div class="settings-actions"><div class="login-photo-settings-copy">${icon('photo')}<span>留一组合照，装点回家的第一眼。</span></div><button class="secondary" data-action="login-photos">${icon('edit')}编辑登录页照片</button></div></section>` : '';
+  return loginPhotos ? `<section class="settings-section login-photo-settings"><h2>登录页照片</h2><div class="settings-actions"><button class="secondary" data-action="login-photos">${icon('edit')}编辑照片</button></div></section>` : '';
 }
 function mountLoginPhotoStory() {
   const story = app.querySelector('.login-story');
@@ -287,21 +288,32 @@ function loadOptionalLoginPhotos(create) {
     loginPhotos = photos;
     if (bootPending) return;
     if (!state.currentUser) { mountLoginPhotoStory(); return; }
-    const form = app.querySelector('#settings-form');
-    if (route() === 'us' && form && !app.querySelector('.login-photo-settings')) {
+    const utilities = app.querySelector('.settings-utilities');
+    if (route() === 'us' && utilities && !app.querySelector('.login-photo-settings')) {
       // Keep the actual form nodes, focus, and any unsaved shared settings intact.
-      form.insertAdjacentHTML('afterend', renderLoginPhotoSettings());
+      utilities.insertAdjacentHTML('afterbegin', renderLoginPhotoSettings());
     }
   }).catch(() => {}); // Keep the original login story and ordinary settings when the optional feature fails.
 }
 function renderSettings() {
-  return `${heading('我们与这个小世界', '把喜欢的称呼，和故事的开头留在这里。', false)}<nav class="settings-shortcuts" aria-label="更多回忆入口">${navLink(['favorites', 'bookmark', '我的收藏'])}${navLink(['anniversaries', 'heart', '纪念日'])}${navLink(['trash', 'trash', '回收站'])}${state.currentUser.role === 'admin' ? navLink(['admin', 'shield', '管理小屋']) : ''}</nav><form id="settings-form" class="settings-form">
-    <section class="settings-section"><div><h2>共同空间</h2><p>会显示在首页，也会和回忆一起导出。</p></div><fieldset><label>空间名字<input name="spaceName" value="${esc(state.settings.spaceName)}" maxlength="30" required /></label><label>一句喜欢的话<input name="subtitle" value="${esc(state.settings.subtitle || '')}" maxlength="80" /></label><label>故事开始的那天<input name="startDate" type="date" value="${esc(state.settings.startDate)}" required /></label></fieldset></section>
-    <section class="settings-section"><div><h2>纪念日</h2><p>每年重复的日子，会自动计算下一次相遇。</p></div><fieldset><div id="anniversary-fields">${(state.settings.anniversaries || []).map(a => anniversaryFields(a)).join('')}</div><button type="button" class="text-button" data-action="add-anniversary">${icon('plus')}加一个日子</button></fieldset></section>
-    <div class="settings-submit"><button type="submit" class="primary">保存我们的小世界</button></div></form>
-    ${renderLoginPhotoSettings()}
-    ${provider?.loadMusic ? '<section class="settings-section"><div><h2>背景音乐</h2><p>共同歌单 · 拖动手柄调整播放顺序</p></div><div id="bgm-settings" class="settings-actions"></div></section>' : ''}
-    <section class="settings-section"><div><h2>数据与账号</h2><p>${CONFIG.mode === 'demo' ? '试写记录保存在此浏览器；清理网站数据会丢失它们。' : '导出仅包含当前账号可见的回忆和媒体，请妥善保存。'}</p></div><div class="settings-actions"><button class="secondary" data-action="export-mine">${icon('download')}导出我写的回忆</button><button class="secondary" data-action="export-all">导出可见共同档案</button>${CONFIG.mode === 'demo' ? '<button class="text-button danger" data-action="reset-demo">恢复初始演示内容</button>' : '<button class="text-button" data-action="logout">退出当前账号</button>'}</div></section>`;
+  return `<header class="page-heading settings-title"><h1>我们与设置</h1><button class="primary" form="settings-form" type="submit">保存设置</button></header><div class="settings-board" data-ui>
+    <nav class="settings-shortcuts" aria-label="更多回忆入口">${navLink(['favorites', 'bookmark', '我的收藏'])}${navLink(['anniversaries', 'heart', '纪念日'])}${navLink(['trash', 'trash', '回收站'])}${state.currentUser.role === 'admin' ? navLink(['admin', 'shield', '管理小屋']) : ''}</nav>
+    <form id="settings-form" class="settings-form">
+      <section class="settings-section"><h2>共同空间</h2><fieldset class="settings-space-fields">
+        <label>空间名字<input name="spaceName" value="${esc(state.settings.spaceName)}" maxlength="30" required /></label>
+        <label>开始日期<input name="startDate" type="date" value="${esc(state.settings.startDate)}" required /></label>
+        <label>一句喜欢的话<input name="subtitle" value="${esc(state.settings.subtitle || '')}" maxlength="80" /></label>
+      </fieldset></section>
+      <section class="settings-section"><div class="settings-card-head"><h2>纪念日</h2><button type="button" class="text-button" data-action="add-anniversary">${icon('plus')}加一个日子</button></div>
+        <fieldset><div id="anniversary-fields">${(state.settings.anniversaries || []).map(a => anniversaryFields(a)).join('')}</div></fieldset>
+      </section>
+    </form>
+    ${provider?.loadMusic ? '<section id="bgm-settings" class="settings-section settings-music"></section>' : ''}
+    <div class="settings-utilities">
+      ${renderLoginPhotoSettings()}
+      <section class="settings-section"><h2>数据与账号</h2><div class="settings-actions"><button class="secondary" data-action="export-mine">${icon('download')}导出我的回忆</button><button class="secondary" data-action="export-all">导出共同档案</button>${CONFIG.mode === 'demo' ? '<button class="text-button danger" data-action="reset-demo">恢复初始示例</button>' : '<button class="text-button" data-action="logout">退出当前账号</button>'}</div></section>
+    </div>
+  </div>`;
 }
 function anniversaryFields(a = {}) { return `<div class="anniversary-fields" data-anniversary="${esc(a.id || crypto.randomUUID())}"><label><span class="sr-only">纪念日名字</span><input name="ann-title" placeholder="例如：第一次见面" value="${esc(a.title || '')}" maxlength="40" required /></label><label><span class="sr-only">纪念日期</span><input name="ann-date" type="date" value="${esc(a.date || '')}" required /></label><label class="checkbox-label"><input name="ann-yearly" type="checkbox" ${a.yearly ? 'checked' : ''} />每年</label><button type="button" class="icon-button" data-action="remove-anniversary" aria-label="移除纪念日">${icon('close')}</button></div>`; }
 function renderAdmin(stats) {
@@ -514,7 +526,7 @@ document.addEventListener('click', async event => {
         if (filters.month) calendarCursor = filters.month;
         closeModal();
         render();
-        window.scrollTo({ top: 0 });
+        scrollToPageTop();
         break;
       case 'filter-type': filters.type = value; render(); break;
       case 'filter-tag': filters.tag = filters.tag === value ? '' : value; render(); break;
@@ -638,7 +650,7 @@ document.addEventListener('submit', async event => {
     const mobile = form.id === 'mobile-search-form';
     if (mobile) closeModal();
     render();
-    if (mobile) window.scrollTo({ top: 0 });
+    if (mobile) scrollToPageTop();
     return;
   }
   if (!['entry-form', 'settings-form', 'comment-form', 'login-form'].includes(form.id)) return;
@@ -688,7 +700,7 @@ window.addEventListener('hashchange', () => {
   Object.assign(filters, { query: '', tag: '', month: '', type: route() === 'events' ? 'event' : 'all' });
   render();
   openLinkedEntry();
-  window.scrollTo({ top: 0 });
+  scrollToPageTop();
 });
 window.addEventListener('memory:session-ended', () => {
   unmountEntryPreviews?.();

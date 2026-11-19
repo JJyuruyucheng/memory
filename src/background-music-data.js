@@ -3,12 +3,39 @@ export const BGM_MAX_BYTES = 25 * 1024 * 1024;
 export const MUSIC_UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const extensions = { mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac' };
 export const BGM_ACCEPT = Object.keys(extensions).map(ext => `.${ext}`).join(',');
+export const LYRICS_MAX_BYTES = 64 * 1024;
 
 export function audioFileType(file) {
   if (!file || !Number.isInteger(file.size) || file.size < 1 || file.size > BGM_MAX_BYTES) return '';
   const extension = extensions[file.name?.split('.').at(-1)?.toLowerCase()];
   if (extension && (!file.type || file.type === 'application/octet-stream' || file.type.startsWith('audio/'))) return extension;
   return Object.values(extensions).includes(file.type) ? file.type : '';
+}
+
+export function musicFileType(file) {
+  if (/\.lrc$/i.test(file?.name || '') && file.size > 0 && file.size <= LYRICS_MAX_BYTES) return 'text/plain';
+  return audioFileType(file);
+}
+
+export function parseLyrics(content) {
+  const stamp = /\[(\d{1,3}):([0-5]\d)(?:[.:](\d{1,3}))?\]/g;
+  const offset = Number(content.match(/^\[offset:\s*([+-]?\d+)\]/mi)?.[1] ?? 0) / 1000;
+  return content.split(/\r?\n/).flatMap(line => {
+    const text = line.replace(stamp, '').trim();
+    if (!text) return [];
+    return Array.from(line.matchAll(stamp), ([, minute, second, fraction]) => ({
+      time: Math.max(0, Number(minute) * 60 + Number(second) + Number(`0.${fraction ?? 0}`) + offset), text,
+    }));
+  }).sort((a, b) => a.time - b.time);
+}
+
+export function adjacentTrack(tracks, current, direction, shuffle = false, previous) {
+  const index = tracks.findIndex(track => track.id === current);
+  if (tracks.length < 2 || index < 0) return tracks[0];
+  if (!shuffle) return tracks[(index + direction + tracks.length) % tracks.length];
+  if (direction < 0 && previous) return tracks.find(track => track.id === previous) ?? tracks[index];
+  const choices = tracks.filter(track => track.id !== current);
+  return choices[Math.floor(Math.random() * choices.length)];
 }
 
 export function musicState(value) {
@@ -18,8 +45,10 @@ export function musicState(value) {
     if (!track || !MUSIC_UUID.test(track.id) || seen.has(track.id) || typeof track.title !== 'string' || !track.title.trim()
       || typeof track.artist !== 'string' || (track.audio !== null && !MUSIC_UUID.test(track.audio))) throw new Error('歌单中有无法读取的曲目。');
     seen.add(track.id);
-    return { id: track.id, title: track.title, artist: track.artist, audio: track.audio };
+    const normalized = { id: track.id, title: track.title, artist: track.artist, audio: track.audio };
+    if (MUSIC_UUID.test(track.lyrics || '')) normalized.lyrics = track.lyrics;
+    return normalized;
   });
   if (value.current_id !== null && !seen.has(value.current_id)) throw new Error('当前曲目无法读取。');
-  return { revision: value.revision, current_id: value.current_id, tracks };
+  return { revision: value.revision, current_id: value.current_id, play_mode: value.play_mode === 'shuffle' ? 'shuffle' : 'sequence', tracks };
 }
