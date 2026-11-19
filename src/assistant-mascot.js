@@ -1,3 +1,5 @@
+import { mountTabbyMotion } from './tabby-motion.js';
+
 const NAP_AFTER_MS = 18000;
 
 export const tabbyArt = name => `./assets/assistant/tabby-${name}.png`;
@@ -5,11 +7,11 @@ export const tabbyArt = name => `./assets/assistant/tabby-${name}.png`;
 export function mascotMarkup() {
   return `<span class="tabby-mascot" aria-hidden="true">
     <span class="tabby-floor"></span>
-    <canvas class="tabby-render"></canvas>
-    ${[['active', 'welcome'], ['thinking', 'thinking'], ['sleeping', 'idle']].map(([pose, art]) =>
+    <span class="tabby-motion"></span>
+    ${[['active', 'welcome'], ['thinking', 'thinking'], ['sleeping', 'idle'], ['annoyed', 'retry']].map(([pose, art]) =>
       `<img class="tabby-pose tabby-pose-${pose}" src="${tabbyArt(art)}" alt="" draggable="false" />`).join('')}
     <span class="tabby-snooze"><span>z</span><span>Z</span></span>
-    <span class="tabby-peek"><img src="${tabbyArt('launcher')}" alt="" draggable="false" /></span>
+    <span class="tabby-peek"><img src="./assets/app-cat-head-192.png" alt="" draggable="false" /></span>
   </span>`;
 }
 
@@ -32,9 +34,7 @@ export function mountAssistantMascot(launcher, signal) {
   setPose('ready');
   launcher.addEventListener('pointerdown', wake, { signal });
   launcher.addEventListener('pointerup', wake, { signal });
-  void import('./tabby-scene.js').then(({ mountTabbyScene }) => !signal.aborted &&
-    mountTabbyScene(launcher.querySelector('canvas'), launcher, signal)
-  ).catch(() => { /* The supplied pose art is also available without WebGL. */ });
+  if (!launcher.classList.contains('is-locked')) void mountTabbyMotion(launcher, signal).catch(() => {});
   signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
 
   return { wake, poke, setThinking(value, answered = false) {

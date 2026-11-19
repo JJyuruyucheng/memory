@@ -12,27 +12,32 @@ function storedPosition(key, initial) {
   return { ...initial };
 }
 
-export function mountFloatingPosition(root, launcher, { storageKey, initial, half = false, onLayout, signal }) {
+export function mountFloatingPosition(root, launcher, {
+  storageKey, initial, half = false, dockable = true, handle = launcher,
+  avoidPlayer = true, avoidLyrics = true, onDrop, onLayout, signal,
+}) {
   const visual = window.visualViewport;
   const position = storageKey ? storedPosition(storageKey, initial) : { ...initial };
+  if (!dockable) position.dock = '';
   let press, suppressClick = false, timer;
 
   function bounds() {
     const mobile = matchMedia('(max-width: 760px)').matches;
-    const margin = half || mobile ? 12 : 22;
+    const margin = half || !dockable || mobile ? 12 : 22;
     const viewportLeft = visual?.offsetLeft ?? 0;
     const viewportTop = visual?.offsetTop ?? 0;
     const insets = getComputedStyle(root);
     const left = viewportLeft + (parseFloat(insets.paddingLeft) || 0) + margin;
-    const panelBottom = document.querySelector('.bgm-panel:not([hidden])')?.getBoundingClientRect().bottom || 0;
-    const top = Math.max(viewportTop + (parseFloat(insets.paddingTop) || 0), panelBottom) + margin;
+    const body = document.body.style;
+    const playerSpace = avoidPlayer ? parseFloat(body.getPropertyValue('--bgm-panel-space')) || 0 : 0;
+    const lyricSpace = avoidLyrics ? parseFloat(body.getPropertyValue('--bgm-caption-space')) || 0 : 0;
+    const top = Math.max(viewportTop + (parseFloat(insets.paddingTop) || 0), playerSpace) + margin;
     const right = viewportLeft + (visual?.width ?? innerWidth) - (parseFloat(insets.paddingRight) || 0) - margin;
     const safeArea = parseFloat(insets.paddingBottom) || 0;
     const viewportBottom = viewportTop + (visual?.height ?? innerHeight) - safeArea;
     const navigation = mobile ? document.querySelector('.mobile-nav') : null;
     const navTop = navigation?.getBoundingClientRect().top ?? viewportBottom;
-    const lyricsTop = document.querySelector('.bgm-lyrics:not([hidden])')?.getBoundingClientRect().top;
-    return { left, top, right, bottom: Math.min(viewportBottom, navTop, lyricsTop ?? viewportBottom) - margin, mobile, margin };
+    return { left, top, right, bottom: Math.min(viewportBottom, navTop) - lyricSpace - margin, mobile, margin };
   }
 
   function layout({ left, top, right, bottom, mobile, margin } = bounds()) {
@@ -49,7 +54,7 @@ export function mountFloatingPosition(root, launcher, { storageKey, initial, hal
     if (dock === 'bottom') y = bottom + margin - (half ? height / 2 : height);
     launcher.style.left = `${x}px`;
     launcher.style.top = `${y}px`;
-    onLayout?.({ left, top, right, bottom, mobile, x, y, width, height });
+    onLayout?.({ left, top, right, bottom, mobile, margin, x, y, width, height });
   }
 
   const refresh = () => layout();
@@ -67,18 +72,18 @@ export function mountFloatingPosition(root, launcher, { storageKey, initial, hal
     launcher.classList.add('is-dragging');
   }
 
-  launcher.addEventListener('pointerdown', event => {
+  handle.addEventListener('pointerdown', event => {
     if (event.button !== 0 || !event.isPrimary) return;
     if (event.pointerType !== 'touch') event.preventDefault();
     suppressClick = false;
     const rect = launcher.getBoundingClientRect();
     press = { id: event.pointerId, x: event.clientX, y: event.clientY, moving: false, moved: false,
       grabX: (event.clientX - rect.left) / rect.width, grabY: (event.clientY - rect.top) / rect.height };
-    launcher.setPointerCapture(event.pointerId);
+    handle.setPointerCapture(event.pointerId);
     timer = setTimeout(startDrag, 280);
   }, { signal });
 
-  launcher.addEventListener('pointermove', event => {
+  handle.addEventListener('pointermove', event => {
     if (press?.id !== event.pointerId) return;
     if (!press.moved && Math.hypot(event.clientX - press.x, event.clientY - press.y) < 6) return;
     startDrag();
@@ -96,7 +101,7 @@ export function mountFloatingPosition(root, launcher, { storageKey, initial, hal
     position.y = clamp((y - top) / Math.max(1, bottom - top - height), 0, 1);
     const distances = [x - left, right - width - x, y - top, bottom - height - y];
     const closest = Math.min(...distances);
-    press.dock = closest <= DOCK_DISTANCE ? DOCK_SIDES[distances.indexOf(closest)] : '';
+    press.dock = dockable && closest <= DOCK_DISTANCE ? DOCK_SIDES[distances.indexOf(closest)] : '';
     layout(frame);
   }, { signal });
 
@@ -107,29 +112,49 @@ export function mountFloatingPosition(root, launcher, { storageKey, initial, hal
     if (press.moved) {
       position.dock = event.type === 'pointerup' ? press.dock : '';
       try { localStorage.setItem(storageKey, JSON.stringify(position)); } catch { /* Keep the in-page position. */ }
+      onDrop?.();
     }
     press = null;
     launcher.classList.remove('is-dragging');
     layout();
     // A captured touch near the viewport edge can finish without a native click.
     if (touchTap) {
-      launcher.click();
+      handle.click();
       suppressClick = true;
     }
   }
 
-  for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) launcher.addEventListener(event, endPress, { signal });
-  launcher.addEventListener('click', event => {
+  for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) handle.addEventListener(event, endPress, { signal });
+  handle.addEventListener('click', event => {
     if (suppressClick && (event.detail > 0 || event.pointerType === 'touch')) {
       event.preventDefault();
       event.stopImmediatePropagation();
     }
     suppressClick = false;
   }, { signal, capture: true });
-  launcher.addEventListener('dragstart', event => event.preventDefault(), { signal });
-  launcher.addEventListener('contextmenu', event => event.preventDefault(), { signal });
+  handle.addEventListener('dragstart', event => event.preventDefault(), { signal });
+  handle.addEventListener('contextmenu', event => event.preventDefault(), { signal });
   signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
   return refresh;
+}
+
+export function placeAdjacent(panel, { left, top, right, bottom, x, y, width, height }) {
+  const gap = 7, w = panel.offsetWidth, h = panel.offsetHeight;
+  const before = x - left - gap, after = right - x - width - gap;
+  const above = y - top - gap, below = bottom - y - height - gap;
+  let panelX, panelY;
+  if (Math.max(before, after) >= w) {
+    panelX = before >= after ? x - w - gap : x + width + gap;
+    panelY = y + (height - h) / 2;
+  } else {
+    panelX = x + (width - w) / 2;
+    panelY = below >= above ? y + height + gap : y - h - gap;
+  }
+  panelX = clamp(panelX, left, right - w);
+  panelY = clamp(panelY, top, bottom - h);
+  panel.style.left = `${panelX}px`;
+  panel.style.top = `${panelY}px`;
+  return panelY + h;
 }
 
 export function mountAssistantPosition(root, launcher, panel, { interactive, signal }) {

@@ -2,6 +2,14 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 21, date: '2026-11-19', version: 'v0.15.0', title: '瓜子动作帧与可移动歌词',
+    changes: [
+      '按瓜子的原图生成走、跑、跳的连续动作帧。贴边时露出完整猫脸和双耳。',
+      '透明音乐控件围绕音符按钮展开，拖动音符时一起移动。',
+      '歌词可独立拖动，并可在歌词样式中调整横排、竖排、字号和透明度。设置保存在当前浏览器。',
+    ],
+  },
+  {
     number: 20, date: '2026-11-19', version: 'v0.14.1', title: '原图瓜子与透明播放器',
     changes: [
       '播放器在页顶预留无底色的控制区，播放时音符按钮旁会依次弹出并渐隐五彩音符。',

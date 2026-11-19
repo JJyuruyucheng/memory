@@ -36,16 +36,18 @@
 }
 
 .bgm-panel {
-  position: absolute; inset: env(safe-area-inset-top, 0px) 0 auto;
-  display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
-  padding: 6px max(18px, env(safe-area-inset-right, 0px)) 6px max(18px, env(safe-area-inset-left, 0px));
-  color: var(--text); background: transparent; pointer-events: none;
+  position: absolute; width: max-content; max-width: calc(100vw - 24px);
+  display: flex; flex-direction: column; gap: 2px; padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--control) 68%, transparent); border-radius: 24px;
+  color: var(--text); background: color-mix(in srgb, var(--surface) 32%, transparent);
+  pointer-events: none;
 }
-.bgm-panel [hidden], .bgm-panel[hidden], .bgm-lyrics[hidden], #bgm-settings [hidden] { display: none; }
+.bgm-panel:has(ol:not([hidden])) { max-width: min(370px, calc(100vw - 24px)); border-radius: 17px; }
+.bgm-panel [hidden], .bgm-panel[hidden], .bgm-lyrics[hidden], .bgm-lyric-options[hidden], #bgm-settings [hidden] { display: none; }
 .bgm-controls { display: flex; align-items: center; justify-content: flex-end; gap: 10px; max-width: 100%; }
 .bgm-controls > [data-bgm='close'] { color: var(--muted); }
 .bgm-controls > [data-bgm='close'] .icon { width: 17px; height: 17px; }
-.bgm-now { min-width: 0; max-width: 185px; text-align: right; line-height: 1.22; }
+.bgm-now { min-width: 0; max-width: 115px; text-align: right; line-height: 1.22; }
 .bgm-now :is(strong, small) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bgm-now strong { font-size: 14px; }
 .bgm-now small { font-size: 10px; color: var(--muted); }
@@ -62,7 +64,7 @@
 .bgm-switches [data-bgm='mode'] { display: inline-flex; gap: 4px; align-items: center; border-radius: 20px; }
 .bgm-switches [data-bgm='mode'] .icon { width: 14px; height: 14px; }
 .bgm-panel ol {
-  display: flex; gap: 5px; max-width: min(100%, 650px); overflow-x: auto; scrollbar-width: thin;
+  display: flex; gap: 5px; max-width: 100%; overflow-x: auto; scrollbar-width: thin;
   margin: 0; padding: 0 1px 3px; list-style: none; pointer-events: auto;
 }
 .bgm-panel ol li { flex: none; }
@@ -74,22 +76,49 @@
 .bgm-panel .bgm-feedback { text-align: right; }
 .bgm-feedback:empty { display: none; }
 
-.has-bgm-layout { --bgm-nav-height: 0px; --bgm-caption-height: 0px; overflow: hidden; padding-bottom: 0; }
-.has-bgm-lyrics { --bgm-caption-height: 43px; }
+.has-bgm-layout { --bgm-nav-height: 0px; overflow: hidden; padding-bottom: 0; }
 .has-bgm-layout #app {
   margin-top: var(--bgm-panel-space, 0px); overflow-y: auto; overscroll-behavior: contain;
-  height: calc(100dvh - var(--bgm-panel-space, 0px) - var(--bgm-caption-height) - var(--bgm-nav-height));
+  height: calc(100dvh - var(--bgm-panel-space, 0px) - var(--bgm-caption-space, 0px) - var(--bgm-nav-height));
 }
 .has-bgm-layout.has-feed-layout .workspace { height: 100%; }
 .has-bgm-layout .sidebar { top: var(--bgm-panel-space, 0px); }
 .bgm-lyrics {
-  position: fixed; inset: auto max(22px, env(safe-area-inset-right, 0px)) var(--bgm-nav-height) auto;
-  display: flex; align-items: center; justify-content: flex-end;
-  height: var(--bgm-caption-height); max-width: min(570px, calc(100vw - 40px));
-  color: color-mix(in srgb, var(--text) 80%, transparent);
-  font-size: 14px; line-height: 1.32; text-align: right; pointer-events: none;
+  position: absolute; z-index: 2; display: flex; align-items: center; gap: 4px;
+  width: max-content; max-width: calc(100vw - 24px); color: var(--text); pointer-events: none;
 }
-.bgm-lyrics span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.bgm-lyric-line {
+  display: block; min-width: 35px; min-height: 35px; padding: 5px 11px; border-radius: 11px;
+  border: 1px solid color-mix(in srgb, var(--control) 63%, transparent);
+  background: color-mix(in srgb, var(--surface) 69%, transparent); opacity: var(--lyric-alpha);
+  font-size: var(--lyric-size); line-height: 1.4; text-align: left; pointer-events: auto;
+  cursor: grab; touch-action: none; user-select: none; -webkit-touch-callout: none;
+}
+.bgm-lyrics.is-dragging .bgm-lyric-line { cursor: grabbing; }
+.bgm-lyric-line > span { display: block; max-width: min(535px, calc(100vw - 92px)); overflow-wrap: anywhere; }
+.bgm-lyrics[data-direction='vertical'] { align-items: flex-start; }
+.bgm-lyrics[data-direction='vertical'] .bgm-lyric-line > span {
+  writing-mode: vertical-rl; text-orientation: mixed;
+  max-inline-size: min(46dvh, 315px);
+}
+.bgm-lyric-settings {
+  display: grid; place-items: center; flex: none; width: 31px; height: 31px; border-radius: 50%;
+  color: var(--accent); background: color-mix(in srgb, var(--surface) 68%, transparent); pointer-events: auto;
+}
+.bgm-lyric-settings .icon { width: 16px; height: 16px; }
+.bgm-lyric-settings:hover, .bgm-lyric-settings[aria-expanded='true'] { background: var(--active); }
+.bgm-lyric-options {
+  position: absolute; z-index: 3; width: 184px; display: grid; gap: 7px; padding: 10px;
+  border: 1px solid var(--control); border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent); color: var(--text); pointer-events: auto;
+}
+.bgm-lyric-directions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.bgm-lyric-directions button { min-height: 31px; border-radius: 6px; color: var(--muted); }
+.bgm-lyric-directions button[aria-pressed='true'] { background: var(--active); color: var(--primary); }
+.bgm-lyric-options label { display: grid; gap: 2px; font-size: 12px; }
+.bgm-lyric-options label > span { display: flex; justify-content: space-between; }
+.bgm-lyric-options output { color: var(--muted); font-variant-numeric: tabular-nums; }
+.bgm-lyric-options input[type='range'] { appearance: auto; width: 100%; min-height: 24px; margin: 0; padding: 0; accent-color: var(--accent); cursor: pointer; }
 
 .bgm-library-head { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
 .bgm-library-head .bgm-total { margin-right: auto; }
@@ -128,14 +157,12 @@
   .has-bgm .mobile-header { padding-right: 58px; }
   .has-bgm .page-heading { padding-right: 0; }
   .has-bgm-layout { --bgm-nav-height: 70px; }
-  .has-bgm-lyrics { --bgm-caption-height: 40px; }
   .bgm-trigger { width: 43px; height: 43px; }
-  .bgm-panel { padding-inline: 10px; }
+  .bgm-panel { padding-inline: 5px; }
   .bgm-controls { gap: 4px; }
   .bgm-controls button { min-width: 29px; }
   .bgm-controls > [data-bgm='close'] { min-width: 25px; }
   .bgm-panel ol small { display: none; }
-  .bgm-lyrics { right: 14px; font-size: 13px; }
   .bgm-track :is(.bgm-grip, .bgm-more) { height: 42px; }
 }
 @media (prefers-reduced-motion: reduce) { .bgm-widget.is-playing .bgm-sparks i { animation: none; } }

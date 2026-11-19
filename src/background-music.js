@@ -1,7 +1,8 @@
-import { mountFloatingPosition } from './assistant-position.js';
+import { mountFloatingPosition, placeAdjacent } from './assistant-position.js';
 import { adjacentTrack, lyricText, musicFileType, parseLyrics } from './background-music-data.js';
 import { escapeHtml as esc } from './domain.js';
 import { icon } from './icons.js';
+import { mountMusicCaptions } from './music-captions.js';
 import { mountMusicSettings } from './music-settings.js';
 
 function preference(name, value) {
@@ -29,12 +30,11 @@ export function mountBackgroundMusic(host, provider) {
       <p class="bgm-feedback" role="status"></p>
       <ol id="bgm-playlist" aria-label="播放列表" hidden></ol>
     </section>
-    <div class="bgm-lyrics" aria-label="当前歌词" hidden><span></span></div>
     <audio preload="none" hidden></audio></div>`;
 
   const widget = host.firstElementChild, trigger = widget.querySelector('.bgm-trigger'), panel = widget.querySelector('.bgm-panel');
   const sparks = widget.querySelector('.bgm-sparks'), app = document.querySelector('#app');
-  const audio = widget.querySelector('audio'), captions = widget.querySelector('.bgm-lyrics');
+  const audio = widget.querySelector('audio');
   const now = panel.querySelector('.bgm-now'), panelList = panel.querySelector('ol'), feedback = panel.querySelector('.bgm-feedback');
   const byAction = action => panel.querySelector(`[data-bgm="${action}"]`);
   const playButton = byAction('play');
@@ -42,6 +42,7 @@ export function mountBackgroundMusic(host, provider) {
   let enabled = preference(playPreference) !== 'off', lyricsOn = preference(lyricPreference) === 'on';
   let state, slot, library, working = false, sorting = false, blobUrl, loadedAudio, loading = false, mediaVersion = 0;
   let lyricsKey, lines = [], played = [];
+  let panelSpace = 0, captionSpace = 0;
   const current = () => state?.tracks.find(track => track.id === state.current_id);
 
   function message(value) {
@@ -49,45 +50,47 @@ export function mountBackgroundMusic(host, provider) {
     library?.message(value);
   }
 
-  mountFloatingPosition(widget, trigger, {
-    storageKey: 'chaoxi-bgm-position', initial: { x: 1, y: 0 }, half: true, signal,
-    onLayout({ left, right, x, y, width, height }) {
+  const placePlayer = mountFloatingPosition(widget, trigger, {
+    storageKey: 'chaoxi-bgm-position', initial: { x: 1, y: 0 }, half: true, avoidPlayer: false, signal,
+    onLayout(frame) {
+      const { left, top, right, x, y, width, height } = frame;
       const centerX = x + width / 2;
       sparks.style.left = `${centerX}px`;
       sparks.style.top = `${y + height / 2}px`;
       sparks.style.setProperty('--spark-side', centerX < (left + right) / 2 ? '1' : '-1');
       sparks.style.setProperty('--spark-rise', y < 0 ? '24px' : `-${Math.min(33, y + 10)}px`);
+      const end = panel.hidden ? 0 : placeAdjacent(panel, frame);
+      reserve(!panel.hidden && y <= top + 6 ? Math.ceil(Math.max(end, y + height) + 7) : 0, captionSpace);
     },
   });
-  function updateLayout() {
+  function reserve(header, footer) {
+    if (panelSpace === header && captionSpace === footer) return;
+    panelSpace = header;
+    captionSpace = footer;
     const { body } = document;
-    const height = panel.hidden ? 0 : Math.ceil(panel.getBoundingClientRect().bottom);
     const hadRoom = body.classList.contains('has-bgm-layout');
-    const needsRoom = height > 0 || !captions.hidden;
+    const needsRoom = header > 0 || footer > 0;
     const top = hadRoom ? app.scrollTop : window.scrollY;
     body.classList.toggle('has-bgm-layout', needsRoom);
-    body.classList.toggle('has-bgm-lyrics', !captions.hidden);
-    body.style.setProperty('--bgm-panel-space', `${height}px`);
+    body.style.setProperty('--bgm-panel-space', `${header}px`);
+    body.style.setProperty('--bgm-caption-space', `${footer}px`);
     if (hadRoom !== needsRoom) (needsRoom ? app : window).scrollTo({ top });
     window.dispatchEvent(new Event('chaoxi-layout-change'));
   }
-  const panelSize = new ResizeObserver(updateLayout);
+  const panelSize = new ResizeObserver(placePlayer);
   panelSize.observe(panel);
+  const caption = mountMusicCaptions(widget, height => reserve(panelSpace, height), signal);
 
   function openPanel(open) {
     panel.hidden = !open;
     trigger.setAttribute('aria-expanded', String(open));
-    updateLayout();
+    placePlayer();
     if (open) void refresh();
   }
 
   function showLyrics() {
     const visible = lyricsOn && lines.length > 0;
-    if (visible === captions.hidden) {
-      captions.hidden = !visible;
-      updateLayout();
-    }
-    if (visible) captions.firstElementChild.textContent = lines.findLast(line => line.time <= audio.currentTime)?.text || '';
+    caption(visible ? lines.findLast(line => line.time <= audio.currentTime)?.text || '' : '', visible);
   }
 
   async function readLyrics() {
@@ -288,7 +291,7 @@ export function mountBackgroundMusic(host, provider) {
         void change(() => save({ play_mode: state.play_mode === 'shuffle' ? 'sequence' : 'shuffle' }));
         break;
       case 'list':
-        panelList.hidden = !panelList.hidden; button.setAttribute('aria-expanded', String(!panelList.hidden)); updateLayout();
+        panelList.hidden = !panelList.hidden; button.setAttribute('aria-expanded', String(!panelList.hidden)); placePlayer();
         break;
       case 'lyrics':
         lyricsOn = !lyricsOn; preference(lyricPreference, lyricsOn);
@@ -299,7 +302,7 @@ export function mountBackgroundMusic(host, provider) {
     }
   }, { signal });
   document.addEventListener('click', event => {
-    if (!panel.hidden && !widget.contains(event.target)) openPanel(false);
+    if (!panel.hidden && !panel.contains(event.target) && !trigger.contains(event.target)) openPanel(false);
   }, { signal });
   for (const event of ['playing', 'pause', 'ended']) audio.addEventListener(event, showPlayback, { signal });
   for (const event of ['timeupdate', 'seeked']) audio.addEventListener(event, showLyrics, { signal });
@@ -319,8 +322,9 @@ export function mountBackgroundMusic(host, provider) {
       events.abort(); panelSize.disconnect(); clearInterval(poll); library?.destroy(); audio.pause(); audio.removeAttribute('src'); audio.load();
       if (blobUrl) URL.revokeObjectURL(blobUrl);
       host.replaceChildren();
-      document.body.classList.remove('has-bgm-layout', 'has-bgm-lyrics');
+      document.body.classList.remove('has-bgm-layout');
       document.body.style.removeProperty('--bgm-panel-space');
+      document.body.style.removeProperty('--bgm-caption-space');
     },
   };
 }
