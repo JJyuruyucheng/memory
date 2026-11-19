@@ -81,6 +81,7 @@
 .tabby-snooze span { position: absolute; left: 0; bottom: 0; animation: tabby-snooze 2.8s ease-in-out infinite; }
 .tabby-snooze span + span { left: 13px; bottom: 8px; font-size: 20px; animation-delay: .75s; }
 .tabby-launcher[data-pose='sleeping'] .tabby-snooze { display: block; }
+.tabby-launcher[data-figure='3d'][data-pose='sleeping'] .tabby-snooze { top: 38%; left: 19%; }
 .tabby-launcher.is-dragging:not([data-dock]) .tabby-pose-active {
   opacity: 1;
   animation: none;

@@ -1,5 +1,5 @@
-import { clamp, mountFloatingPosition } from './assistant-position.js';
-import { adjacentTrack, musicFileType, parseLyrics } from './background-music-data.js';
+import { mountFloatingPosition } from './assistant-position.js';
+import { adjacentTrack, lyricText, musicFileType, parseLyrics } from './background-music-data.js';
 import { escapeHtml as esc } from './domain.js';
 import { icon } from './icons.js';
 import { mountMusicSettings } from './music-settings.js';
@@ -18,13 +18,13 @@ export function mountBackgroundMusic(host, provider) {
   const events = new AbortController(), { signal } = events;
   host.innerHTML = `<div class="bgm-widget" data-ui>
     <button type="button" class="bgm-trigger" aria-label="背景音乐" aria-expanded="false" aria-controls="bgm-panel">${icon('music')}</button>
+    <span class="bgm-sparks" aria-hidden="true"><i>♪</i><i>♫</i><i>♪</i><i>♫</i><i>♪</i></span>
     <section class="bgm-panel" id="bgm-panel" aria-label="音乐播放器" hidden>
-      <div class="bgm-disc">
-        ${control('close', '关闭播放器', icon('close'))}
-        <div class="bgm-note" aria-hidden="true">${icon('music')}</div>
+      <div class="bgm-controls">
         <div class="bgm-now"><strong>正在读歌单…</strong><small></small></div>
         <div class="bgm-transport">${control('previous', '上一首', icon('previous'), 'disabled')}${control('play', '播放', icon('play'), 'disabled')}${control('next', '下一首', icon('next'), 'disabled')}</div>
         <div class="bgm-switches">${control('lyrics', '歌词', '词', 'aria-pressed="false"')}${control('list', '歌单', '列', 'aria-expanded="false" aria-controls="bgm-playlist"')}${control('mode', '顺序播放', `顺${icon('repeat')}`)}</div>
+        ${control('close', '关闭播放器', icon('close'))}
       </div>
       <p class="bgm-feedback" role="status"></p>
       <ol id="bgm-playlist" aria-label="播放列表" hidden></ol>
@@ -33,6 +33,7 @@ export function mountBackgroundMusic(host, provider) {
     <audio preload="none" hidden></audio></div>`;
 
   const widget = host.firstElementChild, trigger = widget.querySelector('.bgm-trigger'), panel = widget.querySelector('.bgm-panel');
+  const sparks = widget.querySelector('.bgm-sparks'), app = document.querySelector('#app');
   const audio = widget.querySelector('audio'), captions = widget.querySelector('.bgm-lyrics');
   const now = panel.querySelector('.bgm-now'), panelList = panel.querySelector('ol'), feedback = panel.querySelector('.bgm-feedback');
   const byAction = action => panel.querySelector(`[data-bgm="${action}"]`);
@@ -46,35 +47,45 @@ export function mountBackgroundMusic(host, provider) {
   function message(value) {
     feedback.textContent = value;
     library?.message(value);
-    if (!panel.hidden) place();
   }
 
-  const place = mountFloatingPosition(widget, trigger, {
+  mountFloatingPosition(widget, trigger, {
     storageKey: 'chaoxi-bgm-position', initial: { x: 1, y: 0 }, half: true, signal,
-    onLayout({ left, top, right, bottom, x, y, width, height }) {
-      if (panel.hidden) return;
-      const panelWidth = panel.offsetWidth, panelHeight = panel.offsetHeight;
-      const below = y + height + 8, above = y - panelHeight - 8;
-      panel.style.left = `${clamp(x + width - panelWidth, left, right - panelWidth)}px`;
-      panel.style.top = `${clamp(below + panelHeight <= bottom || above < top ? below : above, top, bottom - panelHeight)}px`;
+    onLayout({ left, right, x, y, width, height }) {
+      const centerX = x + width / 2;
+      sparks.style.left = `${centerX}px`;
+      sparks.style.top = `${y + height / 2}px`;
+      sparks.style.setProperty('--spark-side', centerX < (left + right) / 2 ? '1' : '-1');
+      sparks.style.setProperty('--spark-rise', y < 0 ? '24px' : `-${Math.min(33, y + 10)}px`);
     },
   });
+  function updateLayout() {
+    const { body } = document;
+    const height = panel.hidden ? 0 : Math.ceil(panel.getBoundingClientRect().bottom);
+    const hadRoom = body.classList.contains('has-bgm-layout');
+    const needsRoom = height > 0 || !captions.hidden;
+    const top = hadRoom ? app.scrollTop : window.scrollY;
+    body.classList.toggle('has-bgm-layout', needsRoom);
+    body.classList.toggle('has-bgm-lyrics', !captions.hidden);
+    body.style.setProperty('--bgm-panel-space', `${height}px`);
+    if (hadRoom !== needsRoom) (needsRoom ? app : window).scrollTo({ top });
+    window.dispatchEvent(new Event('chaoxi-layout-change'));
+  }
+  const panelSize = new ResizeObserver(updateLayout);
+  panelSize.observe(panel);
 
   function openPanel(open) {
     panel.hidden = !open;
     trigger.setAttribute('aria-expanded', String(open));
-    if (open) { place(); void refresh(); }
+    updateLayout();
+    if (open) void refresh();
   }
 
   function showLyrics() {
     const visible = lyricsOn && lines.length > 0;
     if (visible === captions.hidden) {
-      const app = document.querySelector('#app');
-      const top = visible ? window.scrollY : app.scrollTop;
       captions.hidden = !visible;
-      document.body.classList.toggle('has-bgm-lyrics', visible);
-      (visible ? app : window).scrollTo({ top });
-      window.dispatchEvent(new Event('chaoxi-layout-change'));
+      updateLayout();
     }
     if (visible) captions.firstElementChild.textContent = lines.findLast(line => line.time <= audio.currentTime)?.text || '';
   }
@@ -95,7 +106,7 @@ export function mountBackgroundMusic(host, provider) {
   }
 
   function showPlayback() {
-    const playing = !audio.paused;
+    const playing = !audio.paused && !audio.ended;
     const label = playing ? '关闭音乐' : '播放';
     playButton.innerHTML = icon(playing ? 'pause' : 'play');
     playButton.setAttribute('aria-label', label);
@@ -147,7 +158,6 @@ export function mountBackgroundMusic(host, provider) {
     byAction('lyrics').setAttribute('aria-pressed', String(lyricsOn));
     library?.render(state);
     showPlayback();
-    place();
   }
 
   function apply(next) {
@@ -214,9 +224,15 @@ export function mountBackgroundMusic(host, provider) {
           if (!file?.size) continue;
           const mime = musicFileType(file);
           if (field === 'audio' && !mime.startsWith('audio/')) throw new Error('请选择 25 MB 以内的音频。');
-          if (field === 'lyrics' && (mime !== 'text/plain' || !parseLyrics(await file.text()).length)) throw new Error('请选择带有时间标记的 LRC 歌词。');
+          let body = file;
+          if (field === 'lyrics') {
+            if (mime !== 'text/plain') throw new Error('请选择 64 KB 以内的 LRC 歌词。');
+            const text = await lyricText(file);
+            if (!parseLyrics(text).length) throw new Error('歌词需要包含时间标记。');
+            body = new File([text], file.name, { type: mime });
+          }
           replaced.push(track[field]);
-          track[field] = await provider.uploadMusicFile(file, mime);
+          track[field] = await provider.uploadMusicFile(body, mime);
           uploaded.push(track[field]);
         }
         const tracks = existing ? state.tracks.map(item => item.id === id ? track : item) : [...state.tracks, track];
@@ -229,7 +245,9 @@ export function mountBackgroundMusic(host, provider) {
   const actions = {
     select,
     add: (audio, lyrics, title, artist) => editTrack(null, { audio, lyrics, title, artist }),
-    replace: (id, field, file) => editTrack(id, { [field]: file }),
+    async replace(id, field, file) {
+      if (await editTrack(id, { [field]: file })) message(field === 'lyrics' ? '歌词已保存。' : '音源已保存。');
+    },
     setSorting(value) { sorting = value; },
     reorder(ids) {
       void change(() => save({ tracks: ids.map(id => state.tracks.find(track => track.id === id)) }));
@@ -270,7 +288,7 @@ export function mountBackgroundMusic(host, provider) {
         void change(() => save({ play_mode: state.play_mode === 'shuffle' ? 'sequence' : 'shuffle' }));
         break;
       case 'list':
-        panelList.hidden = !panelList.hidden; button.setAttribute('aria-expanded', String(!panelList.hidden)); place();
+        panelList.hidden = !panelList.hidden; button.setAttribute('aria-expanded', String(!panelList.hidden)); updateLayout();
         break;
       case 'lyrics':
         lyricsOn = !lyricsOn; preference(lyricPreference, lyricsOn);
@@ -280,10 +298,10 @@ export function mountBackgroundMusic(host, provider) {
         break;
     }
   }, { signal });
-  document.addEventListener('pointerdown', event => {
+  document.addEventListener('click', event => {
     if (!panel.hidden && !widget.contains(event.target)) openPanel(false);
   }, { signal });
-  for (const event of ['playing', 'pause']) audio.addEventListener(event, showPlayback, { signal });
+  for (const event of ['playing', 'pause', 'ended']) audio.addEventListener(event, showPlayback, { signal });
   for (const event of ['timeupdate', 'seeked']) audio.addEventListener(event, showLyrics, { signal });
   audio.addEventListener('ended', () => { if (enabled) step(1, true); }, { signal });
   const poll = setInterval(refresh, 5000);
@@ -298,10 +316,11 @@ export function mountBackgroundMusic(host, provider) {
       library?.render(state);
     },
     destroy() {
-      events.abort(); clearInterval(poll); library?.destroy(); audio.pause(); audio.removeAttribute('src'); audio.load();
+      events.abort(); panelSize.disconnect(); clearInterval(poll); library?.destroy(); audio.pause(); audio.removeAttribute('src'); audio.load();
       if (blobUrl) URL.revokeObjectURL(blobUrl);
       host.replaceChildren();
-      document.body.classList.remove('has-bgm-lyrics');
+      document.body.classList.remove('has-bgm-layout', 'has-bgm-lyrics');
+      document.body.style.removeProperty('--bgm-panel-space');
     },
   };
 }

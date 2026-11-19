@@ -347,7 +347,11 @@ export function createSupabaseProvider(config = {}) {
     uploadMusicFile: (file, mime) => enqueue(async expected => {
       if (!(file instanceof Blob) || !mime || mime !== musicFileType(file)) throw new SupabaseProviderError('请选择音频或 LRC 歌词文件。', 'VALIDATION');
       const id = crypto.randomUUID();
-      await result(client.storage.from(BGM_BUCKET).upload(id, file, { contentType: mime, cacheControl: '0', upsert: false }), expected);
+      // The SDK otherwise sends the browser's multipart file type, often octet-stream for .lrc.
+      const body = mime === 'text/plain' ? await file.arrayBuffer() : file;
+      requireUser(expected);
+      const request = client.storage.from(BGM_BUCKET).upload(id, body, { contentType: mime, cacheControl: '0', upsert: false });
+      await result(request, expected, { fallback: mime === 'text/plain' ? '歌词上传失败，请重新选择文件后重试。' : '音频上传未完成。' });
       return id;
     }),
     removeMusicFile: id => enqueue(async expected => {

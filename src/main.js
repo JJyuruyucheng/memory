@@ -27,7 +27,7 @@ const app = document.querySelector('#app');
 const modalRoot = document.querySelector('#modal-root');
 const assistantRoot = document.querySelector('#assistant-root');
 const musicRoot = document.querySelector('#bgm-root');
-const scrollToPageTop = () => (document.body.classList.contains('has-bgm-lyrics') ? app : window).scrollTo({ top: 0 });
+const scrollToPageTop = () => (document.body.classList.contains('has-bgm-layout') ? app : window).scrollTo({ top: 0 });
 let provider, loginVerification, loginPhotos, loginCarousel, loginPhotoEditor, mediaViewer, profileEditor;
 let assistant, assistantIdentity, backgroundMusic, stopUsage;
 const moodNames = { happy: '微笑', neutral: '一般', sad: '难受', unset: '未填写' };

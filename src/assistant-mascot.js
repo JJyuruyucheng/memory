@@ -32,9 +32,9 @@ export function mountAssistantMascot(launcher, signal) {
   setPose('ready');
   launcher.addEventListener('pointerdown', wake, { signal });
   launcher.addEventListener('pointerup', wake, { signal });
-  void import('./tabby-scene.js').then(({ mountTabbyScene }) => {
-    if (!signal.aborted) mountTabbyScene(launcher.querySelector('canvas'), launcher, signal);
-  }).catch(() => { /* The supplied pose art is also available without WebGL. */ });
+  void import('./tabby-scene.js').then(({ mountTabbyScene }) => !signal.aborted &&
+    mountTabbyScene(launcher.querySelector('canvas'), launcher, signal)
+  ).catch(() => { /* The supplied pose art is also available without WebGL. */ });
   signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
 
   return { wake, poke, setThinking(value, answered = false) {

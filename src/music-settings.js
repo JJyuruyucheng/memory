@@ -100,6 +100,8 @@ export function mountMusicSettings(slot, actions) {
         },
       });
     }).catch(() => {});
-  return { render, message(text) { slot.querySelectorAll('.bgm-feedback').forEach(output => { output.textContent = text; }); },
+  return { render, message(text) {
+    slot.querySelectorAll('.bgm-feedback').forEach(output => { output.textContent = dialog.contains(output) === dialog.open ? text : ''; });
+  },
     destroy() { events.abort(); sortable?.destroy(); actions.setSorting(false); } };
 }

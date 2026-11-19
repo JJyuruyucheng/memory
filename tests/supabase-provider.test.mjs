@@ -172,6 +172,26 @@ test('missing client fails closed; anonymous init loads no private tables', asyn
   assert.deepEqual(f.calls.map(value => value.action), ['getSession']);
 });
 
+test('lyrics upload sends bytes with the explicit text MIME type', async () => {
+  const f = fixture();
+  await f.provider.init();
+  await f.signIn();
+  const lyric = '[00:01.00] 示例';
+  f.client.storage.from = bucket => {
+    assert.equal(bucket, 'memory-bgm');
+    return {
+      async upload(path, body, options) {
+        assert.equal(options.contentType, 'text/plain');
+        assert.ok(body instanceof ArrayBuffer, 'raw bytes keep the SDK out of its multipart path');
+        assert.equal(new TextDecoder().decode(body), lyric);
+        return { data: { path }, error: null };
+      },
+    };
+  };
+  const file = new File([lyric], 'fixture.lrc', { type: 'application/octet-stream' });
+  assert.match(await f.provider.uploadMusicFile(file, 'text/plain'), /^[\da-f-]{36}$/);
+});
+
 test('transient session/profile/data failures keep restoration retryable without a password login', async () => {
   for (const stage of ['getSession', 'getUser', 'tables']) {
     let disconnected = true;

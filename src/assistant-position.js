@@ -1,6 +1,6 @@
 const DOCK_SIDES = ['left', 'right', 'top', 'bottom'];
 const DOCK_DISTANCE = 16;
-export const clamp = (value, min, max) => Math.min(Math.max(value, min), Math.max(min, max));
+const clamp = (value, min, max) => Math.min(Math.max(value, min), Math.max(min, max));
 
 function storedPosition(key, initial) {
   try {
@@ -24,7 +24,8 @@ export function mountFloatingPosition(root, launcher, { storageKey, initial, hal
     const viewportTop = visual?.offsetTop ?? 0;
     const insets = getComputedStyle(root);
     const left = viewportLeft + (parseFloat(insets.paddingLeft) || 0) + margin;
-    const top = viewportTop + (parseFloat(insets.paddingTop) || 0) + margin;
+    const panelBottom = document.querySelector('.bgm-panel:not([hidden])')?.getBoundingClientRect().bottom || 0;
+    const top = Math.max(viewportTop + (parseFloat(insets.paddingTop) || 0), panelBottom) + margin;
     const right = viewportLeft + (visual?.width ?? innerWidth) - (parseFloat(insets.paddingRight) || 0) - margin;
     const safeArea = parseFloat(insets.paddingBottom) || 0;
     const viewportBottom = viewportTop + (visual?.height ?? innerHeight) - safeArea;

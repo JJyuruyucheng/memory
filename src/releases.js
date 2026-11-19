@@ -2,6 +2,15 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 20, date: '2026-11-19', version: 'v0.14.1', title: '原图瓜子与透明播放器',
+    changes: [
+      '播放器在页顶预留无底色的控制区，播放时音符按钮旁会依次弹出并渐隐五彩音符。',
+      '修复浏览器将 LRC 歌词作为通用二进制发送而被存储拒绝的问题。',
+      '瓜子 3D 表面直接使用原图，保留脸、毛色和条纹。',
+      '浏览器标签页与手机桌面使用紧贴画面的透明猫头像。',
+    ],
+  },
+  {
     number: 19, date: '2026-11-19', version: 'v0.14.0', title: '立体瓜子、圆形播放器与紧凑设置',
     changes: [
       '瓜子换成实时 3D 狸花猫，会走、跑、跳、蜷睡和贴边探头。收到回复会开心，连续被戳时会短暂闹脾气。',

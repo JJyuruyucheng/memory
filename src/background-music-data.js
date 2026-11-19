@@ -17,6 +17,14 @@ export function musicFileType(file) {
   return audioFileType(file);
 }
 
+export async function lyricText(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes);
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be').decode(bytes);
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+  catch { return new TextDecoder('gb18030').decode(bytes); }
+}
+
 export function parseLyrics(content) {
   const stamp = /\[(\d{1,3}):([0-5]\d)(?:[.:](\d{1,3}))?\]/g;
   const offset = Number(content.match(/^\[offset:\s*([+-]?\d+)\]/mi)?.[1] ?? 0) / 1000;
