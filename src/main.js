@@ -15,6 +15,7 @@ import { entryTagsMarkup, mountEntryTags } from './entry-tags-editor.js';
 import { calendarGrid, feedDatePickerMarkup, mountFeedDatePicker, shiftCalendarMonth } from './feed-date-picker.js';
 import { mountTagOverflow } from './feed-tag-overflow.js';
 import { mountEntryBody, mountEntryUpload } from './entry-editor-controls.js';
+import { entryEmojiMarkup, mountEntryEmoji } from './entry-emojis.js';
 import { renderAdminActivity } from './admin-activity.js';
 import { avatarImageUrl } from './profile.js';
 import { profileEditorMarkup, mountProfileEditor } from './profile-editor.js';
@@ -38,7 +39,7 @@ let state = { currentUser: null, users: [], entries: [], settings: {} }, loginPe
 let reconnectPending = false, reconnectError = null, reconnectAttempt, recoveryEpoch = 0;
 let searchTimer, toastTimer, dialogReturnFocus, draftTimer;
 let editorAttachments = [], editorId = null, editorTags = null, previewUrls = [];
-let unmountEntryBody, unmountEntryUpload, unmountTagOverflow, unmountEntryPreviews;
+let unmountEntryBody, unmountEntryUpload, unmountEntryEmoji, unmountTagOverflow, unmountEntryPreviews;
 const expandedEntries = new Set();
 let feedTagsExpanded = false;
 let adminActivity = { days: 30, pending: false };
@@ -217,8 +218,8 @@ function renderFilters() {
     <div class="segmented" aria-label="记录类型">${[['all', '全部'], ['note', '随记'], ['event', '事件'], ['whisper', '悄悄话']].map(([id, label]) => `<button data-action="filter-type" data-value="${id}" aria-pressed="${type === id}" ${view === 'events' && id !== 'event' ? 'disabled' : ''}>${label}</button>`).join('')}</div>
     ${tags.length ? `<div class="tag-filter-list" role="group" aria-label="按小标签筛选"><div id="feed-tag-items" class="feed-tag-items"><button id="filter-tag-all" class="tag-filter" data-action="filter-tag" data-value="" aria-pressed="${!filters.tag}">全部标签</button>${orderedTags.map(tag => `<button id="filter-tag-value-${esc(encodeURIComponent(tag))}" class="tag-filter" data-action="filter-tag" data-value="${esc(tag)}" aria-pressed="${filters.tag === tag}" title="#${esc(tag)}">#${esc(tag)}</button>`).join('')}</div><button type="button" class="feed-tag-toggle" aria-controls="feed-tag-items" aria-expanded="false" hidden>展开</button></div>` : ''}
     <div class="feed-selects">
-      <label class="select-field"><span class="sr-only">按作者筛选</span><select id="filter-author"><option value="all">所有作者</option>${authors.map(u => `<option value="${esc(u.id)}" ${filters.authorId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>
-      <label class="select-field"><span class="sr-only">按心情筛选</span><select id="filter-mood"><option value="all">所有心情</option>${Object.entries(moodNames).map(([id, label]) => `<option value="${id}" ${filters.mood === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+      <label class="select-field"><span class="sr-only">按作者筛选</span><select id="filter-author" ${filters.authorId !== 'all' ? 'data-active' : ''}><option value="all">所有作者</option>${authors.map(u => `<option value="${esc(u.id)}" ${filters.authorId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>${icon('down')}</label>
+      <label class="select-field"><span class="sr-only">按心情筛选</span><select id="filter-mood" ${filters.mood !== 'all' ? 'data-active' : ''}><option value="all">所有心情</option>${Object.entries(moodNames).map(([id, label]) => `<option value="${id}" ${filters.mood === id ? 'selected' : ''}>${label}</option>`).join('')}</select>${icon('down')}</label>
       <button type="button" id="filter-feed-date" class="feed-date-trigger" data-action="open-feed-date"
         aria-label="日期筛选，${esc(dateText)}" aria-haspopup="dialog" ${date ? 'data-active' : ''}>${icon('calendar')}<span>${esc(dateText)}</span></button>
     </div></div></div>`;
@@ -362,6 +363,7 @@ function closeModal(saveDraft = true) {
   editorTags = null;
   unmountEntryBody?.(); unmountEntryBody = null;
   unmountEntryUpload?.(); unmountEntryUpload = null;
+  unmountEntryEmoji?.(); unmountEntryEmoji = null;
   loginPhotoEditor?.destroy(); loginPhotoEditor = null;
   profileEditor?.destroy(); profileEditor = null;
   mediaViewer?.destroy(); mediaViewer = null;
@@ -420,7 +422,7 @@ function openEditor(entry) {
   openDialog(`<form id="entry-form" data-original-type="${esc(entry?.type || '')}"><header class="editor-header"><div><h2>${entry ? '再添一点细节' : '今天，也值得记住'}</h2></div><div class="editor-who">${avatar(author, true)}<div><span>${esc(author.name)}</span><span id="entry-visibility">${icon('lock')}${visibilityLabel(data.type)}</span></div></div></header>
     <div class="editor-layout"><div class="editor-story"><label>给这段回忆起个名字 <span class="optional">随记可不填</span><input name="title" value="${esc(data.title || '')}" placeholder="例如：下班路上，一起看了晚霞" maxlength="120" /></label>
     <p id="whisper-warning" class="privacy-warning" hidden>${icon('info')}改为悄悄话后，对方将不能再查看；此前的副本、缓存和已签发链接无法即时收回。</p>
-    <div class="editor-content"><label for="entry-content">正文</label><div class="editor-body-field">
+    <div class="editor-content"><div class="editor-body-heading"><label for="entry-content">正文</label>${entryEmojiMarkup()}</div><div class="editor-body-field">
       <textarea id="entry-content" name="content" rows="2" placeholder="写下想记住的事" maxlength="20000">${esc(data.content || '')}</textarea>
       <button type="button" class="body-resize" aria-label="调整正文高度，可拖动或按上下方向键"></button></div></div></div>
     <div class="editor-side"><div class="form-two"><label>记录类型<select name="type"><option value="note" ${!['event', 'whisper'].includes(data.type) ? 'selected' : ''}>日常随记</option><option value="event" ${data.type === 'event' ? 'selected' : ''}>重要事件</option><option value="whisper" ${data.type === 'whisper' ? 'selected' : ''}>悄悄话</option></select></label><label>发生在<input name="occurredAt" type="datetime-local" value="${dateTimeInput(data.occurredAt)}" required /></label></div>
@@ -433,6 +435,7 @@ function openEditor(entry) {
   editorAttachments = (entry?.media || []).map(media => ({ key: crypto.randomUUID(), kind: 'media', media }));
   unmountEntryBody = mountEntryBody(modalRoot.querySelector('.editor-body-field'));
   unmountEntryUpload = mountEntryUpload(modalRoot.querySelector('.editor-dropzone'), addEditorFiles);
+  unmountEntryEmoji = mountEntryEmoji(modalRoot.querySelector('.entry-emoji'), modalRoot.querySelector('#entry-content'), addEditorFiles);
   renderEditorPreviews();
 }
 function addEditorFiles(files) {

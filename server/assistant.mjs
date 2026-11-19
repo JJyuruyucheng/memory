@@ -106,7 +106,7 @@ export function createSupabaseAssistantAuthorization({ supabaseUrl, supabasePubl
         if (ids.some(value => !ENTRY_UUID.test(value))) return [];
         const entrySignal = AbortSignal.any([request.signal, AbortSignal.timeout(10000)]);
         const entries = new URL('/rest/v1/entries', supabaseUrl);
-        entries.searchParams.set('select', `id,title,authorId,occurredAt,tags,status,type,deletedAt,author:profiles(name)${ids.length ? ',content' : ''}`);
+        entries.searchParams.set('select', `id,title,authorId,occurredAt,tags,status,type,deletedAt,author:profiles!entries_authorId_fkey(name)${ids.length ? ',content' : ''}`);
         entries.searchParams.set('status', 'eq.published');
         entries.searchParams.set('type', 'in.(note,event)');
         entries.searchParams.set('deletedAt', 'is.null');

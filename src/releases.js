@@ -2,6 +2,14 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 23, date: '2026-11-19', version: 'v0.16.0', title: '记录表情与瓜子问答修复',
+    changes: [
+      '发布和编辑记录时可在正文光标处插入 Emoji，也可添加 GIF、PNG 或 WebP 表情包。',
+      '时光线的作者和心情筛选保留完整边框，选中状态使用淡绿色提示。',
+      '修复「问瓜子」读取共享记录时的作者关系冲突，支持从无标题随记直接提问。',
+    ],
+  },
+  {
     number: 22, date: '2026-11-19', version: 'v0.15.1', title: '瓜子动作与浮动歌词优化',
     changes: [
       '补齐瓜子起身、加速、起跳和落地坐稳的过渡帧，动作连贯播放。',

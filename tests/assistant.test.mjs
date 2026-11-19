@@ -44,6 +44,10 @@ function setup({ account = 200, profiles = [ { id } ], entries = [], ...override
       assert.equal(target.searchParams.get('status'), 'eq.published');
       assert.equal(target.searchParams.get('type'), 'in.(note,event)');
       assert.equal(target.searchParams.get('deletedAt'), 'is.null');
+      // PostgREST also sees favorites and reactions as relationships to profiles.
+      if (!target.searchParams.get('select').includes('author:profiles!entries_authorId_fkey(name)')) {
+        return Response.json({ code: 'PGRST201' }, { status: 300 });
+      }
       const selected = target.searchParams.get('id');
       if (selected) return Response.json(entries.filter(row => selected.includes(row.id)));
       assert.ok(!target.searchParams.get('select').includes('content'));
@@ -198,6 +202,24 @@ test('按作者和标题读取共享记录，不发送悄悄话、草稿、回�
   const hidden = await handle(request({ body: { ...body, articleSlug: entries[2].id } }), env);
   assert.deepEqual((await hidden.json()).sources, []);
   assert.equal(upstream.length, 1);
+});
+
+test('从无标题的共享随记发起提问，短问题也读取所选正文和作者', async () => {
+  const selected = {
+    id: '20000000-0000-4000-8000-000000000001', authorId: id, title: '', author: { name: '示例成员' },
+    occurredAt: '2026-11-19T04:10:00Z', status: 'published', type: 'note', deletedAt: null,
+    content: '想知道出游回来的朋友会不会带一张明信片。', tags: ['期待'],
+  };
+  const { handle, upstream, verified } = setup({ entries: [selected] });
+  const response = await handle(request({ body: {
+    articleSlug: selected.id, messages: [{ role: 'user', content: '你觉得会带吗？' }],
+  } }), env);
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).sources, [{ title: '2026-11-19 的随记', href: `#timeline?entry=${selected.id}` }]);
+  assert.deepEqual(verified, ['/auth/v1/user', '/rest/v1/profiles', '/rest/v1/entries']);
+  const input = upstream[0].input[0].content;
+  assert.match(input, /示例成员/u);
+  assert.match(input, /朋友会不会带一张明信片/u);
 });
 
 test('实时天气只向天气服务查询城市和坐标，无需发送聊天记录', async () => {
