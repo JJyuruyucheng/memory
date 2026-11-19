@@ -2,6 +2,14 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 22, date: '2026-11-19', version: 'v0.15.1', title: '瓜子动作与浮动歌词优化',
+    changes: [
+      '补齐瓜子起身、加速、起跳和落地坐稳的过渡帧，动作连贯播放。',
+      '背景音乐卡片随曲名和演唱者的长度调整，文字可换行显示。',
+      '歌词随播放进度高亮，支持横排、竖排、单行和双行。鼠标悬停或点按歌词可显示播放控件与样式设置。',
+    ],
+  },
+  {
     number: 21, date: '2026-11-19', version: 'v0.15.0', title: '瓜子动作帧与可移动歌词',
     changes: [
       '按瓜子的原图生成走、跑、跳的连续动作帧。贴边时露出完整猫脸和双耳。',

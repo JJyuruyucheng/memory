@@ -3,6 +3,17 @@ import { escapeHtml as esc } from './domain.js';
 import { icon } from './icons.js';
 import { loadLocalScript } from './local-script.js';
 
+function adjacentRow(items, from, direction) {
+  const boxes = items.map(item => item.getBoundingClientRect()), origin = boxes[from];
+  const candidates = boxes.map((box, index) => ({ box, index }))
+    .filter(({ box }) => (box.top - origin.top) * direction > 1);
+  const row = candidates.reduce((nearest, { box }) =>
+    Math.abs(box.top - origin.top) < Math.abs(nearest - origin.top) ? box.top : nearest, Infinity);
+  const center = box => box.left + box.width / 2;
+  return candidates.filter(({ box }) => Math.abs(box.top - row) < 1)
+    .sort((a, b) => Math.abs(center(a.box) - center(origin)) - Math.abs(center(b.box) - center(origin)))[0]?.index ?? -1;
+}
+
 export function mountMusicSettings(slot, actions) {
   const events = new AbortController(), { signal } = events;
   slot.innerHTML = `
@@ -39,15 +50,18 @@ export function mountMusicSettings(slot, actions) {
   }
 
   function render(next) {
+    const focusedTrack = list.contains(document.activeElement) && document.activeElement.classList.contains('bgm-grip')
+      ? document.activeElement.closest('li').dataset.id : null;
     state = next;
     const tracks = state?.tracks ?? [];
     slot.querySelector('.bgm-total').textContent = state ? `${tracks.length} 首` : '正在读取歌单…';
     list.innerHTML = tracks.map(track => `<li data-id="${track.id}" class="bgm-track" data-current="${track.id === state.current_id}">
       <button type="button" class="bgm-grip" aria-label="调整${esc(track.title)}顺序" title="拖动排序">${icon('grip')}</button>
       <button type="button" class="bgm-track-main" data-library="select" aria-pressed="${track.id === state.current_id}" title="${esc(track.title)}">
-        <strong>${esc(track.title)}</strong><small>${esc(track.audio ? track.artist || '音频' : '待上传音源')}</small></button>
+        <strong>${esc(track.title)}</strong><small>${esc(track.artist || (track.audio ? '' : '待上传音源'))}</small></button>
       <button type="button" class="bgm-more" data-library="edit" aria-label="编辑${esc(track.title)}">${icon('more')}</button>
     </li>`).join('');
+    if (focusedTrack) [...list.children].find(item => item.dataset.id === focusedTrack)?.querySelector('.bgm-grip').focus();
     if (dialog.open) showTrack();
   }
   slot.addEventListener('click', event => {
@@ -81,9 +95,9 @@ export function mountMusicSettings(slot, actions) {
   list.addEventListener('keydown', event => {
     if (!event.target.closest('.bgm-grip') || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     event.preventDefault();
-    const ids = order(), from = ids.indexOf(event.target.closest('li').dataset.id);
-    const columns = getComputedStyle(list).gridTemplateColumns.split(' ').length;
-    const to = from + { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -columns, ArrowDown: columns }[event.key];
+    const items = [...list.children], ids = order(), from = items.indexOf(event.target.closest('li'));
+    const to = event.key === 'ArrowLeft' ? from - 1 : event.key === 'ArrowRight' ? from + 1
+      : adjacentRow(items, from, event.key === 'ArrowUp' ? -1 : 1);
     if (to >= 0 && to < ids.length) { [ids[from], ids[to]] = [ids[to], ids[from]]; actions.reorder(ids); }
   }, { signal });
   void loadLocalScript({ url: new URL('../assets/sortable-1.15.7.js', import.meta.url), read: () => globalThis.Sortable, label: '歌单排序组件' })

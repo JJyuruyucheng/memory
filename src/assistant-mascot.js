@@ -39,7 +39,7 @@ export function mountAssistantMascot(launcher, signal) {
 
   return { wake, poke, setThinking(value, answered = false) {
     thinking = value;
-    if (answered) setPose('happy', 2600, 'active');
+    if (answered) setPose('happy', 2450, 'ready');
     else wake();
   } };
 }

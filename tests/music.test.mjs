@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { adjacentTrack, lyricText, musicFileType, musicState, parseLyrics } from '../src/background-music-data.js';
+import { adjacentTrack, lyricParts, lyricText, musicFileType, musicState, parseLyrics } from '../src/background-music-data.js';
 
 test('LRC 解析有序时间、毫秒偏移和一行多个时间戳', () => {
   const lines = parseLyrics('[ti:示例]\r\n[offset:+200]\r\n[00:12.50][00:24.5] 后一句\r\n[00:01.3] 先一句');
@@ -8,6 +8,28 @@ test('LRC 解析有序时间、毫秒偏移和一行多个时间戳', () => {
     { time: 1.5, text: '先一句' }, { time: 12.7, text: '后一句' }, { time: 24.7, text: '后一句' },
   ]);
   assert.deepEqual(parseLyrics('没有时间标记的文字'), []);
+});
+
+test('增强 LRC 保留词的起止时间、全局偏移和复唱时间', () => {
+  const [intro, repeat, outro] = parseLyrics(
+    '[offset:+500]\n[00:02][00:06]<00:02>晨光<00:02.75>照过来<00:03.25>\n[00:10] 听 [00:10.50] 风落下',
+  );
+  assert.deepEqual(intro, { time: 2.5, text: '晨光照过来', words: [
+    { text: '晨光', time: 2.5, end: 3.25 }, { text: '照过来', time: 3.25, end: 3.75 },
+  ] });
+  assert.deepEqual(lyricParts(repeat, 10.5, 15), [
+    { text: '晨光', time: 6.5, end: 7.25 }, { text: '照过来', time: 7.25, end: 7.75 },
+  ]);
+  assert.deepEqual(outro.words.map(word => [word.text.trim(), word.time, word.end]), [
+    ['听', 10.5, 11], ['风落下', 11, undefined],
+  ]);
+});
+
+test('逐行 LRC 在每句时长内依次给文字分配进度', () => {
+  const [line] = parseLyrics('[00:01]Hello world');
+  assert.deepEqual(lyricParts(line, 12, 15), [
+    { text: 'Hello', time: 1, end: 6 }, { text: ' ', time: 6, end: 7 }, { text: 'world', time: 7, end: 12 },
+  ]);
 });
 
 test('通用二进制文件类型的中文 LRC 可识别和解码', async () => {

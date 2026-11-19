@@ -79,7 +79,13 @@ export function mountBackgroundMusic(host, provider) {
   }
   const panelSize = new ResizeObserver(placePlayer);
   panelSize.observe(panel);
-  const caption = mountMusicCaptions(widget, height => reserve(panelSpace, height), signal);
+  const caption = mountMusicCaptions(widget, audio, {
+    onReserve: height => reserve(panelSpace, height),
+    onControl(action) {
+      if (action === 'close') setLyrics(false);
+      else byAction(action).click();
+    },
+  }, signal);
 
   function openPanel(open) {
     panel.hidden = !open;
@@ -89,8 +95,15 @@ export function mountBackgroundMusic(host, provider) {
   }
 
   function showLyrics() {
-    const visible = lyricsOn && lines.length > 0;
-    caption(visible ? lines.findLast(line => line.time <= audio.currentTime)?.text || '' : '', visible);
+    caption.render(lyricsOn ? lines : []);
+  }
+
+  function setLyrics(value) {
+    lyricsOn = value;
+    preference(lyricPreference, lyricsOn);
+    byAction('lyrics').setAttribute('aria-pressed', String(lyricsOn));
+    message(lyricsOn && !current()?.lyrics ? '这首还没有歌词。' : '');
+    void readLyrics();
   }
 
   async function readLyrics() {
@@ -116,6 +129,7 @@ export function mountBackgroundMusic(host, provider) {
     playButton.title = label;
     playButton.disabled = loading || !current()?.audio;
     widget.classList.toggle('is-playing', playing);
+    caption.transport(playing, !playButton.disabled, (state?.tracks.length ?? 0) > 1);
   }
 
   async function play() {
@@ -294,10 +308,7 @@ export function mountBackgroundMusic(host, provider) {
         panelList.hidden = !panelList.hidden; button.setAttribute('aria-expanded', String(!panelList.hidden)); placePlayer();
         break;
       case 'lyrics':
-        lyricsOn = !lyricsOn; preference(lyricPreference, lyricsOn);
-        button.setAttribute('aria-pressed', String(lyricsOn));
-        message(lyricsOn && !current()?.lyrics ? '这首还没有歌词。' : '');
-        void readLyrics();
+        setLyrics(!lyricsOn);
         break;
     }
   }, { signal });
@@ -305,7 +316,6 @@ export function mountBackgroundMusic(host, provider) {
     if (!panel.hidden && !panel.contains(event.target) && !trigger.contains(event.target)) openPanel(false);
   }, { signal });
   for (const event of ['playing', 'pause', 'ended']) audio.addEventListener(event, showPlayback, { signal });
-  for (const event of ['timeupdate', 'seeked']) audio.addEventListener(event, showLyrics, { signal });
   audio.addEventListener('ended', () => { if (enabled) step(1, true); }, { signal });
   const poll = setInterval(refresh, 5000);
   window.addEventListener('focus', refresh, { signal });

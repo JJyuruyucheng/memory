@@ -14,7 +14,7 @@ function storedPosition(key, initial) {
 
 export function mountFloatingPosition(root, launcher, {
   storageKey, initial, half = false, dockable = true, handle = launcher,
-  avoidPlayer = true, avoidLyrics = true, onDrop, onLayout, signal,
+  avoidPlayer = true, avoidLyrics = true, bottomInset, onDrop, onLayout, signal,
 }) {
   const visual = window.visualViewport;
   const position = storageKey ? storedPosition(storageKey, initial) : { ...initial };
@@ -37,7 +37,9 @@ export function mountFloatingPosition(root, launcher, {
     const viewportBottom = viewportTop + (visual?.height ?? innerHeight) - safeArea;
     const navigation = mobile ? document.querySelector('.mobile-nav') : null;
     const navTop = navigation?.getBoundingClientRect().top ?? viewportBottom;
-    return { left, top, right, bottom: Math.min(viewportBottom, navTop) - lyricSpace - margin, mobile, margin };
+    const bottom = Math.min(viewportBottom, navTop) - lyricSpace - margin;
+    const clearance = bottomInset ? Math.min(bottomInset(), Math.max(0, bottom - top - launcher.offsetHeight)) : 0;
+    return { left, top, right, bottom: bottom - clearance, mobile, margin };
   }
 
   function layout({ left, top, right, bottom, mobile, margin } = bounds()) {

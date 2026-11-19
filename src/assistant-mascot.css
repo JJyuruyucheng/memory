@@ -14,17 +14,20 @@
 }
 .tabby-lock .icon { width: 13px; height: 13px; }
 .tabby-mascot { position: absolute; inset: 0; pointer-events: none; }
+.tabby-launcher:not([data-dock], .is-dragging) .tabby-mascot { transform: translateX(var(--tabby-x, 0%)); }
 .tabby-floor {
   position: absolute; left: 25%; right: 23%; bottom: 7%; height: 11%;
   border-radius: 50%; background: #383028; opacity: .2; filter: blur(6px);
 }
-.tabby-launcher[data-motion='jump'] .tabby-floor { transform: scale(.8); opacity: .13; }
-.tabby-motion {
-  display: none; position: absolute; inset: 11%;
-  background-size: 400% 400%; background-repeat: no-repeat;
+.tabby-launcher[data-motion] .tabby-floor {
+  transform: scale(calc(1 - var(--tabby-air, 0) * .18));
+  opacity: calc(.2 - var(--tabby-air, 0) * .07);
 }
-.tabby-launcher[data-motion] .tabby-motion { display: block; }
-.tabby-launcher[data-motion] .tabby-pose-active { display: none; }
+.tabby-motion {
+  position: absolute; inset: 2%; opacity: 0; transition: opacity 170ms ease;
+  background-size: 1400% 1300%; background-repeat: no-repeat;
+}
+.tabby-launcher[data-motion] .tabby-motion { opacity: 1; }
 .tabby-pose {
   position: absolute; inset: 2%; width: 96%; height: 96%; object-fit: contain;
   opacity: 0; transform-origin: 50% 88%; transition: opacity 120ms ease;

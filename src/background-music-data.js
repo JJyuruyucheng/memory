@@ -25,16 +25,67 @@ export async function lyricText(file) {
   catch { return new TextDecoder('gb18030').decode(bytes); }
 }
 
+const clock = String.raw`\d{1,3}:[0-5]\d(?:[.:]\d{1,3})?`;
+const tag = `\\[(${clock})\\]`;
+const lineStart = new RegExp(`^(?:${tag}\\s*)+`);
+const lineStamp = new RegExp(tag, 'g');
+const wordStamp = new RegExp(`<(${clock})>|${tag}`, 'g');
+const splitWords = new Intl.Segmenter('zh', { granularity: 'word' });
+
+function seconds(stamp) {
+  const [minutes, seconds, fraction = 0] = stamp.split(/[.:]/);
+  return Number(minutes) * 60 + Number(seconds) + Number(`0.${fraction}`);
+}
+
+function timedWords(text, start) {
+  const markers = [...text.matchAll(wordStamp)];
+  if (!markers.length) return [];
+  let from = 0, time = start;
+  const words = [];
+  for (const marker of markers) {
+    const end = seconds(marker[1] ?? marker[2]);
+    if (marker.index > from) words.push({ text: text.slice(from, marker.index), time, end });
+    time = end;
+    from = marker.index + marker[0].length;
+  }
+  if (text.length > from) words.push({ text: text.slice(from), time });
+  return words;
+}
+
 export function parseLyrics(content) {
-  const stamp = /\[(\d{1,3}):([0-5]\d)(?:[.:](\d{1,3}))?\]/g;
-  const offset = Number(content.match(/^\[offset:\s*([+-]?\d+)\]/mi)?.[1] ?? 0) / 1000;
+  const offset = Number(content.match(/^\s*\[offset:\s*([+-]?\d+)\]/mi)?.[1] ?? 0) / 1000;
   return content.split(/\r?\n/).flatMap(line => {
-    const text = line.replace(stamp, '').trim();
+    line = line.trimStart();
+    const prefix = line.match(lineStart)?.[0];
+    if (!prefix) return [];
+    const source = line.slice(prefix.length).trim(), text = source.replace(wordStamp, '').trim();
     if (!text) return [];
-    return Array.from(line.matchAll(stamp), ([, minute, second, fraction]) => ({
-      time: Math.max(0, Number(minute) * 60 + Number(second) + Number(`0.${fraction ?? 0}`) + offset), text,
-    }));
+    const starts = Array.from(prefix.matchAll(lineStamp), ([, stamp]) => seconds(stamp));
+    const words = timedWords(source, starts[0]);
+    return starts.map(start => {
+      const result = { time: Math.max(0, start + offset), text };
+      if (words.length) {
+        const shift = start - starts[0] + offset;
+        result.words = words.map(({ text, time, end }) => ({
+          text, time: Math.max(0, time + shift), ...(end === undefined ? {} : { end: Math.max(0, end + shift) }),
+        }));
+      }
+      return result;
+    });
   }).sort((a, b) => a.time - b.time);
+}
+
+export function lyricParts(line, nextTime, duration) {
+  const count = [...line.text].length;
+  const estimatedEnd = line.time + Math.min(8, Math.max(2, count * .28));
+  const end = nextTime > line.time ? nextTime : duration > line.time ? Math.min(duration, estimatedEnd) : estimatedEnd;
+  if (line.words) return line.words.map(word => ({ ...word, end: word.end ?? Math.max(word.time + .3, end) }));
+  let cursor = 0;
+  return [...splitWords.segment(line.text)].map(({ segment: text }) => {
+    const time = line.time + cursor / count * (end - line.time);
+    cursor += [...text].length;
+    return { text, time, end: line.time + cursor / count * (end - line.time) };
+  });
 }
 
 export function adjacentTrack(tracks, current, direction, shuffle = false, previous) {
