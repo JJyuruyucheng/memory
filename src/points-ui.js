@@ -1,5 +1,6 @@
 import { escapeHtml as esc } from './domain.js';
 import { icon } from './icons.js';
+import { loadLocalScript } from './local-script.js';
 
 const routes = { points: '我的积分', shop: '积分商城', backpack: '我的背包', 'shop-admin': '商城管理' };
 const milestones = [7, 30, 180, 365];
@@ -87,29 +88,20 @@ function milestonesMarkup(streak) {
 }
 
 function checkinStatus(summary, countdown, failed) {
-  const known = Boolean(summary);
-  const checked = Boolean(summary?.checked_in);
-  const streak = summary?.streak ?? 0;
-  const working = countdown !== null;
-  return checked ? `今天已签到 · 连续 ${streak} 天`
-    : working ? (countdown > 0 ? `自动签到中，还需 ${countdown} 秒` : '正在确认签到…')
-      : failed ? '暂时无法读取签到状态' : known ? `页面在前台持续停留 60 秒后自动签到 · 连续 ${streak} 天` : '正在读取签到状态…';
-}
-
-function checkinMarkup(summary, countdown, overview = false, failed = false) {
-  const info = overview ? '' : link('points', '我的积分');
-  return `<div><h2>每日签到</h2><p data-points-checkin-label>${esc(checkinStatus(summary, countdown, failed))}</p></div>
-    ${info ? `<div class="points-card-actions">${info}</div>` : ''}<span class="sr-only" role="status" data-points-checkin-status></span>`;
+  if (summary?.checked_in) return `已签 · ${summary.streak ?? 0} 天`;
+  if (countdown !== null) return countdown > 0 ? `签到 ${countdown} 秒` : '签到确认中';
+  return failed ? '签到待重试' : summary ? '今日待签到' : '签到读取中';
 }
 
 function rulesMarkup() {
-  return `<ul class="points-rule-list">
-    <li>按北京时间计算，页面在前台持续停留 60 秒后自动签到，每天得 0.5 分。每轮连续签到达到 7、30、180、365 天分别得 7、30、180、365 分，连续天数会继续累计。断签后开启新一轮，可重新领取各档奖励。</li>
-    <li>发布一条符合条件的共同记录得 1 分。记录收到对方有效点赞或评论，或评论收到有效回复，各得 0.2 分。</li>
-    <li>共同回忆双方各确认一次后，每位成员得 5 分。共同挑战按发布时设定的额度发放。</li>
+  return `<ol class="points-rule-list">
+    <li>北京时间每日前台停留 60 秒自动签到，得 0.5 分。</li>
+    <li>每轮连签满 7、30、180、365 天，分别奖同等积分。天数持续累计，断签后重开一轮。</li>
+    <li>有效共同记录得 1 分。收到对方有效点赞、评论或回复，各得 0.2 分。</li>
+    <li>共同回忆双方都确认后，作者得 5 分。共同挑战按设定奖励发放。</li>
     <li>每年 1 月 1 日发放 50 分纪念日积分。</li>
-    <li>现金券和补贴按 1 积分 = 1 元定价，按商品说明线下兑现。兑换会扣除积分、消耗一件库存，兑换和使用均不可撤销。</li>
-  </ul>`;
+    <li>兑换扣积分和库存，兑换及使用不可撤销。现金券与补贴按 1 分抵 1 元线下兑现。</li>
+  </ol>`;
 }
 
 function balanceMarkup(summary, extra = '') {
@@ -166,14 +158,21 @@ function anniversaryMarkup(value) {
   return `<p>${esc(value.title || '纪念日')}${next ? ` · ${esc(next)}` : ''}${Number.isSafeInteger(value.reward) ? ` · ${credits(value.reward)}` : ''}</p>`;
 }
 
-function productMarkup(row, balance) {
+function productMarkup(row, balance, { admin = false, canSort = false } = {}) {
   const soldOut = row.stock <= 0;
   const insufficient = Number.isSafeInteger(balance) && balance < row.price;
   const label = soldOut ? '已兑完' : insufficient ? `还差 ${credits(row.price - balance)}` : '兑换';
-  return `<li class="points-panel points-product">${cover(row.cover)}<div class="points-product-body">
+  const productId = admin ? ` data-points-product="${esc(row.id)}"` : '';
+  const offShelf = admin && row.active === false ? '<span class="points-product-off-shelf">已下架</span>' : '';
+  const grip = canSort ? `<button class="points-product-grip" type="button" data-points-action="sort-grip" data-points-id="${esc(row.id)}"
+    aria-label="调整${esc(row.name)}的顺序" title="拖动或使用方向键排序">${icon('grip')}</button>` : '';
+  const tools = offShelf || grip ? `<div class="points-product-tools">${offShelf}${grip}</div>` : '';
+  const action = admin ? button('edit-product', '编辑', { id: row.id, primary: true, more: ' aria-haspopup="dialog"' })
+    : button('redeem', label, { id: row.id, primary: true, disabled: soldOut || insufficient || !Number.isSafeInteger(balance), more: ' aria-haspopup="dialog"' });
+  return `<li class="points-panel points-product${admin ? ' points-admin-product' : ''}"${productId}>${cover(row.cover)}${tools}<div class="points-product-body">
     <h3>${esc(row.name)}</h3>${row.description ? `<p>${esc(row.description)}</p>` : ''}
     <div class="points-product-meta"><strong>${credits(row.price)}</strong><span>库存 ${esc(row.stock)}</span></div>
-    ${button('redeem', label, { id: row.id, primary: true, disabled: soldOut || insufficient || !Number.isSafeInteger(balance), more: ` aria-haspopup="dialog"` })}
+    ${action}
   </div></li>`;
 }
 
@@ -189,11 +188,15 @@ function orderList(rows, options = {}) {
   return `<ul class="points-list">${rows.map(row => receiptMarkup(row, { ...options, selected: options.orderId === row.id, userName: options.name?.(row.user_id) })).join('')}</ul>`;
 }
 
-function musicMarkup() {
-  return `<div class="points-music" data-points-music>${button('music', '播放店内音乐', { disabled: true })}<small role="status"></small></div>`;
+function adminProductMarkup(items, reorderable) {
+  if (!items.length) return status('还没有商品。');
+  const canSort = reorderable && items.length > 1;
+  return `${canSort ? '<p class="points-sort-help" id="points-sort-help">拖动手柄排序，也可聚焦手柄后按方向键。</p>' : ''}
+    <ol class="points-grid" aria-label="商品顺序"${canSort ? ' data-points-sort aria-describedby="points-sort-help"' : ''}>
+      ${items.map(row => productMarkup(row, undefined, { admin: true, canSort })).join('')}</ol>`;
 }
 
-export function mountPointsUi({ app, provider, getUser, getUsers = () => [], getRoute, music, toast = () => {}, openNotification }) {
+export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = () => [], getRoute, toast = () => {}, openNotification, onSummary }) {
   const store = new Map();
   const events = new AbortController();
   const { signal } = events;
@@ -209,6 +212,7 @@ export function mountPointsUi({ app, provider, getUser, getUsers = () => [], get
   let returnFocus;
   let busyChallenge = false;
   let dialogVersion = 0;
+  let sortableList, sortable, dragging = false, savingOrder = false, adminDrawPending = false;
   const pendingRedemptions = new Map();
 
   const summary = () => store.get('summary')?.value;
@@ -233,6 +237,7 @@ export function mountPointsUi({ app, provider, getUser, getUsers = () => [], get
     item.version = (item.version || 0) + 1;
     store.set(key, item);
     draw(key);
+    if (key === 'summary') onSummary?.(value);
   }
 
   async function load(key, refresh = false) {
@@ -260,7 +265,7 @@ export function mountPointsUi({ app, provider, getUser, getUsers = () => [], get
     if (!allowed) return `<section class="points-page" data-ui><div class="points-heading"><h1>${routes[route]}</h1></div>${status('当前账号无法使用这一页。')}</section>`;
     const nav = isAdmin() ? '' : `<nav class="points-nav" aria-label="积分导航">${['points', 'shop', 'backpack'].map(key =>
       `<a href="#${key}"${key === route ? ' aria-current="page"' : ''}>${routes[key]}</a>`).join('')}</nav>`;
-    return `<section class="points-page" data-ui><div class="points-heading"><h1>${routes[route]}</h1>${route === 'shop' ? musicMarkup() : ''}</div>
+    return `<section class="points-page" data-ui><div class="points-heading"><h1>${routes[route]}</h1></div>
       ${nav}<div data-points-view="${route}" tabindex="-1">${viewBody(route)}</div></section>`;
   }
 
@@ -269,25 +274,21 @@ export function mountPointsUi({ app, provider, getUser, getUsers = () => [], get
     if (route === 'points') return dataBody('summary', store, state => `<div class="points-layout">
       <div class="points-wallet">${balanceMarkup(state, `<div class="points-card-actions">${link('shop', '去兑换')}</div>`)}</div>
       <div class="points-stack points-main">
-        <section class="points-panel points-checkin" data-points-checkin="overview">${checkinMarkup(state, countdown, true)}</section>
+        ${panel('积分规则', rulesMarkup())}
         ${panel('积分明细', ledgerMarkup(state.ledger))}
         ${panel('共同挑战', challengeMarkup(state.challenges, getUser()))}
         ${panel('共同回忆', memoriesMarkup(state.memories, getUser()))}
       </div><aside class="points-stack points-details" aria-label="积分概览">
         ${panel('连续签到', `<p>已连续 ${esc(state.streak ?? 0)} 天</p>${milestonesMarkup(state.streak ?? 0)}`)}
         ${panel('纪念日奖励', anniversaryMarkup(state.anniversary))}
-        ${panel('积分规则', rulesMarkup())}
       </aside></div>`);
-    if (route === 'shop') return `<div class="points-layout"><div class="points-wallet">
-      ${balanceMarkup(wallet, `<div class="points-card-actions">${link('points', '查看明细')}${link('backpack', '打开背包')}</div>`)}
+    if (route === 'shop') return `<div class="points-store-balance">${link('points', `可用积分 ${credits(wallet?.balance)}`)}</div>
       ${store.get('summary')?.error ? dataBody('summary', store, () => '') : ''}
-      </div><section class="points-main" aria-labelledby="points-shop-catalog"><h2 id="points-shop-catalog" class="points-section-title">可兑换商品</h2>
+      <section aria-labelledby="points-shop-catalog"><h2 id="points-shop-catalog" class="sr-only">可兑换商品</h2>
       ${dataBody('catalog', store, items => {
         const available = items.filter(row => row.active !== false);
         return available.length ? `<ul class="points-grid">${available.map(row => productMarkup(row, wallet?.balance)).join('')}</ul>` : status('暂时没有上架商品。');
-      })}</section><aside class="points-details" aria-label="兑换信息">
-      ${panel('兑换说明', '<p>每次兑换一件商品。兑换成功后可在背包查看和使用。</p>')}
-    </aside></div>`;
+      })}</section>`;
     if (route === 'backpack') return dataBody('backpack', store, items => {
       const available = items.filter(item => !item.used_at);
       const used = items.filter(item => item.used_at);
@@ -297,9 +298,10 @@ export function mountPointsUi({ app, provider, getUser, getUsers = () => [], get
       </div>`;
     });
     if (route === 'shop-admin') return `<div class="points-stack">
-      ${panel('商品与库存', `<div class="points-card-actions">${button('edit-product', '添加商品', { primary: true, more: ' aria-haspopup="dialog"' })}</div>
-      ${dataBody('adminCatalog', store, items => items.length ? `<ul class="points-list">${items.map(row => `<li class="points-row"><div><h3>${esc(row.name)}</h3>
-      <p>${credits(row.price)} · 库存 ${esc(row.stock)} · ${row.active ? '上架中' : '已下架'}</p></div>${button('edit-product', '编辑', { id: row.id, more: ' aria-haspopup="dialog"' })}</li>`).join('')}</ul>` : status('还没有商品。'))}`)}
+      <section class="points-admin-products" aria-labelledby="points-admin-products-title">
+        <div class="points-panel-header"><h2 id="points-admin-products-title">商品与库存</h2>${button('edit-product', '添加商品', { primary: true, more: ' aria-haspopup="dialog"' })}</div>
+        ${dataBody('adminCatalog', store, items => adminProductMarkup(items, Boolean(provider.pointsAdminReorder)))}
+      </section>
       ${panel('共同挑战', `<p>双方确认完成后发放积分。</p><div class="points-card-actions">${button('new-challenge', '发布挑战', { more: ' aria-haspopup="dialog"' })}</div>
         ${dataBody('adminChallenges', store, adminChallengeMarkup)}`)}
       ${panel('兑换记录', dataBody('adminOrders', store, items => orderList(items, { admin: true, name: userName, orderId: linkedOrder() })))}
@@ -314,7 +316,8 @@ export function mountPointsUi({ app, provider, getUser, getUsers = () => [], get
 
   function renderCheckin() {
     if (!isMember()) return '';
-    return `<section class="points-panel points-checkin" data-points-checkin="home">${checkinMarkup(summary(), countdown, false, Boolean(store.get('summary')?.error))}</section>`;
+    const text = checkinStatus(summary(), countdown, Boolean(store.get('summary')?.error));
+    return `<span class="points-checkin" data-points-checkin title="在前台连续停留 60 秒自动签到"><span data-points-checkin-label>${esc(text)}</span><span class="sr-only" role="status" data-points-checkin-status></span></span>`;
   }
 
   function updateBell() {
@@ -337,23 +340,117 @@ export function mountPointsUi({ app, provider, getUser, getUsers = () => [], get
   function paintCheckin() {
     const wallet = summary(), failed = Boolean(store.get('summary')?.error);
     const text = checkinStatus(wallet, countdown, failed);
-    for (const region of app.querySelectorAll('[data-points-checkin]')) {
+    const regions = [app, modalRoot].filter(Boolean).flatMap(root => [...root.querySelectorAll('[data-points-checkin]')]);
+    for (const region of regions) {
       const label = region.querySelector('[data-points-checkin-label]');
       if (label.textContent === text) continue;
       label.textContent = text;
-      if (wallet?.checked_in || failed) region.querySelector('[data-points-checkin-status]').textContent = text;
+      if (wallet?.checked_in || failed) {
+        region.querySelector('[data-points-checkin-status]').textContent = wallet?.checked_in ? `今日已签到，连续 ${wallet.streak ?? 0} 天` : '签到状态暂时无法读取';
+      }
     }
   }
 
-  function refreshMusic() {
-    const region = app.querySelector('[data-points-music]');
-    if (!region) return;
-    const state = music?.getShopState?.() ?? {};
-    const control = region.querySelector('button');
-    control.textContent = state.playing ? '暂停店内音乐' : state.loading ? '准备音乐…' : '播放店内音乐';
-    control.disabled = !music?.toggleShop || Boolean(state.loading || state.available === false);
-    control.setAttribute('aria-pressed', String(Boolean(state.playing)));
-    region.querySelector('small').textContent = state.message ?? (state.available === false ? '暂未设置店内音乐' : '');
+  const productRows = list => [...list.querySelectorAll(':scope > [data-points-product]')];
+  const productIds = list => productRows(list).map(row => row.dataset.pointsProduct);
+
+  function syncAdminSort() {
+    const list = app.querySelector('[data-points-sort]');
+    if (list === sortableList) return;
+    sortable?.destroy();
+    sortable = null;
+    sortableList = list;
+    dragging = false;
+    if (!list) return;
+    if (savingOrder) list.setAttribute('aria-busy', 'true');
+    void loadLocalScript({
+      url: new URL('../assets/sortable-1.15.7.js', import.meta.url),
+      read: () => globalThis.Sortable,
+      label: '商品排序组件',
+    }).then(Sortable => {
+      if (signal.aborted || list !== sortableList || !list.isConnected) return;
+      sortable = new Sortable(list, {
+        handle: '.points-product-grip', draggable: '.points-admin-product',
+        direction(_event, target, item) { return target && item && target.offsetTop === item.offsetTop ? 'horizontal' : 'vertical'; },
+        forceFallback: true, fallbackOnBody: true, fallbackClass: 'points-sort-fallback', fallbackTolerance: 4,
+        animation: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 140,
+        delay: 180, delayOnTouchOnly: true, ghostClass: 'points-sort-ghost', disabled: savingOrder,
+        onStart() { dragging = true; },
+        onEnd(event) {
+          dragging = false;
+          queueMicrotask(() => {
+            if (signal.aborted || list !== sortableList) return;
+            if (event.oldIndex !== event.newIndex) void saveProductOrder(list);
+            else if (adminDrawPending) draw('adminCatalog');
+          });
+        },
+      });
+    }).catch(() => {});
+  }
+
+  async function saveProductOrder(list) {
+    if (savingOrder) return;
+    const ids = productIds(list);
+    const current = store.get('adminCatalog')?.value ?? [];
+    const products = new Map(current.map(row => [row.id, row]));
+    if (ids.length !== products.size || ids.some(id => !products.has(id))) {
+      draw('adminCatalog');
+      toast('商品清单刚更新，请按最新清单重新排序。', true);
+      return;
+    }
+    if (ids.every((id, index) => current[index].id === id)) {
+      if (adminDrawPending) draw('adminCatalog');
+      return;
+    }
+    savingOrder = true;
+    list.setAttribute('aria-busy', 'true');
+    sortable?.option('disabled', true);
+    let reload = false;
+    try {
+      const result = await provider.pointsAdminReorder(ids);
+      if (!signal.aborted) {
+        set('adminCatalog', Array.isArray(result) ? result : ids.map(id => products.get(id)));
+        toast('已保存商品顺序。');
+      }
+    } catch (error) {
+      if (!signal.aborted) {
+        reload = true;
+        const changed = errorCode(error) === 'POINTS_CHANGED';
+        toast(changed ? '商品清单刚更新，请按最新清单重新排序。' : error?.message || '商品顺序暂时无法保存。', true);
+      }
+    } finally {
+      savingOrder = false;
+      if (!signal.aborted) {
+        draw('adminCatalog');
+        if (reload) void load('adminCatalog', true);
+      }
+    }
+  }
+
+  function nextGridRow(rows, from, direction) {
+    const origin = rows[from].getBoundingClientRect();
+    const candidates = rows.map((row, index) => ({ index, box: row.getBoundingClientRect() }))
+      .filter(({ box }) => (box.top - origin.top) * direction > 1)
+      .sort((a, b) => Math.abs(a.box.top - origin.top) - Math.abs(b.box.top - origin.top)
+        || Math.abs(a.box.left - origin.left) - Math.abs(b.box.left - origin.left));
+    return candidates[0]?.index ?? -1;
+  }
+
+  function sortByKeyboard(event) {
+    const grip = event.target.closest?.('.points-product-grip');
+    const list = grip?.closest('[data-points-sort]');
+    if (!list || dragging || savingOrder || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const rows = productRows(list);
+    const row = grip.closest('[data-points-product]');
+    const from = rows.indexOf(row);
+    const to = { ArrowLeft: from - 1, ArrowRight: from + 1, Home: 0, End: rows.length - 1 }[event.key]
+      ?? nextGridRow(rows, from, event.key === 'ArrowUp' ? -1 : 1);
+    if (to < 0 || to === from || to >= rows.length) return;
+    if (to < from) rows[to].before(row);
+    else rows[to].after(row);
+    grip.focus({ preventScroll: true });
+    void saveProductOrder(list);
   }
 
   function draw(key) {
@@ -364,18 +461,23 @@ export function mountPointsUi({ app, provider, getUser, getUsers = () => [], get
       'shop-admin': ['adminCatalog', 'adminOrders', 'adminChallenges'],
     };
     if (key !== 'notifications' && region && dependencies[route]?.includes(key)) {
+      if (route === 'shop-admin' && (dragging || savingOrder)) { adminDrawPending = true; return; }
       const active = document.activeElement;
       const action = region.contains(active) ? active.dataset.pointsAction : null;
       const id = action ? active.dataset.pointsId : null;
       region.innerHTML = viewBody(route);
       if (action) (findControl(action, id, region) ?? region).focus({ preventScroll: true });
+      if (route === 'shop-admin') {
+        adminDrawPending = false;
+        syncAdminSort();
+        focusLinkedOrder();
+      }
     }
     if (key === 'summary') paintCheckin();
     if (key === 'notifications') {
       updateBell();
       if (inboxOpen && dialog.open) updateInbox();
     }
-    if (key === 'adminOrders' && route === 'shop-admin') focusLinkedOrder();
   }
 
   function focusLinkedOrder() {
@@ -391,10 +493,9 @@ export function mountPointsUi({ app, provider, getUser, getUsers = () => [], get
     previousRoute = route;
     if (route !== 'shop-admin' || !linkedOrder()) previousOrder = null;
     if (changed && dialog.open && !inboxOpen) closeDialog();
-    music?.setShopActive?.(isMember() && route === 'shop');
+    syncAdminSort();
     updateBell();
     paintCheckin();
-    refreshMusic();
     if (isMember() || isAdmin()) void load('notifications');
     if (isMember()) {
       void load('summary', changed && ['points', 'shop'].includes(route));
@@ -644,8 +745,7 @@ export function mountPointsUi({ app, provider, getUser, getUsers = () => [], get
     else if (action === 'open-notice') {
       const row = notifications()?.items?.find(item => item.id === id);
       if (row) void readNotices([id], row);
-    } else if (action === 'music') { const pending = music?.toggleShop?.(); refreshMusic(); void Promise.resolve(pending).catch(() => {}).finally(refreshMusic); }
-    else if (action === 'redeem') showRedemption(id, target);
+    } else if (action === 'redeem') showRedemption(id, target);
     else if (action === 'use') showUse(id, target);
     else if (action === 'confirm-challenge') void confirmChallenge(id, target);
     else if (action === 'edit-product') editProduct(id, target);
@@ -653,6 +753,7 @@ export function mountPointsUi({ app, provider, getUser, getUsers = () => [], get
   }
 
   app.addEventListener('click', click, { signal });
+  app.addEventListener('keydown', sortByKeyboard, { signal });
   app.addEventListener('error', event => { if (event.target.matches?.('.points-cover img')) event.target.hidden = true; }, { signal, capture: true });
   dialog.addEventListener('click', click, { signal });
   dialog.addEventListener('submit', submitForm, { signal });
@@ -666,9 +767,9 @@ export function mountPointsUi({ app, provider, getUser, getUsers = () => [], get
   }, 30_000);
 
   return {
-    renderView, renderBell, renderCheckin, sync, updateCheckin, refreshMusic,
+    renderView, renderBell, renderCheckin, sync, updateCheckin, getSummary: summary,
     refreshSummary(value) { return value ? set('summary', value) : load('summary', true); },
     refreshNotifications() { return load('notifications', true); },
-    destroy() { events.abort(); clearInterval(notificationPoll); music?.setShopActive?.(false); closeDialog({ restore: false }); dialog.remove(); },
+    destroy() { events.abort(); clearInterval(notificationPoll); sortable?.destroy(); closeDialog({ restore: false }); dialog.remove(); },
   };
 }

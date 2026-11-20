@@ -42,6 +42,7 @@ function fixture({ before = async () => {}, author = U1, initialMedia = false, p
     entries: [{ id: ENTRY, authorId: author, ...input(), status: 'published', createdAt: NOW, updatedAt: NOW, deletedAt: null }],
     comments: [], reactions: [], favorites: [],
     settings: [{ id: 1, spaceName: '朝夕', subtitle: '两个人的小事', startDate: '2026-01-01', anniversaries: [], updatedAt: NOW }],
+    background_music: [1, 2].map(id => ({ id, revision: 0, current_id: null, tracks: [], play_mode: 'sequence' })),
     media: [],
   };
   const objects = new Map();
@@ -54,12 +55,13 @@ function fixture({ before = async () => {}, author = U1, initialMedia = false, p
   const isAdmin = () => user() === ADMIN;
   const owns = entryId => isAdmin() || tables.entries.some(entry => entry.id === entryId && entry.authorId === user());
   class Builder {
-    constructor(table, action = 'select', payload) { Object.assign(this, { table, action, payload, filters: [], orders: [], offset: 0, end: Infinity, cardinality: 'many' }); }
+    constructor(table, action = 'select', payload) { Object.assign(this, { table, action, payload, filters: [], minimums: [], orders: [], offset: 0, end: Infinity, cardinality: 'many' }); }
     select() { return this; }
     insert(payload) { this.action = 'insert'; this.payload = payload; return this; }
     update(payload) { this.action = 'update'; this.payload = payload; return this; }
     delete() { this.action = 'delete'; return this; }
     eq(field, value) { this.filters.push([field, value]); return this; }
+    gt(field, value) { this.minimums.push([field, value]); return this; }
     order(field) { this.orders.push(field); return this; }
     range(offset, end) { this.offset = offset; this.end = end; return this; }
     abortSignal(signal) { this.signal = signal; return this; }
@@ -69,7 +71,7 @@ function fixture({ before = async () => {}, author = U1, initialMedia = false, p
     async run() {
       const call = { kind: 'table', table: this.table, action: this.action, payload: this.payload, filters: [...this.filters], signal: this.signal, offset: this.offset }; calls.push(call); await before(call);
       if (!user()) return { data: null, error: { status: 401 } };
-      let selected = tables[this.table].filter(row => this.filters.every(([field, value]) => row[field] === value));
+      let selected = tables[this.table].filter(row => this.filters.every(([field, value]) => row[field] === value) && this.minimums.every(([field, value]) => row[field] > value));
       if (enforceEntryVisibility && this.table === 'entries') selected = selected.filter(row => row.status === 'draft' ? row.authorId === user() : row.type !== 'whisper' || row.authorId === user() || isAdmin());
       if (this.action === 'insert') {
         const payload = structuredClone(this.payload);
@@ -89,6 +91,7 @@ function fixture({ before = async () => {}, author = U1, initialMedia = false, p
           selected = selected.filter(row => row.id === user());
         }
         selected.forEach(row => Object.assign(row, this.payload, { updatedAt: new Date(Date.parse(NOW) + ++tick * 1000).toISOString() }));
+        if (this.table === 'background_music') selected.forEach(row => { row.revision++; });
       } else if (this.action === 'delete') {
         assert.ok(['reactions', 'favorites'].includes(this.table), 'records are never physically deleted');
         assert.ok(selected.every(row => row.userId === user()), 'only the current user reaction is removed');
@@ -172,7 +175,7 @@ test('missing client fails closed; anonymous init loads no private tables', asyn
   assert.deepEqual(f.calls.map(value => value.action), ['getSession']);
 });
 
-test('lyrics upload sends bytes with the explicit text MIME type', async () => {
+test('song uploads correct browser fallback MIME types for audio and lyrics', async () => {
   const f = fixture();
   await f.provider.init();
   await f.signIn();
@@ -181,15 +184,45 @@ test('lyrics upload sends bytes with the explicit text MIME type', async () => {
     assert.equal(bucket, 'memory-bgm');
     return {
       async upload(path, body, options) {
-        assert.equal(options.contentType, 'text/plain');
-        assert.ok(body instanceof ArrayBuffer, 'raw bytes keep the SDK out of its multipart path');
-        assert.equal(new TextDecoder().decode(body), lyric);
+        if (options.contentType === 'text/plain') {
+          assert.ok(body instanceof ArrayBuffer, 'raw bytes keep the SDK out of its multipart path');
+          assert.equal(new TextDecoder().decode(body), lyric);
+        } else {
+          assert.equal(options.contentType, 'audio/mpeg');
+          assert.equal(body.type, 'audio/mpeg');
+          assert.equal(await body.text(), 'fixture-song');
+        }
         return { data: { path }, error: null };
       },
     };
   };
   const file = new File([lyric], 'fixture.lrc', { type: 'application/octet-stream' });
   assert.match(await f.provider.uploadMusicFile(file, 'text/plain'), /^[\da-f-]{36}$/);
+  const song = new File(['fixture-song'], 'fixture.mp3', { type: 'application/octet-stream' });
+  assert.match(await f.provider.uploadMusicFile(song, 'audio/mpeg'), /^[\da-f-]{36}$/);
+});
+
+test('site and points playlists have separate versions and the points instrumental is bundled', async t => {
+  const f = fixture();
+  await f.signIn();
+  const scope = { scope: 'points' };
+  const pianoId = '50000000-0000-4000-8000-000000000004';
+  const song = { id: pianoId, title: '朝夕小调', artist: '朝夕', audio: pianoId };
+  const initial = await f.provider.loadMusic(scope);
+  const saved = await f.provider.saveMusic({ ...initial, current_id: song.id, tracks: [song] }, initial.revision, scope);
+  assert.equal(saved.revision, 1);
+  assert.deepEqual((await f.provider.loadMusic({ ...scope, revision: 0 })).tracks, [song]);
+  assert.deepEqual((await f.provider.loadMusic()).tracks, []);
+  assert.equal(await f.provider.loadMusic({ ...scope, revision: 1 }), null);
+  await assert.rejects(f.provider.saveMusic(initial, initial.revision, scope), error => error.code === 'CONFLICT');
+
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.match(url.href, /\/assets\/reward-covers\/shop-piano\.mp3$/);
+    return new Response('test-audio', { headers: { 'content-type': 'audio/mpeg' } });
+  });
+  assert.equal(await (await f.provider.loadMusicFile(pianoId)).text(), 'test-audio');
+  await f.provider.removeMusicFile(pianoId);
+  assert.equal(globalThis.fetch.mock.callCount(), 1);
 });
 
 test('transient session/profile/data failures keep restoration retryable without a password login', async () => {

@@ -8,8 +8,7 @@
 @import url('./settings-layout.css');
 @import url('./points.css');
 .points-desktop-bell { position: absolute; top: 35px; right: 14px; }
-.points-memory-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 13px 0; }
-.points-memory-confirm > span, .comment-reply-to { color: var(--muted); font-size: 12px; }
+.comment-reply-to { color: var(--muted); font-size: 12px; }
 .comment-reply-to { margin-left: 8px; }
 .comment-actions, .comment-reply-target { display: flex; align-items: center; gap: 10px; }
 .comment-reply-target { justify-content: space-between; color: var(--primary); font-size: 12px; }
@@ -139,6 +138,10 @@
 #mobile-search-form input { width: 100%; min-height: 44px; padding: 8px 11px; border: 1px solid var(--control); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 16px; }
 #mobile-search-form .primary { min-height: 44px; }
 .dialog.feed-date-dialog { width: min(400px, calc(100% - 24px)); padding: 22px; }
+.feed-date-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-right: 42px; }
+.calendar-footer { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; }
+.calendar-footer:has(.points-checkin) { justify-content: space-between; }
+.right-rail .calendar-footer .calendar-caption { margin: 0; }
 .feed-date-dialog .dialog-close { width: 44px; height: 44px; top: 12px; right: 12px; }
 .feed-date-navigation { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 8px; margin: 16px 0 12px; }
 .feed-date-navigation button { width: 44px; height: 44px; }
@@ -462,10 +465,12 @@
 .release-meta b { color: var(--accent); font-weight: 500; font-size: 11px; }
 .release-chevron { position: absolute; right: 0; top: 15px; width: 16px; height: 16px; color: var(--muted); }
 .release-details[open] .release-chevron { transform: rotate(180deg); }
-.memory-actions { gap: 9px; padding: 13px 0; }
-.memory-actions :is(.reaction-button, .bookmark-button) { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 8px 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--muted); line-height: 1.3; font-size: 13px; white-space: nowrap; }
-.memory-actions :is(.reaction-button, .bookmark-button) > .icon { width: 18px; height: 18px; flex: none; }
-.memory-actions .bookmark-button { margin-left: auto; }
+.memory-actions { flex-wrap: wrap; gap: 9px; padding: 13px 0; }
+.memory-actions :is(.reaction-button, .bookmark-button, .memory-confirm-button) { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 8px 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--muted); line-height: 1.3; font-size: 13px; white-space: nowrap; }
+.memory-actions :is(.reaction-button, .bookmark-button, .memory-confirm-button) > .icon { width: 18px; height: 18px; flex: none; }
+.memory-actions-end { display: flex; gap: inherit; margin-left: auto; }
+.memory-actions .memory-confirm-button:hover:not([aria-disabled="true"]) { color: var(--accent); background: var(--raised); }
+.memory-actions .memory-confirm-button[aria-disabled="true"] { background: var(--active); color: var(--accent); cursor: default; }
 .memory-actions .reaction-button:not(.comment-button):hover { color: var(--mood-sad-ink); background: var(--mood-sad-bg); border-color: #ddbec2; }
 .memory-actions .reaction-button.selected { color: var(--mood-sad-ink); background: var(--mood-sad-bg); border-color: #ddbec2; }
 .memory-actions .reaction-button.selected > .icon { fill: currentColor; }
@@ -501,7 +506,7 @@
 }
 @media (max-width: 700px) {
   .memory-actions { gap: 6px; }
-  .memory-actions :is(.reaction-button, .bookmark-button) { min-height: 44px; padding: 8px 10px; gap: 5px; font-size: 12px; }
+  .memory-actions :is(.reaction-button, .bookmark-button, .memory-confirm-button) { min-height: 44px; padding: 8px 10px; gap: 5px; font-size: 12px; }
   .editor-dialog .editor-previews { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .release-details summary { min-height: 44px; }
 }

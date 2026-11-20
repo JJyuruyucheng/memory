@@ -24,7 +24,6 @@ import { mountBackgroundMusic } from './background-music.js';
 import { trackActiveUsage } from './active-usage.js';
 import { mountPointsUi } from './points-ui.js';
 import { mountPointsCheckin } from './points-checkin.js';
-import { mountShopMusic } from './shop-music.js';
 import { ALLOWED_FILE_TYPES, escapeHtml as esc, filterEntries, collectEntryTags, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
 
 const app = document.querySelector('#app');
@@ -34,7 +33,7 @@ const musicRoot = document.querySelector('#bgm-root');
 const scrollToPageTop = () => (document.body.classList.contains('has-bgm-layout') ? app : window).scrollTo({ top: 0 });
 let provider, loginVerification, loginPhotos, loginCarousel, loginPhotoEditor, mediaViewer, profileEditor;
 let assistant, assistantIdentity, backgroundMusic, stopUsage;
-let pointsUi, pointsIdentity, shopMusic, stopCheckin;
+let pointsUi, pointsIdentity, stopCheckin;
 let commentRequest;
 const moodNames = { happy: '微笑', neutral: '一般', sad: '难受', unset: '未填写' };
 const moodIcons = { happy: 'smile', neutral: 'neutral', sad: 'sad' };
@@ -51,7 +50,9 @@ let adminActivity = { days: 30, pending: false };
 let calendarCursor = dayKey(new Date()).slice(0, 7), selectedDay = '';
 const route = () => location.hash.slice(1).split('?')[0] || 'timeline';
 const isFeedView = view => ['timeline', 'events', 'favorites'].includes(view);
-const pointsRoutes = new Set(['points', 'shop', 'backpack', 'shop-admin']);
+const memberPointsRoutes = new Set(['points', 'shop', 'backpack']);
+const pointsRoutes = new Set([...memberPointsRoutes, 'shop-admin']);
+const musicScope = () => state.currentUser?.role === 'member' && memberPointsRoutes.has(route()) ? 'points' : 'site';
 const user = id => state.users.find(u => u.id === id) || { id, name: '已离开的作者', color: 'sage' };
 const dateLabel = (value, full = false, withTime = false) => new Intl.DateTimeFormat('zh-CN', { timeZone: CONFIG.timeZone, ...(full ? { year: 'numeric' } : {}), month: 'long', day: 'numeric', ...(withTime ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } : {}) }).format(new Date(value));
 const avatar = (u, small = false) => {
@@ -85,7 +86,6 @@ function navLink(item) { const [id, symbol, label] = item; return `<a href="#${i
 
 function clearPoints() {
   stopCheckin?.(); stopCheckin = null;
-  shopMusic?.destroy(); shopMusic = null;
   pointsUi?.destroy(); pointsUi = null;
   pointsIdentity = null;
 }
@@ -97,12 +97,7 @@ function preparePoints() {
   pointsIdentity = current.id;
   pointsUi = mountPointsUi({
     app, modalRoot, provider, getUser: () => state.currentUser, getUsers: () => state.users,
-    getRoute: route, toast, openNotification: openPointsNotification,
-    music: {
-      setShopActive: value => shopMusic?.setShopActive(value),
-      getShopState: () => shopMusic?.getShopState() || { available: false },
-      toggleShop: () => shopMusic?.toggleShop(),
-    },
+    getRoute: route, toast, openNotification: openPointsNotification, onSummary: updateMemoryConfirmations,
   });
   const ui = pointsUi;
   if (current.role === 'member') stopCheckin = mountPointsCheckin(provider, {
@@ -121,14 +116,12 @@ function syncAssistant(locked = false) {
     stopUsage?.();
     assistantIdentity = identity;
     assistant = mountAssistant(assistantRoot, identity && provider?.askAssistant);
-    backgroundMusic = identity && provider?.loadMusic && musicRoot ? mountBackgroundMusic(musicRoot, provider) : null;
-    if (identity && pointsUi && state.currentUser.role === 'member') {
-      shopMusic = mountShopMusic(backgroundMusic, () => pointsUi?.refreshMusic());
-    }
+    backgroundMusic = identity && provider?.loadMusic && musicRoot ? mountBackgroundMusic(musicRoot, provider, musicScope()) : null;
     stopUsage = identity && state.currentUser.role === 'member' && provider?.recordActiveMinute ? trackActiveUsage(provider.recordActiveMinute) : null;
     document.body.classList.toggle('has-bgm', Boolean(backgroundMusic));
   }
-  backgroundMusic?.mountSettings(app.querySelector('#bgm-settings'));
+  backgroundMusic?.setScope(musicScope());
+  backgroundMusic?.mountSettings(app.querySelector('#bgm-settings'), app.querySelector('#points-bgm-settings'));
   const article = identity && modalRoot.querySelector('.detail-dialog[open][data-assistant-article]');
   assistant.setContext(article || assistantRoot, article?.dataset.assistantArticle);
   if (identity) pointsUi?.sync();
@@ -240,7 +233,6 @@ function renderView(stats) {
       const filterControls = renderFilters();
       const rows = filtered();
       return `${heading(title, view === 'favorites' ? '你标记过的片段，都在这里。' : view === 'events' ? '第一次、纪念日，还有一起经历的每一个特别。' : `${dateLabel(new Date(), true)} · ${esc(state.settings.subtitle || '平凡的小事，也值得被记住。')}`)}
-        ${view === 'timeline' ? pointsUi?.renderCheckin() || '' : ''}
         <div class="home-grid"><section class="feed-column" tabindex="0" aria-label="我们的时光线">
         ${filterControls}<div class="feed-summary"><span>${selectedDay ? `${esc(selectedDay)} · ` : ''}共 ${rows.length} 条${view === 'favorites' ? '收藏' : '回忆'}</span>${selectedDay || filters.query || filters.tag || filters.mood !== 'all' || filters.authorId !== 'all' || filters.type !== 'all' || filters.month ? '<button class="text-button" data-action="clear-filters">清除筛选</button>' : '<span>按发生时间排列</span>'}</div>
         ${renderFeed(rows)}</section><aside class="right-rail" tabindex="0" aria-label="共同空间信息">${renderTogether(stats)}${renderCalendar()}${renderUpcoming()}</aside></div>`;
@@ -275,16 +267,35 @@ function renderFeed(rows, trash = false) {
   let lastMonth = '';
   return `<div class="timeline">${rows.map(entry => { const month = dayKey(entry.occurredAt).slice(0, 7); const marker = month !== lastMonth ? `<div class="month-marker"><span>${month.slice(0, 4)} 年 ${Number(month.slice(5))} 月</span></div>` : ''; lastMonth = month; return marker + renderEntry(entry, trash); }).join('')}</div>`;
 }
+function memoryConfirmationState(memory) {
+  if (memory?.complete) return { label: '回忆已确认', hint: '双方已确认，发帖者获得 5 分。', confirmed: true };
+  if (memory?.confirmed_by?.includes(state.currentUser.id)) return { label: '待对方确认', hint: '等对方确认后，发帖者获得 5 分。', confirmed: true };
+  return { label: '确认回忆', hint: '双方确认后，发帖者获得 5 分。', confirmed: false };
+}
+function updateMemoryConfirmations(summary) {
+  const memories = new Map(summary?.memories?.map(memory => [memory.entry_id, memory]));
+  for (const button of app.querySelectorAll('[data-action="points-confirm-memory"]')) {
+    const { label, hint, confirmed } = memoryConfirmationState(memories.get(button.dataset.id));
+    button.querySelector('span').textContent = label;
+    button.title = hint;
+    button.setAttribute('aria-disabled', String(confirmed));
+  }
+}
 function renderEntry(entry, trash = false) {
   const author = user(entry.authorId), liked = entry.reactionBy?.includes(state.currentUser.id), saved = entry.favoriteBy?.includes(state.currentUser.id);
   const askButton = provider?.askAssistant && ['note', 'event'].includes(entry.type) && !entry.deletedAt
     ? `<button class="reaction-button comment-button" data-action="ask-guazi" data-id="${esc(entry.id)}">问瓜子</button>` : '';
+  const allowConfirm = pointsUi && state.currentUser.role === 'member' && author.role === 'member'
+    && entry.status !== 'draft' && ['note', 'event'].includes(entry.type) && !entry.deletedAt && !trash;
+  const memory = allowConfirm ? memoryConfirmationState(pointsUi.getSummary()?.memories?.find(row => row.entry_id === entry.id)) : null;
+  const confirmButton = memory ? `<button type="button" class="memory-confirm-button" data-action="points-confirm-memory"
+    data-id="${esc(entry.id)}" aria-disabled="${memory.confirmed}" title="${memory.hint}">${icon('star')}<span>${memory.label}</span></button>` : '';
   return `<article class="memory-card ${entry.type === 'event' ? 'event-card' : entry.type === 'whisper' ? 'whisper-card' : ''}">
     <div class="memory-meta">${avatar(author, true)}<div><strong>${esc(author.name)}</strong><time datetime="${esc(entry.occurredAt)}">${dateLabel(entry.occurredAt, false, true)}${entry.createdAt && dayKey(entry.createdAt) !== dayKey(entry.occurredAt) ? ' · 补记' : ''}</time></div><span class="entry-kind" ${entry.type === 'whisper' ? 'title="仅作者和管理员可见"' : ''}>${entry.type === 'event' ? `${icon('calendar')}事件` : entry.type === 'whisper' ? `${icon('lock')}悄悄话` : '随记'}</span>${canEdit(entry) && !trash ? `<button class="icon-button" data-action="edit" data-id="${esc(entry.id)}" aria-label="编辑${esc(entry.title || '这条回忆')}">${icon('edit')}</button>` : ''}</div>
     ${entry.title ? `<h2>${esc(entry.title)}</h2>` : ''}${entryPreviewMarkup(entry)}
     ${renderEntryMedia(entry, safeUrl)}
     ${entry.mood || entry.tags?.length ? `<div class="entry-tags">${entry.mood ? `<span class="mood-tag ${entry.mood}">${icon(moodIcons[entry.mood])}${moodNames[entry.mood] || '未填写'}</span>` : ''}${(entry.tags || []).map(tag => `<button class="tag" data-action="search-tag" data-value="${esc(tag)}"># ${esc(tag)}</button>`).join('')}</div>` : ''}
-    <div class="memory-actions">${trash ? `${canEdit(entry) ? `<button class="text-button" data-action="restore" data-id="${esc(entry.id)}">${icon('restore')}恢复这条回忆</button>` : '<span class="muted">由作者恢复</span>'}` : `<button class="reaction-button ${liked ? 'selected' : ''}" data-action="reaction" data-id="${esc(entry.id)}" aria-pressed="${Boolean(liked)}" aria-label="${liked ? '取消喜欢' : '喜欢这条回忆'}">${icon('heart')}<span>${liked ? '已喜欢' : '喜欢'}</span>${entry.reactionBy?.length ? `<span class="action-count num">${entry.reactionBy.length}</span>` : ''}</button><button class="reaction-button comment-button" data-action="detail" data-id="${esc(entry.id)}">${icon('comment')}<span>留言</span>${entry.comments?.length ? `<span class="action-count num">${entry.comments.length}</span>` : ''}</button>${askButton}<button class="bookmark-button ${saved ? 'selected' : ''}" data-action="favorite" data-id="${esc(entry.id)}" aria-label="${saved ? '取消收藏' : '收藏这条回忆'}" aria-pressed="${Boolean(saved)}">${icon('bookmark')}<span>${saved ? '已收藏' : '收藏'}</span></button>`}</div>
+    <div class="memory-actions">${trash ? `${canEdit(entry) ? `<button class="text-button" data-action="restore" data-id="${esc(entry.id)}">${icon('restore')}恢复这条回忆</button>` : '<span class="muted">由作者恢复</span>'}` : `<button class="reaction-button ${liked ? 'selected' : ''}" data-action="reaction" data-id="${esc(entry.id)}" aria-pressed="${Boolean(liked)}" aria-label="${liked ? '取消喜欢' : '喜欢这条回忆'}">${icon('heart')}<span>${liked ? '已喜欢' : '喜欢'}</span>${entry.reactionBy?.length ? `<span class="action-count num">${entry.reactionBy.length}</span>` : ''}</button><button class="reaction-button comment-button" data-action="detail" data-id="${esc(entry.id)}">${icon('comment')}<span>留言</span>${entry.comments?.length ? `<span class="action-count num">${entry.comments.length}</span>` : ''}</button>${askButton}<div class="memory-actions-end">${confirmButton}<button class="bookmark-button ${saved ? 'selected' : ''}" data-action="favorite" data-id="${esc(entry.id)}" aria-label="${saved ? '取消收藏' : '收藏这条回忆'}" aria-pressed="${Boolean(saved)}">${icon('bookmark')}<span>${saved ? '已收藏' : '收藏'}</span></button></div>`}</div>
   </article>`;
 }
 function renderTogether(stats) {
@@ -295,7 +306,7 @@ function renderTogether(stats) {
 function renderCalendar() {
   const [year, month] = calendarCursor.split('-').map(Number);
   const dates = new Set(visibleEntries().filter(entry => !entry.deletedAt && entry.status !== 'draft').map(entry => dayKey(entry.occurredAt)));
-  return `<section class="calendar-panel"><div class="rail-heading"><h2>${year} 年 ${month} 月</h2><div><button class="icon-button previous" data-action="calendar-prev" aria-label="上个月">${icon('chevron')}</button><button class="icon-button" data-action="calendar-next" aria-label="下个月">${icon('chevron')}</button></div></div>${calendarGrid(calendarCursor, { dates, selectedDay })}<p class="calendar-caption"><span></span>有记录的日子</p></section>`;
+  return `<section class="calendar-panel"><div class="rail-heading"><h2>${year} 年 ${month} 月</h2><div><button class="icon-button previous" data-action="calendar-prev" aria-label="上个月">${icon('chevron')}</button><button class="icon-button" data-action="calendar-next" aria-label="下个月">${icon('chevron')}</button></div></div>${calendarGrid(calendarCursor, { dates, selectedDay })}<div class="calendar-footer"><p class="calendar-caption"><span></span>有记录的日子</p>${pointsUi?.renderCheckin() || ''}</div></section>`;
 }
 function upcoming() { return (state.settings.anniversaries || []).map(a => anniversaryInfo(a, new Date())).filter(a => !a.isPast).sort((a, b) => a.daysUntil - b.daysUntil); }
 function renderUpcoming() { return `<section class="upcoming-panel"><div class="rail-heading"><h2>下一个小期待</h2><a class="small-link" href="#anniversaries">查看全部</a></div>${upcoming().slice(0, 2).map(a => `<div class="upcoming-row"><div><strong>${esc(a.title)}</strong><small>${esc(a.nextDate || a.date)}</small></div><span>${a.isToday ? '就是今天' : `<b class="num">${a.daysUntil}</b> 天后`}</span></div>`).join('') || '<p class="muted">设置一个值得期待的日子吧。</p>'}</section>`; }
@@ -356,7 +367,7 @@ function renderSettings() {
         <fieldset><div id="anniversary-fields">${(state.settings.anniversaries || []).map(a => anniversaryFields(a)).join('')}</div></fieldset>
       </section>
     </form>
-    ${provider?.loadMusic ? '<section id="bgm-settings" class="settings-section settings-music"></section>' : ''}
+    ${provider?.loadMusic ? '<section id="bgm-settings" class="settings-section settings-music"></section><section id="points-bgm-settings" class="settings-section settings-music"></section>' : ''}
     <div class="settings-utilities">
       ${renderLoginPhotoSettings()}
       <section class="settings-section"><h2>数据与账号</h2><div class="settings-actions"><button class="secondary" data-action="export-mine">${icon('download')}导出我的回忆</button><button class="secondary" data-action="export-all">导出共同档案</button>${CONFIG.mode === 'demo' ? '<button class="text-button danger" data-action="reset-demo">恢复初始示例</button>' : '<button class="text-button" data-action="logout">退出当前账号</button>'}</div></section>
@@ -442,7 +453,7 @@ function showProfileEditor(button) {
 function showFeedDatePicker(button) {
   const entries = visibleEntries().filter(entry => entry.status !== 'draft');
   const dates = new Set(filterEntries(entries, feedScope(route())).map(entry => dayKey(entry.occurredAt)).filter(Boolean));
-  openDialog(feedDatePickerMarkup(), 'feed-date-dialog', button);
+  openDialog(feedDatePickerMarkup(pointsUi?.renderCheckin()), 'feed-date-dialog', button);
   mountFeedDatePicker(modalRoot.querySelector('dialog'), { selectedMonth: filters.month, selectedDay, dates });
 }
 function showMobileSearch(button) {
@@ -537,7 +548,6 @@ function showDetail(id, commentId) {
       ${shared && comment.authorId !== state.currentUser.id ? `<button type="button" class="text-button" data-action="reply-comment" data-id="${esc(comment.id)}">回复</button>` : ''}</div></div></div>`;
   }).join('');
   openDialog(`<h2>${esc(entry.title || (entry.type === 'whisper' ? '给自己的一页' : '日常的一页'))}</h2><p class="dialog-description">${esc(user(entry.authorId).name)} · ${dateLabel(entry.occurredAt, true, true)}${entry.type === 'whisper' ? ' · 仅作者和管理员可见' : ''}</p><p class="detail-body">${renderEntryText(entry.title, entry.content)}</p>
-    ${shared ? `<div class="points-memory-confirm"><button type="button" class="secondary" data-action="points-confirm-memory" data-id="${esc(id)}">${icon('heart')} 确认共同回忆</button><span>两人确认后各得 5 分</span></div>` : ''}
     ${comments.length ? `<section class="comments" aria-label="留言">${commentsMarkup}</section>` : ''}
     <form id="comment-form" data-id="${esc(id)}"><div class="comment-reply-target" hidden><span></span><button type="button" class="text-button" data-action="cancel-comment-reply">取消回复</button></div>
     <label class="sr-only" for="comment-content">留言内容</label><textarea id="comment-content" name="content" rows="2" maxlength="2000" required placeholder="看到这段回忆，想起了什么？"></textarea><button class="primary" type="submit">留在这一页</button><p class="form-error" role="alert"></p></form>`, 'detail-dialog');
@@ -630,12 +640,17 @@ document.addEventListener('click', async event => {
       case 'reply-comment': setCommentReply(id); break;
       case 'cancel-comment-reply': setCommentReply(null); break;
       case 'points-confirm-memory': {
+        if (button.disabled || button.getAttribute('aria-disabled') === 'true') break;
+        const identity = state.currentUser?.id;
+        const entry = visibleEntries().find(row => row.id === id);
         button.disabled = true;
         try {
           const snapshot = await provider.pointsConfirmMemory(id);
+          if (state.currentUser?.id !== identity) break;
           pointsUi?.refreshSummary(snapshot);
           const memory = snapshot.memories?.find(entry => entry.entry_id === id);
-          toast(memory?.complete ? '共同回忆已确认，各得 5 分。' : '已确认，等对方也确认后一起领分。');
+          toast(memory?.complete ? (entry?.authorId === identity ? '共同回忆已确认，你获得 5 分。' : '共同回忆已确认，发帖者获得 5 分。')
+            : '你已确认。对方确认后，发帖者获得 5 分。');
         } finally { if (button.isConnected) button.disabled = false; }
         break;
       }

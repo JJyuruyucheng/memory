@@ -13,6 +13,8 @@ const PAGE_SIZE = 500;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const USERNAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
 const DEFAULT_SETTINGS = { spaceName: '朝夕', subtitle: '把我们的日子，一页页留下来。', startDate: '', anniversaries: [] };
+const POINTS_PIANO_ID = '50000000-0000-4000-8000-000000000004';
+const pointsPianoUrl = new URL('../assets/reward-covers/shop-piano.mp3', import.meta.url);
 const clone = value => structuredClone(value);
 
 export class SupabaseProviderError extends Error {
@@ -342,18 +344,18 @@ export function createSupabaseProvider(config = {}) {
   });
   return {
     ...points,
-    async loadMusic({ signal, revision } = {}) {
+    async loadMusic({ signal, revision, scope = 'site' } = {}) {
       const expected = generation;
       requireUser(expected);
       const requestSignal = signal ? AbortSignal.any([sessionController.signal, signal]) : sessionController.signal;
-      const lookup = client.from('background_music').select('revision,current_id,play_mode,tracks').eq('id', 1);
+      const lookup = client.from('background_music').select('revision,current_id,play_mode,tracks').eq('id', scope === 'points' ? 2 : 1);
       const staleOnly = Number.isSafeInteger(revision);
       const value = await result((staleOnly ? lookup.gt('revision', revision).maybeSingle() : lookup.single()).abortSignal(requestSignal), expected, { allowNull: staleOnly });
       return value ? musicState(value) : null;
     },
-    saveMusic: (value, version) => enqueue(async expected => {
+    saveMusic: (value, version, { scope = 'site' } = {}) => enqueue(async expected => {
       const { current_id, play_mode, tracks } = musicState(value);
-      const saved = await result(query(client.from('background_music').update({ current_id, play_mode, tracks }).eq('id', 1)
+      const saved = await result(query(client.from('background_music').update({ current_id, play_mode, tracks }).eq('id', scope === 'points' ? 2 : 1)
         .eq('revision', version).select('revision,current_id,play_mode,tracks').maybeSingle()), expected, { allowNull: true });
       if (!saved) throw new SupabaseProviderError('另一位成员刚更新了歌单，请重试。', 'CONFLICT', 409);
       return musicState(saved);
@@ -363,20 +365,27 @@ export function createSupabaseProvider(config = {}) {
       requireUser(expected);
       if (!MUSIC_UUID.test(id)) throw new SupabaseProviderError('音源地址无效。', 'VALIDATION');
       const requestSignal = signal ? AbortSignal.any([sessionController.signal, signal]) : sessionController.signal;
+      if (id === POINTS_PIANO_ID) {
+        const response = await fetch(pointsPianoUrl, { signal: requestSignal });
+        if (!response.ok) throw new SupabaseProviderError('朝夕小调暂时无法加载。', 'NETWORK', response.status);
+        const audio = await response.blob();
+        requireSession(expected);
+        return audio;
+      }
       return result(client.storage.from(BGM_BUCKET).download(id, {}, { signal: requestSignal, cache: 'no-store' }), expected);
     },
     uploadMusicFile: (file, mime) => enqueue(async expected => {
       if (!(file instanceof Blob) || !mime || mime !== musicFileType(file)) throw new SupabaseProviderError('请选择音频或 LRC 歌词文件。', 'VALIDATION');
       const id = crypto.randomUUID();
-      // The SDK otherwise sends the browser's multipart file type, often octet-stream for .lrc.
-      const body = mime === 'text/plain' ? await file.arrayBuffer() : file;
+      // Keep the detected type when the browser supplies a generic file type.
+      const body = mime === 'text/plain' ? await file.arrayBuffer() : file.slice(0, file.size, mime);
       requireUser(expected);
       const request = client.storage.from(BGM_BUCKET).upload(id, body, { contentType: mime, cacheControl: '0', upsert: false });
       await result(request, expected, { fallback: mime === 'text/plain' ? '歌词上传失败，请重新选择文件后重试。' : '音频上传未完成。' });
       return id;
     }),
     removeMusicFile: id => enqueue(async expected => {
-      if (MUSIC_UUID.test(id)) await result(client.storage.from(BGM_BUCKET).remove([id]), expected);
+      if (id !== POINTS_PIANO_ID && MUSIC_UUID.test(id)) await result(client.storage.from(BGM_BUCKET).remove([id]), expected);
     }),
     async recordActiveMinute() {
       const expected = generation;

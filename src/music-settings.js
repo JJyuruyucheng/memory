@@ -14,10 +14,13 @@ function adjacentRow(items, from, direction) {
     .sort((a, b) => Math.abs(center(a.box) - center(origin)) - Math.abs(center(b.box) - center(origin)))[0]?.index ?? -1;
 }
 
-export function mountMusicSettings(slot, actions) {
+export function mountMusicSettings(slot, actions, { scope = 'site' } = {}) {
   const events = new AbortController(), { signal } = events;
+  const points = scope === 'points';
+  const heading = points ? '积分专属音乐' : '背景音乐';
+  const editTitle = points ? 'points-bgm-edit-title' : 'bgm-edit-title';
   slot.innerHTML = `
-    <div class="bgm-library-head"><h2>背景音乐</h2><span class="bgm-total"></span><button type="button" class="secondary" data-library="new" aria-expanded="false">${icon('plus')}添加音乐</button></div>
+    <div class="bgm-library-head"><h2>${heading}</h2><span class="bgm-total"></span><button type="button" class="secondary" data-library="new" aria-expanded="false">${icon('plus')}添加音乐</button></div>
     <form class="bgm-upload" hidden>
       <label>曲名<input name="title" maxlength="80" placeholder="使用文件名" /></label>
       <label>演唱者<input name="artist" maxlength="80" /></label>
@@ -25,10 +28,10 @@ export function mountMusicSettings(slot, actions) {
       <label>LRC 歌词<input name="lyrics" type="file" accept=".lrc" /></label>
       <button class="primary" type="submit">保存曲目</button>
     </form>
-    <ol class="bgm-sort-list" aria-label="共同歌单"></ol>
+    <ol class="bgm-sort-list" aria-label="${points ? '积分歌单' : '共同歌单'}"></ol>
     <p class="bgm-feedback" role="status"></p>
-    <dialog class="dialog bgm-edit-dialog" aria-labelledby="bgm-edit-title">
-      <h2 id="bgm-edit-title">曲目设置</h2><button type="button" class="icon-button dialog-close" data-library="close" aria-label="关闭曲目设置">${icon('close')}</button>
+    <dialog class="dialog bgm-edit-dialog" aria-labelledby="${editTitle}">
+      <h2 id="${editTitle}">曲目设置</h2><button type="button" class="icon-button dialog-close" data-library="close" aria-label="关闭曲目设置">${icon('close')}</button>
       <div class="bgm-edit-files">
         <label class="bgm-file-label"><span>上传音源</span><input type="file" name="audio" accept="${BGM_ACCEPT}" /></label>
         <label class="bgm-file-label"><span>上传 LRC 歌词</span><input type="file" name="lyrics" accept=".lrc" /></label>

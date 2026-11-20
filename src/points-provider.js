@@ -10,6 +10,7 @@ const errors = {
   POINTS_REQUEST_CONFLICT: '这次请求已处理，请先查看背包。',
   POINTS_INVALID_PRODUCT: '请核对名称、售价、库存和封面。',
   POINTS_INVALID_CHALLENGE: '请核对挑战标题和奖励分。',
+  POINTS_INVALID_REQUEST: '排序未保存，请重新加载商品。',
 };
 
 export function pointsError(message) {
@@ -53,6 +54,7 @@ export function makePointsProvider(rpc, checkAdmin) {
     pointsConfirmMemory: id => rpc('points_confirm_memory', { p_entry_id: id }, true),
     pointsConfirmChallenge: id => rpc('points_confirm_challenge', { p_challenge_id: id }, true),
     pointsAdminCatalog: () => rpc('points_admin_catalog'),
+    pointsAdminReorder: ids => rpc('points_admin_reorder_products', { p_product_ids: ids }, true),
     pointsAdminOrders: () => rpc('points_admin_orders'),
     pointsAdminChallenges: () => rpc('points_admin_challenges'),
     pointsAdminSaveProduct: product => rpc('points_admin_save_product', {

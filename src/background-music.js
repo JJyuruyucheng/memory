@@ -1,9 +1,9 @@
 import { mountFloatingPosition, placeAdjacent } from './assistant-position.js';
-import { adjacentTrack, lyricText, musicFileType, parseLyrics } from './background-music-data.js';
+import { adjacentTrack, parseLyrics } from './background-music-data.js';
+import { musicLibrary } from './background-music-library.js';
 import { escapeHtml as esc } from './domain.js';
 import { icon } from './icons.js';
 import { mountMusicCaptions } from './music-captions.js';
-import { mountMusicSettings } from './music-settings.js';
 
 function preference(name, value) {
   try {
@@ -15,7 +15,7 @@ function preference(name, value) {
 const control = (action, label, content, attrs = '') =>
   `<button type="button" data-bgm="${action}" aria-label="${label}" title="${label}" ${attrs}>${content}</button>`;
 
-export function mountBackgroundMusic(host, provider) {
+export function mountBackgroundMusic(host, provider, initialScope = 'site') {
   const events = new AbortController(), { signal } = events;
   host.innerHTML = `<div class="bgm-widget" data-ui>
     <button type="button" class="bgm-trigger" aria-label="背景音乐" aria-expanded="false" aria-controls="bgm-panel">${icon('music')}</button>
@@ -38,17 +38,33 @@ export function mountBackgroundMusic(host, provider) {
   const now = panel.querySelector('.bgm-now'), panelList = panel.querySelector('ol'), feedback = panel.querySelector('.bgm-feedback');
   const byAction = action => panel.querySelector(`[data-bgm="${action}"]`);
   const playButton = byAction('play');
-  const playPreference = 'chaoxi-bgm-playing', lyricPreference = 'chaoxi-bgm-lyrics';
-  let enabled = preference(playPreference) !== 'off', lyricsOn = preference(lyricPreference) === 'on';
-  let state, slot, library, working = false, sorting = false, blobUrl, loadedAudio, loading = false, mediaVersion = 0;
+  const lyricPreference = 'chaoxi-bgm-lyrics';
+  const playPreference = scope => scope === 'points' ? 'chaoxi-points-bgm-playing' : 'chaoxi-bgm-playing';
+  let scope = initialScope, lyricsOn = preference(lyricPreference) === 'on';
+  let blobUrl, loadedAudio, loading = false, mediaVersion = 0;
   let lyricsKey, lines = [], played = [];
-  let shopSuspended = false, wasPlaying = false;
   let panelSpace = 0, captionSpace = 0;
-  const current = () => state?.tracks.find(track => track.id === state.current_id);
+  const positions = new Map();
+  const libraries = new Map(['site', 'points'].map(key => [key, musicLibrary(provider, key, {
+    signal,
+    onMessage(text) { if (scope === key) message(text); },
+    onChange(next, previous) {
+      if (scope !== key) return;
+      if (previous?.current_id && next.current_id !== previous.current_id) {
+        if (played.at(-1) === next.current_id) played.pop();
+        else played.push(previous.current_id);
+      }
+      render(); void loadTrack(); void readLyrics();
+    },
+  })]));
+  const active = () => libraries.get(scope);
+  const current = () => active().current();
+  const enabled = () => preference(playPreference(scope)) !== 'off';
+  const setEnabled = value => preference(playPreference(scope), value);
+  const refresh = () => active().refresh();
 
   function message(value) {
     feedback.textContent = value;
-    library?.message(value);
   }
 
   const placePlayer = mountFloatingPosition(widget, trigger, {
@@ -96,7 +112,7 @@ export function mountBackgroundMusic(host, provider) {
   }
 
   function showLyrics() {
-    caption.render(lyricsOn && !shopSuspended ? lines : []);
+    caption.render(lyricsOn ? lines : []);
   }
 
   function setLyrics(value) {
@@ -130,24 +146,33 @@ export function mountBackgroundMusic(host, provider) {
     playButton.title = label;
     playButton.disabled = loading || !current()?.audio;
     widget.classList.toggle('is-playing', playing);
-    caption.transport(playing, !playButton.disabled, (state?.tracks.length ?? 0) > 1);
+    caption.transport(playing, !playButton.disabled, (active().state?.tracks.length ?? 0) > 1);
   }
 
   async function play() {
-    if (shopSuspended) return;
-    try { await audio.play(); message(''); }
+    const version = mediaVersion;
+    try { await audio.play(); if (version === mediaVersion) message(''); }
     catch (error) {
-      if (!signal.aborted && error.name !== 'AbortError') message(error.name === 'NotAllowedError' ? '点播放开启声音。' : '这首音乐暂时无法播放。');
+      if (!signal.aborted && version === mediaVersion && error.name !== 'AbortError') {
+        message(error.name === 'NotAllowedError' ? '点播放开启声音。' : '这首音乐暂时无法播放。');
+      }
     }
     showPlayback();
+  }
+
+  function clearTrack() {
+    mediaVersion++;
+    audio.pause(); audio.removeAttribute('src'); audio.load();
+    if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = ''; }
+    loadedAudio = undefined;
+    loading = false;
   }
 
   async function loadTrack() {
     const key = current()?.audio || '';
     if (key === loadedAudio) return;
-    const version = ++mediaVersion;
-    audio.pause(); audio.removeAttribute('src'); audio.load();
-    if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = ''; }
+    clearTrack();
+    const version = mediaVersion;
     loadedAudio = key; loading = Boolean(key); showPlayback();
     if (!key) return;
     try {
@@ -155,7 +180,10 @@ export function mountBackgroundMusic(host, provider) {
       if (signal.aborted || version !== mediaVersion) return;
       blobUrl = URL.createObjectURL(blob);
       audio.src = blobUrl;
-      if (enabled) await play();
+      const position = positions.get(scope);
+      positions.delete(scope);
+      if (position?.key === key && position.seconds > 0) audio.currentTime = position.seconds;
+      if (enabled()) await play();
     } catch {
       if (!signal.aborted && version === mediaVersion) { loadedAudio = undefined; message('音源加载失败，点播放重试。'); }
     } finally {
@@ -164,8 +192,11 @@ export function mountBackgroundMusic(host, provider) {
   }
 
   function render() {
+    const state = active().state;
     const currentTrack = current(), tracks = state?.tracks ?? [];
-    now.querySelector('strong').textContent = currentTrack?.title || '暂无曲目';
+    trigger.setAttribute('aria-label', scope === 'points' ? '积分专属音乐' : '背景音乐');
+    panelList.setAttribute('aria-label', scope === 'points' ? '积分歌单' : '播放列表');
+    now.querySelector('strong').textContent = currentTrack?.title || (state ? '暂无曲目' : '正在读歌单…');
     now.querySelector('small').textContent = currentTrack ? currentTrack.audio ? currentTrack.artist : '待上传音源' : '';
     panelList.innerHTML = tracks.map(track => `<li><button type="button" data-bgm="select" data-id="${track.id}" aria-pressed="${track.id === state.current_id}">
       <strong>${esc(track.title)}</strong><small>${esc(track.audio ? track.artist : '待上传音源')}</small></button></li>`).join('');
@@ -175,120 +206,26 @@ export function mountBackgroundMusic(host, provider) {
     const label = shuffle ? '随机播放，点击切回顺序' : '顺序播放，点击切换随机';
     mode.setAttribute('aria-label', label); mode.title = label;
     byAction('lyrics').setAttribute('aria-pressed', String(lyricsOn));
-    library?.render(state);
     showPlayback();
   }
 
-  function apply(next) {
-    if (signal.aborted || (state && next.revision <= state.revision)) return;
-    if (state?.current_id && next.current_id !== state.current_id) {
-      if (played.at(-1) === next.current_id) played.pop();
-      else played.push(state.current_id);
-    }
-    state = next;
-    if (feedback.textContent) message('');
-    render();
-    void loadTrack();
-    void readLyrics();
-  }
-
-  async function refresh() {
-    if (working || sorting || signal.aborted) return;
-    try {
-      const next = await provider.loadMusic({ signal, revision: state?.revision });
-      if (next && !sorting) apply(next);
-    } catch { if (!state && !signal.aborted) message('歌单暂时无法读取。'); }
-  }
-
-  async function change(edit) {
-    if (!state || working || signal.aborted) return false;
-    working = true; message('');
-    try { await edit(); return true; }
-    catch (error) {
-      if (!signal.aborted) { library?.render(state); message(error.message || '歌单暂时无法保存。'); }
-      return false;
-    } finally { working = false; void refresh(); }
-  }
-
-  const save = async changes => apply(await provider.saveMusic({ ...state, ...changes }, state.revision));
-  const drop = async ids => Promise.all(ids.filter(Boolean).map(id => provider.removeMusicFile(id).catch(() => {})));
-  const setEnabled = value => { enabled = value; preference(playPreference, value); };
-
-  function select(id, start = false) {
-    const track = state?.tracks.find(item => item.id === id);
+  function select(id) {
+    const state = active().state, track = state?.tracks.find(item => item.id === id);
     if (!track) return;
-    if (start && track.audio) setEnabled(true);
-    if (state.current_id === id) { if (start && track.audio) void (blobUrl ? play() : loadTrack()); }
-    else void change(() => save({ current_id: id }));
+    if (track.audio) setEnabled(true);
+    if (state.current_id === id) { if (track.audio) void (blobUrl ? play() : loadTrack()); }
+    else void active().select(id);
   }
 
   function step(direction, automatic = false) {
+    const state = active().state;
     if (!state) return;
     const tracks = automatic ? state.tracks.filter(track => track.audio) : state.tracks;
     const previous = played.findLast(id => tracks.some(track => track.id === id && track.id !== state.current_id));
     const track = adjacentTrack(tracks, state.current_id, direction, state.play_mode === 'shuffle', previous);
     if (automatic && track?.id === state.current_id) { audio.currentTime = 0; void play(); }
-    else if (track) select(track.id);
+    else if (track) void active().select(track.id);
   }
-
-  function editTrack(id, { title, artist, audio: audioFile, lyrics: lyricFile }) {
-    return change(async () => {
-      const existing = state.tracks.find(track => track.id === id);
-      const track = existing ? { ...existing } : {
-        id: crypto.randomUUID(), title: (title || audioFile.name.replace(/\.[^.]+$/u, '') || '未命名曲目').slice(0, 80), artist, audio: null,
-      };
-      const uploaded = [], replaced = [];
-      try {
-        for (const [field, file] of [['audio', audioFile], ['lyrics', lyricFile]]) {
-          if (!file?.size) continue;
-          const mime = musicFileType(file);
-          if (field === 'audio' && !mime.startsWith('audio/')) throw new Error('请选择 25 MB 以内的音频。');
-          let body = file;
-          if (field === 'lyrics') {
-            if (mime !== 'text/plain') throw new Error('请选择 64 KB 以内的 LRC 歌词。');
-            const text = await lyricText(file);
-            if (!parseLyrics(text).length) throw new Error('歌词需要包含时间标记。');
-            body = new File([text], file.name, { type: mime });
-          }
-          replaced.push(track[field]);
-          track[field] = await provider.uploadMusicFile(body, mime);
-          uploaded.push(track[field]);
-        }
-        const tracks = existing ? state.tracks.map(item => item.id === id ? track : item) : [...state.tracks, track];
-        await save({ tracks, current_id: state.current_id ?? track.id });
-      } catch (error) { await drop(uploaded); throw error; }
-      await drop(replaced);
-    });
-  }
-
-  const actions = {
-    select,
-    add: (audio, lyrics, title, artist) => editTrack(null, { audio, lyrics, title, artist }),
-    async replace(id, field, file) {
-      if (await editTrack(id, { [field]: file })) message(field === 'lyrics' ? '歌词已保存。' : '音源已保存。');
-    },
-    setSorting(value) { sorting = value; },
-    reorder(ids) {
-      void change(() => save({ tracks: ids.map(id => state.tracks.find(track => track.id === id)) }));
-    },
-    removeLyrics(id) {
-      void change(async () => {
-        const { lyrics, ...rest } = state.tracks.find(track => track.id === id);
-        await save({ tracks: state.tracks.map(track => track.id === id ? rest : track) });
-        await drop([lyrics]);
-      });
-    },
-    remove(id) {
-      const track = state?.tracks.find(item => item.id === id);
-      if (!track || !window.confirm(`从共同歌单删除《${track.title}》？`)) return;
-      void change(async () => {
-        const tracks = state.tracks.filter(item => item.id !== id);
-        const current_id = state.current_id === id ? (tracks.find(item => item.audio) || tracks[0])?.id ?? null : state.current_id;
-        await save({ tracks, current_id });
-        await drop([track.audio, track.lyrics]);
-      });
-    },
-  };
 
   trigger.addEventListener('click', () => openPanel(panel.hidden), { signal });
   panel.addEventListener('click', event => {
@@ -298,14 +235,12 @@ export function mountBackgroundMusic(host, provider) {
       case 'close': openPanel(false); trigger.focus(); break;
       case 'previous': step(-1); break;
       case 'next': step(1); break;
-      case 'select': select(button.dataset.id, true); break;
+      case 'select': select(button.dataset.id); break;
       case 'play':
         if (audio.paused) { setEnabled(true); void (blobUrl ? play() : loadTrack()); }
         else { setEnabled(false); audio.pause(); }
         break;
-      case 'mode':
-        void change(() => save({ play_mode: state.play_mode === 'shuffle' ? 'sequence' : 'shuffle' }));
-        break;
+      case 'mode': active().changeMode(); break;
       case 'list':
         panelList.hidden = !panelList.hidden; button.setAttribute('aria-expanded', String(!panelList.hidden)); placePlayer();
         break;
@@ -318,35 +253,33 @@ export function mountBackgroundMusic(host, provider) {
     if (!panel.hidden && !panel.contains(event.target) && !trigger.contains(event.target)) openPanel(false);
   }, { signal });
   for (const event of ['playing', 'pause', 'ended']) audio.addEventListener(event, showPlayback, { signal });
-  audio.addEventListener('ended', () => { if (enabled && !shopSuspended) step(1, true); }, { signal });
+  audio.addEventListener('ended', () => { if (enabled()) step(1, true); }, { signal });
+  document.addEventListener('click', event => {
+    if (event.isTrusted && scope === 'points' && enabled() && feedback.textContent === '点播放开启声音。' && blobUrl && audio.paused) void play();
+  }, { signal });
   const poll = setInterval(refresh, 5000);
   window.addEventListener('focus', refresh, { signal });
+  render();
   void refresh();
 
   return {
-    suspendForShop() {
-      if (shopSuspended) return;
-      wasPlaying = !audio.paused && !audio.ended;
-      shopSuspended = true;
-      widget.classList.add('is-shop-suspended');
-      openPanel(false); audio.pause(); showLyrics();
+    setScope(next) {
+      if (scope === next) return;
+      if (loadedAudio && blobUrl) positions.set(scope, { key: loadedAudio, seconds: audio.currentTime });
+      scope = next;
+      played = [];
+      lyricsKey = undefined; lines = [];
+      clearTrack(); showLyrics(); message(''); render();
+      void loadTrack(); void readLyrics(); void refresh();
     },
-    resumeFromShop() {
-      if (!shopSuspended) return;
-      shopSuspended = false;
-      widget.classList.remove('is-shop-suspended');
-      showLyrics();
-      if (wasPlaying && enabled) void (blobUrl ? play() : loadTrack());
-    },
-    mountSettings(next) {
-      if (slot === next) return;
-      library?.destroy(); slot = next;
-      library = slot ? mountMusicSettings(slot, actions) : null;
-      library?.render(state);
+    mountSettings(site, points) {
+      libraries.get('site').mountSettings(site);
+      libraries.get('points').mountSettings(points);
     },
     destroy() {
-      events.abort(); panelSize.disconnect(); clearInterval(poll); library?.destroy(); audio.pause(); audio.removeAttribute('src'); audio.load();
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      events.abort(); panelSize.disconnect(); clearInterval(poll);
+      for (const library of libraries.values()) library.destroy();
+      clearTrack();
       host.replaceChildren();
       document.body.classList.remove('has-bgm-layout');
       document.body.style.removeProperty('--bgm-panel-space');

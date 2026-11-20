@@ -31,8 +31,8 @@ export function calendarGrid(month, { dates, selectedDay, today = dayKey(new Dat
   return `<div class="calendar-grid">${weekdays}${'<span></span>'.repeat(offset)}${buttons}</div>`;
 }
 
-export function feedDatePickerMarkup() {
-  return `<h2>日期筛选</h2>
+export function feedDatePickerMarkup(checkin = '') {
+  return `<div class="feed-date-title"><h2>日期筛选</h2>${checkin}</div>
     <div class="feed-date-navigation"></div>
     <div id="feed-date-options"></div>
     <div class="feed-date-footer">

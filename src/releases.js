@@ -2,6 +2,15 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 25, date: '2026-11-20', version: 'v0.17.1', title: '精简积分与商城布局',
+    changes: [
+      '签到倒计时移入日历。积分页缩窄右栏，积分规则改为左侧编号列表。',
+      '商城和商城管理共用紧凑商品卡片，桌面每行最多五件，价格用红色标出。默认按价格排序，管理员可拖动重排和逐件编辑。',
+      '共同回忆可以从记录卡片确认。双方确认后，发帖者获得 5 分。',
+      '我的积分、积分商城和背包共用积分专属歌单，使用原有播放器，可在设置中上传和管理音乐。',
+    ],
+  },
+  {
     number: 24, date: '2026-11-20', version: 'v0.17.0', title: '我们的积分与朝夕小铺',
     changes: [
       '登录后前台停留一分钟自动签到，连续 7、30、180、365 天领额外奖励，连签天数持续记录。',
