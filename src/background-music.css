@@ -3,22 +3,23 @@
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
 }
 .bgm-trigger {
-  position: absolute; display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
+  --bgm-trigger-size: 54px;
+  position: absolute; display: grid; place-items: center; width: var(--bgm-trigger-size); height: var(--bgm-trigger-size); padding: 0;
   border-radius: 50%; background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--primary);
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: 0 3px 14px #24382a17;
   pointer-events: auto; cursor: grab; touch-action: none; user-select: none; -webkit-touch-callout: none;
 }
-.bgm-trigger .icon { width: 19px; height: 19px; }
+.bgm-trigger .icon { width: 23px; height: 23px; }
 .bgm-trigger.is-dragging { cursor: grabbing; }
 .bgm-trigger[aria-expanded='true'], .bgm-widget.is-playing .bgm-trigger { background: var(--primary); color: #fff; }
 .bgm-trigger[data-dock='left'] { clip-path: inset(0 0 0 50%); }
-.bgm-trigger[data-dock='left'] .icon { transform: translateX(10px); }
+.bgm-trigger[data-dock='left'] .icon { transform: translateX(calc(var(--bgm-trigger-size) / 4)); }
 .bgm-trigger[data-dock='right'] { clip-path: inset(0 50% 0 0); }
-.bgm-trigger[data-dock='right'] .icon { transform: translateX(-10px); }
+.bgm-trigger[data-dock='right'] .icon { transform: translateX(calc(var(--bgm-trigger-size) / -4)); }
 .bgm-trigger[data-dock='top'] { clip-path: inset(50% 0 0); }
-.bgm-trigger[data-dock='top'] .icon { transform: translateY(10px); }
+.bgm-trigger[data-dock='top'] .icon { transform: translateY(calc(var(--bgm-trigger-size) / 4)); }
 .bgm-trigger[data-dock='bottom'] { clip-path: inset(0 0 50%); }
-.bgm-trigger[data-dock='bottom'] .icon { transform: translateY(-10px); }
+.bgm-trigger[data-dock='bottom'] .icon { transform: translateY(calc(var(--bgm-trigger-size) / -4)); }
 
 .bgm-sparks { position: absolute; z-index: 1; pointer-events: none; }
 .bgm-sparks i { position: absolute; left: -5px; top: -8px; opacity: 0; font: 600 17px/1 Georgia, serif; }
@@ -43,7 +44,7 @@
   pointer-events: none;
 }
 .bgm-panel:has(ol:not([hidden])) { max-width: min(370px, calc(100vw - 24px)); border-radius: 17px; }
-.bgm-panel [hidden], .bgm-panel[hidden], .bgm-lyrics[hidden], .bgm-lyric-options[hidden], #bgm-settings [hidden] { display: none; }
+.bgm-panel [hidden], .bgm-panel[hidden], .bgm-lyrics[hidden], .bgm-lyric-options[hidden], .settings-music [hidden] { display: none; }
 .bgm-controls { display: flex; align-items: center; justify-content: flex-end; gap: 10px; max-width: 100%; }
 .bgm-controls > [data-bgm='close'] { color: var(--muted); }
 .bgm-controls > [data-bgm='close'] .icon { width: 17px; height: 17px; }
@@ -63,6 +64,15 @@
 .bgm-switches button { font-size: 12px; font-weight: 650; }
 .bgm-switches [data-bgm='mode'] { display: inline-flex; gap: 4px; align-items: center; border-radius: 20px; }
 .bgm-switches [data-bgm='mode'] .icon { width: 14px; height: 14px; }
+.bgm-volume {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) 4ch; align-items: center; align-self: center; gap: 6px;
+  width: min(170px, 100%); color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums;
+}
+.bgm-volume input[type='range'] {
+  appearance: auto; width: 100%; min-height: 25px; margin: 0; padding: 0;
+  accent-color: var(--primary); background: transparent; border: 0; pointer-events: auto; cursor: pointer;
+}
+.bgm-volume-value { text-align: right; }
 .bgm-panel ol {
   display: flex; gap: 5px; max-width: 100%; overflow-x: auto; scrollbar-width: thin;
   margin: 0; padding: 0 1px 3px; list-style: none; pointer-events: auto;
@@ -78,11 +88,10 @@
 
 .has-bgm-layout { --bgm-nav-height: 0px; overflow: hidden; padding-bottom: 0; }
 .has-bgm-layout #app {
-  margin-top: var(--bgm-panel-space, 0px); overflow-y: auto; overscroll-behavior: contain;
-  height: calc(100dvh - var(--bgm-panel-space, 0px) - var(--bgm-caption-space, 0px) - var(--bgm-nav-height));
+  overflow-y: auto; overscroll-behavior: contain;
+  height: calc(100dvh - var(--bgm-caption-space, 0px) - var(--bgm-nav-height));
 }
 .has-bgm-layout.has-feed-layout .workspace { height: 100%; }
-.has-bgm-layout .sidebar { top: var(--bgm-panel-space, 0px); }
 .bgm-lyrics {
   position: absolute; z-index: 2; width: min(570px, calc(100vw - 24px)); pointer-events: none;
 }
@@ -203,12 +212,13 @@
 .bgm-file-label input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
 .bgm-file-label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .bgm-edit-actions .danger { color: var(--negative); }
-.has-bgm .page-heading { padding-right: 31px; }
+.has-bgm .page-heading { padding-right: 41px; }
 @media (max-width: 760px) {
-  .has-bgm .mobile-header { padding-right: 58px; }
+  .has-bgm .mobile-header { padding-right: 68px; }
   .has-bgm .page-heading { padding-right: 0; }
   .has-bgm-layout { --bgm-nav-height: 70px; }
-  .bgm-trigger { width: 43px; height: 43px; }
+  .bgm-trigger { --bgm-trigger-size: 53px; }
+  .bgm-volume input[type='range'] { min-height: 34px; }
   .bgm-panel { padding-inline: 5px; }
   .bgm-controls { gap: 4px; }
   .bgm-controls button { min-width: 29px; }

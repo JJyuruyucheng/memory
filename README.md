@@ -4,7 +4,7 @@
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
-源码版本 **v0.17.1**。日历显示自动签到，积分商城和管理端使用紧凑商品卡片，管理员可拖动排序。积分、商城和背包共用专属歌单。详见 [修改日志](CHANGELOG.md)、[v0.7.0 验证记录](docs/release-v0.7.0.md) 和 [照片协议](docs/login-photos.md)。
+源码版本 **v0.17.2**。共同回忆可撤销确认，时光统计新增标签占比和筛选跳转，商品封面可拖放上传。详见 [修改日志](CHANGELOG.md)、[v0.7.0 验证记录](docs/release-v0.7.0.md) 和 [照片协议](docs/login-photos.md)。
 
 **[Cloudflare 正式入口：朝夕](https://memory-awv.pages.dev/)** 已上线；用户已确认使用 `xbl` 完成真实 Turnstile 与口令登录并进入时间线。原生 Auth 已拒绝缺失和伪造验证码，真实用户 JWT 下的记录与私有图片权限探针也已通过。真实验证码 token 的过期与重放拒绝仍待专项验收。[GitHub Pages](https://jjyuruyucheng.github.io/memory/) 继续作为 `preview`：不加载记录、不提交真实口令，也没有跳过登录入口。
 
@@ -43,6 +43,8 @@ node scripts/serve.mjs --source
 日期控件采用 [Air Datepicker 3.6.0](https://github.com/t1m0n/air-datepicker/tree/v3.6.0)（MIT），本地打包、中文定制；版本、SHA-256 与原许可证记录在 `vendor/air-datepicker.lock.json`。QA 服务仅额外开放明确列名的日期组件文件与许可证，正式 Supabase 构建还开放已锁定的官方 SDK；没有开放任意 JS、JSON、文档或私密配置。
 
 附件排序采用 [SortableJS 1.15.7](https://github.com/SortableJS/Sortable/tree/1.15.7)（MIT），固定版本本地打包，SHA-256 与原许可证见 `vendor/sortable.lock.json`。支持鼠标与触屏拖动；聚焦排序按钮后也可用方向键、Home、End 调整。固定版本公共组件可缓存；账号状态、业务代码与私密请求不因此改为离线缓存。
+
+新增附件上传入口时，复用 [文件拖放组件](src/file-drop.js)，保留点击选择文件，拖入与点选共用原有的校验和提交逻辑。
 
 ## 瓜子博客助手
 

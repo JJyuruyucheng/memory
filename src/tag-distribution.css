@@ -1,0 +1,53 @@
+.stat-panel.tag-stat-panel { grid-column: 1 / -1; min-height: 0; }
+.tag-stat-layout {
+  display: grid;
+  grid-template-columns: minmax(175px, 260px) minmax(0, 1fr);
+  gap: 12px clamp(12px, 4vw, 44px);
+  align-items: center;
+  margin-top: 12px;
+}
+.tag-stat-donut { display: block; width: 100%; max-width: 260px; justify-self: center; overflow: visible; }
+.tag-stat-donut text {
+  text-anchor: middle;
+  dominant-baseline: middle;
+  font-variant-numeric: tabular-nums;
+  fill: var(--text);
+  pointer-events: none;
+}
+.tag-sector { cursor: pointer; }
+.tag-sector path { stroke: var(--surface); stroke-width: 1.6; stroke-linejoin: round; }
+.tag-sector:is(:hover, :focus-visible) :is(path, circle) { filter: brightness(.9); }
+.tag-sector text { font-size: 12px; font-weight: 650; fill: #27312d; }
+.tag-stat-donut .tag-stat-total { font-size: 30px; font-weight: 550; }
+.tag-stat-donut .tag-stat-unit { font-size: 11px; fill: var(--muted); }
+.tag-stat-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(145px, 100%), 1fr));
+  gap: 6px 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tag-stat-legend button {
+  width: 100%;
+  min-height: 41px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 8px;
+  text-align: left;
+  font-size: 12px;
+}
+.tag-stat-legend button:hover { background: var(--raised); border-color: var(--border); }
+.tag-stat-legend i { width: 8px; height: 8px; border-radius: 50%; background: var(--tag-swatch); }
+.tag-stat-legend span { overflow-wrap: anywhere; }
+.tag-stat-legend small { display: block; color: var(--muted); font-size: 10px; }
+.tag-stat-legend strong { color: var(--accent); font-weight: 650; font-variant-numeric: tabular-nums; }
+@media (max-width: 680px) {
+  .tag-stat-layout { grid-template-columns: minmax(0, 1fr); }
+  .tag-stat-donut { max-width: 228px; }
+  .tag-stat-legend { grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr)); }
+}

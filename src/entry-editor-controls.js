@@ -1,3 +1,5 @@
+import { mountFileDrop } from './file-drop.js';
+
 export function mountEntryBody(container) {
   const textarea = container.querySelector('textarea');
   const grip = container.querySelector('.body-resize');
@@ -52,30 +54,12 @@ export function mountEntryBody(container) {
 export function mountEntryUpload(dropzone, addFiles) {
   const input = dropzone.querySelector('input[type=file]');
   const controller = new AbortController();
-  const options = { signal: controller.signal };
-  const hasFiles = event => Array.from(event.dataTransfer?.types || []).includes('Files');
+  const { signal } = controller;
 
   input.addEventListener('change', () => {
     addFiles(Array.from(input.files));
     input.value = '';
-  }, options);
-  for (const type of ['dragenter', 'dragover']) {
-    document.addEventListener(type, event => {
-      if (!hasFiles(event)) return;
-      event.preventDefault();
-      const inside = dropzone.contains(event.target);
-      event.dataTransfer.dropEffect = inside ? 'copy' : 'none';
-      dropzone.classList.toggle('drag-over', inside);
-    }, options);
-  }
-  dropzone.addEventListener('dragleave', event => {
-    if (!dropzone.contains(event.relatedTarget)) dropzone.classList.remove('drag-over');
-  }, options);
-  document.addEventListener('drop', event => {
-    if (!hasFiles(event) && !event.dataTransfer?.files?.length) return;
-    event.preventDefault();
-    dropzone.classList.remove('drag-over');
-    if (dropzone.contains(event.target)) addFiles(Array.from(event.dataTransfer.files));
-  }, options);
+  }, { signal });
+  mountFileDrop(dropzone, addFiles, { signal });
   return () => controller.abort();
 }

@@ -28,6 +28,7 @@ const paths = {
   neutral: '<circle cx="12" cy="12" r="9"/><path d="M8 9h.01M16 9h.01M8 15h8"/>',
   sad: '<circle cx="12" cy="12" r="9"/><path d="M8 9h.01M16 9h.01M8 17c2-3 6-3 8 0"/>',
   comment: '<path d="M21 11.5a9 9 0 0 1-9 9 9 9 0 0 1-4-.9L3 21l1.4-4.5A9 9 0 1 1 21 11.5Z"/>',
+  cat: '<path d="M4.5 11 4 4l5 3.6a10 10 0 0 1 6 0L20 4l-.5 7a7 7 0 0 1 .8 3.4c0 3.8-3.7 6.1-8.3 6.1s-8.3-2.3-8.3-6.1a7 7 0 0 1 .8-3.4ZM8.5 13h.01m7 0h.01M11 16l1 1 1-1"/>',
   bookmark: '<path d="M6 3h12v18l-6-4-6 4Z"/>',
   edit: '<path d="m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5"/>',
   trash: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/>',

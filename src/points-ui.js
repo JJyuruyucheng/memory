@@ -1,6 +1,7 @@
 import { escapeHtml as esc } from './domain.js';
 import { icon } from './icons.js';
 import { loadLocalScript } from './local-script.js';
+import { mountFileDrop } from './file-drop.js';
 
 const routes = { points: '我的积分', shop: '积分商城', backpack: '我的背包', 'shop-admin': '商城管理' };
 const milestones = [7, 30, 180, 365];
@@ -8,6 +9,7 @@ const coverOptions = Object.entries({
   drink: '饮料', dessert: '甜点', gift: '礼物', transport: '交通', reconcile: '和好',
   movie: '电影', cash: '现金券', flight: '机票',
 }).map(([id, label]) => [`./assets/reward-covers/${id}.webp`, label]);
+const coverMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
 const amountFormat = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 });
 const dateFormat = new Intl.DateTimeFormat('zh-CN', {
   timeZone: 'Asia/Shanghai', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
@@ -61,6 +63,31 @@ function cover(value) {
   return `<div class="points-cover" aria-hidden="true">${icon('bookmark')}${url ? `<img src="${esc(url)}" alt="" loading="lazy" decoding="async" />` : ''}</div>`;
 }
 
+function coverUploadMarkup() {
+  return `<div class="points-cover-upload">
+    <label class="upload-control points-cover-dropzone" data-points-cover-drop>
+      ${icon('photo')}<span>选择新封面</span><small>也可拖入图片</small>
+      <input type="file" name="cover" accept="${coverMimeTypes.join(',')}" aria-describedby="points-cover-format points-cover-selection" />
+    </label>
+    <small class="points-cover-format" id="points-cover-format">一张 JPG、PNG 或 WebP，最多 10 MB。</small>
+    <div class="points-cover-selection-row">
+      <p id="points-cover-selection" class="points-cover-selection" role="status"></p>
+      <button type="button" class="text-button" data-points-cover-clear hidden>清除选图</button>
+    </div>
+  </div>`;
+}
+
+function coverFileProblem(files) {
+  if (files.length !== 1) return '一次只能选择一张封面图片。';
+  const [file] = files;
+  if (!file.size || file.size > 10_000_000) return '请选择不超过 10 MB 的图片文件。';
+  const unknownType = !file.type || file.type === 'application/octet-stream';
+  if (!coverMimeTypes.includes(file.type) && !(unknownType && /\.(?:jpe?g|png|webp)$/i.test(file.name))) {
+    return '请选择 JPG、PNG 或 WebP 图片。';
+  }
+  return '';
+}
+
 function dataBody(key, store, render) {
   const current = store.get(key);
   if (current?.error && current.value === undefined) {
@@ -93,11 +120,13 @@ function checkinStatus(summary, countdown, failed) {
   return failed ? '签到待重试' : summary ? '今日待签到' : '签到读取中';
 }
 
+const calendarBalanceLabel = balance => `可用积分 ${balance}，查看我的积分`;
+
 function rulesMarkup() {
   return `<ol class="points-rule-list">
     <li>北京时间每日前台停留 60 秒自动签到，得 0.5 分。</li>
     <li>每轮连签满 7、30、180、365 天，分别奖同等积分。天数持续累计，断签后重开一轮。</li>
-    <li>有效共同记录得 1 分。收到对方有效点赞、评论或回复，各得 0.2 分。</li>
+    <li>发布帖子得1分。收到对方有效点赞、评论或回复，各得 0.2 分。</li>
     <li>共同回忆双方都确认后，作者得 5 分。共同挑战按设定奖励发放。</li>
     <li>每年 1 月 1 日发放 50 分纪念日积分。</li>
     <li>兑换扣积分和库存，兑换及使用不可撤销。现金券与补贴按 1 分抵 1 元线下兑现。</li>
@@ -212,6 +241,7 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
   let returnFocus;
   let busyChallenge = false;
   let dialogVersion = 0;
+  let selectedCoverFile, coverDropEvents;
   let sortableList, sortable, dragging = false, savingOrder = false, adminDrawPending = false;
   const pendingRedemptions = new Map();
 
@@ -316,8 +346,14 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
 
   function renderCheckin() {
     if (!isMember()) return '';
-    const text = checkinStatus(summary(), countdown, Boolean(store.get('summary')?.error));
-    return `<span class="points-checkin" data-points-checkin title="在前台连续停留 60 秒自动签到"><span data-points-checkin-label>${esc(text)}</span><span class="sr-only" role="status" data-points-checkin-status></span></span>`;
+    const wallet = summary();
+    const text = checkinStatus(wallet, countdown, Boolean(store.get('summary')?.error));
+    const balance = credits(wallet?.balance);
+    return `<span class="points-checkin" data-points-checkin>
+      <span data-points-checkin-label title="在前台连续停留 60 秒自动签到">${esc(text)}</span>
+      <a class="points-checkin-balance" data-points-checkin-balance href="#points" aria-label="${esc(calendarBalanceLabel(balance))}">${esc(balance)}</a>
+      <span class="sr-only" role="status" data-points-checkin-status></span>
+    </span>`;
   }
 
   function updateBell() {
@@ -340,8 +376,14 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
   function paintCheckin() {
     const wallet = summary(), failed = Boolean(store.get('summary')?.error);
     const text = checkinStatus(wallet, countdown, failed);
+    const available = credits(wallet?.balance);
     const regions = [app, modalRoot].filter(Boolean).flatMap(root => [...root.querySelectorAll('[data-points-checkin]')]);
     for (const region of regions) {
+      const balance = region.querySelector('[data-points-checkin-balance]');
+      if (balance.textContent !== available) {
+        balance.textContent = available;
+        balance.setAttribute('aria-label', calendarBalanceLabel(available));
+      }
       const label = region.querySelector('[data-points-checkin-label]');
       if (label.textContent === text) continue;
       label.textContent = text;
@@ -517,6 +559,9 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
     if (!dialog.open) return;
     inboxOpen = false;
     dialogVersion++;
+    coverDropEvents?.abort();
+    coverDropEvents = null;
+    selectedCoverFile = null;
     dialog.close();
     const restoreTarget = returnFocus?.isConnected ? returnFocus : findControl(returnFocus?.dataset.pointsAction, returnFocus?.dataset.pointsId);
     if (restore) ((restoreTarget && !restoreTarget.disabled ? restoreTarget : app.querySelector('#main-content'))?.focus({ preventScroll: true }));
@@ -608,8 +653,8 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
       if (!Number.isSafeInteger(stock) || stock < 0) throw new Error('库存请填写非负整数。');
       const selection = fields.get('defaultCover');
       let image = selection === 'keep' ? previous?.cover ?? null : selection || null;
-      const file = fields.get('cover');
-      if (file?.size) image = await provider.pointsUploadCover(file);
+      const file = selectedCoverFile;
+      if (file) image = await provider.pointsUploadCover(file);
       if (typeof image === 'object' && image !== null) image = image.cover ?? image.path ?? image.url ?? null;
       if (signal.aborted) return;
       await provider.pointsAdminSaveProduct({
@@ -668,8 +713,45 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
         ${row?.cover ? '<option value="keep">保留当前封面</option>' : ''}<option value="">无封面</option>
         ${coverOptions.map(([path, name]) => `<option value="${path}">${name}</option>`).join('')}
       </select></label></div>
-      ${provider.pointsUploadCover ? '<label>或上传新封面<input type="file" name="cover" accept="image/jpeg,image/png,image/webp" /></label>' : ''}
+      ${provider.pointsUploadCover ? coverUploadMarkup() : ''}
       <label class="points-form-check"><input name="active" type="checkbox" ${row?.active !== false ? 'checked' : ''} /> 上架商品</label>`, '保存商品', 'product'), origin);
+    if (provider.pointsUploadCover) mountCoverUpload();
+  }
+
+  function mountCoverUpload() {
+    const dropzone = dialog.querySelector('[data-points-cover-drop]');
+    const input = dropzone.querySelector('input');
+    const status = dialog.querySelector('#points-cover-selection');
+    const clear = dialog.querySelector('[data-points-cover-clear]');
+    coverDropEvents = new AbortController();
+    const { signal } = coverDropEvents;
+
+    function select(files) {
+      if (dialogueBusy) return;
+      const problem = coverFileProblem(files);
+      status.dataset.invalid = String(Boolean(problem));
+      if (problem) {
+        status.textContent = selectedCoverFile ? `${problem}已保留 ${selectedCoverFile.name}。` : problem;
+        return;
+      }
+      [selectedCoverFile] = files;
+      status.textContent = `已选择 ${selectedCoverFile.name}`;
+      clear.hidden = false;
+    }
+
+    input.addEventListener('change', () => {
+      if (input.files.length) select(Array.from(input.files));
+      input.value = '';
+    }, { signal });
+    clear.addEventListener('click', () => {
+      if (dialogueBusy) return;
+      selectedCoverFile = null;
+      status.dataset.invalid = 'false';
+      status.textContent = '已清除选图。';
+      clear.hidden = true;
+      input.focus();
+    }, { signal });
+    mountFileDrop(dropzone, select, { signal, enabled: () => !dialogueBusy });
   }
 
   function newChallenge(origin) {

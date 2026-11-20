@@ -12,6 +12,16 @@ function preference(name, value) {
   } catch { return null; }
 }
 
+const volumeKey = 'chaoxi-bgm-volume';
+const defaultVolume = 60;
+function savedVolume() {
+  try {
+    const value = localStorage.getItem(volumeKey);
+    if (value !== null && /^\d{1,3}$/.test(value)) return Math.min(100, Number(value));
+  } catch { /* The player still works when preferences cannot be stored. */ }
+  return defaultVolume;
+}
+
 const control = (action, label, content, attrs = '') =>
   `<button type="button" data-bgm="${action}" aria-label="${label}" title="${label}" ${attrs}>${content}</button>`;
 
@@ -27,6 +37,10 @@ export function mountBackgroundMusic(host, provider, initialScope = 'site') {
         <div class="bgm-switches">${control('lyrics', '歌词', '词', 'aria-pressed="false"')}${control('list', '歌单', '列', 'aria-expanded="false" aria-controls="bgm-playlist"')}${control('mode', '顺序播放', `顺${icon('repeat')}`)}</div>
         ${control('close', '关闭播放器', icon('close'))}
       </div>
+      <label class="bgm-volume">
+        <span>音量</span><input type="range" min="0" max="100" step="1" aria-label="音量">
+        <span class="bgm-volume-value" aria-hidden="true"></span>
+      </label>
       <p class="bgm-feedback" role="status"></p>
       <ol id="bgm-playlist" aria-label="播放列表" hidden></ol>
     </section>
@@ -38,12 +52,26 @@ export function mountBackgroundMusic(host, provider, initialScope = 'site') {
   const now = panel.querySelector('.bgm-now'), panelList = panel.querySelector('ol'), feedback = panel.querySelector('.bgm-feedback');
   const byAction = action => panel.querySelector(`[data-bgm="${action}"]`);
   const playButton = byAction('play');
+  const volume = panel.querySelector('.bgm-volume input'), volumeValue = panel.querySelector('.bgm-volume-value');
+  function setVolume(level) {
+    const percent = `${level}%`;
+    volume.value = level;
+    volumeValue.textContent = percent;
+    volume.setAttribute('aria-valuetext', percent);
+    audio.volume = level / 100;
+  }
+  setVolume(savedVolume());
+  volume.addEventListener('input', () => {
+    const level = volume.valueAsNumber;
+    setVolume(level);
+    try { localStorage.setItem(volumeKey, String(level)); } catch { /* Keep the volume for this page. */ }
+  }, { signal });
   const lyricPreference = 'chaoxi-bgm-lyrics';
   const playPreference = scope => scope === 'points' ? 'chaoxi-points-bgm-playing' : 'chaoxi-bgm-playing';
   let scope = initialScope, lyricsOn = preference(lyricPreference) === 'on';
   let blobUrl, loadedAudio, loading = false, mediaVersion = 0;
   let lyricsKey, lines = [], played = [];
-  let panelSpace = 0, captionSpace = 0;
+  let captionSpace = 0;
   const positions = new Map();
   const libraries = new Map(['site', 'points'].map(key => [key, musicLibrary(provider, key, {
     signal,
@@ -70,34 +98,31 @@ export function mountBackgroundMusic(host, provider, initialScope = 'site') {
   const placePlayer = mountFloatingPosition(widget, trigger, {
     storageKey: 'chaoxi-bgm-position', initial: { x: 1, y: 0 }, half: true, avoidPlayer: false, signal,
     onLayout(frame) {
-      const { left, top, right, x, y, width, height } = frame;
+      const { left, right, x, y, width, height } = frame;
       const centerX = x + width / 2;
       sparks.style.left = `${centerX}px`;
       sparks.style.top = `${y + height / 2}px`;
       sparks.style.setProperty('--spark-side', centerX < (left + right) / 2 ? '1' : '-1');
       sparks.style.setProperty('--spark-rise', y < 0 ? '24px' : `-${Math.min(33, y + 10)}px`);
-      const end = panel.hidden ? 0 : placeAdjacent(panel, frame);
-      reserve(!panel.hidden && y <= top + 6 ? Math.ceil(Math.max(end, y + height) + 7) : 0, captionSpace);
+      if (!panel.hidden) placeAdjacent(panel, frame);
     },
   });
-  function reserve(header, footer) {
-    if (panelSpace === header && captionSpace === footer) return;
-    panelSpace = header;
-    captionSpace = footer;
+  function reserveLyrics(height) {
+    if (captionSpace === height) return;
+    captionSpace = height;
     const { body } = document;
     const hadRoom = body.classList.contains('has-bgm-layout');
-    const needsRoom = header > 0 || footer > 0;
+    const needsRoom = height > 0;
     const top = hadRoom ? app.scrollTop : window.scrollY;
     body.classList.toggle('has-bgm-layout', needsRoom);
-    body.style.setProperty('--bgm-panel-space', `${header}px`);
-    body.style.setProperty('--bgm-caption-space', `${footer}px`);
+    body.style.setProperty('--bgm-caption-space', `${height}px`);
     if (hadRoom !== needsRoom) (needsRoom ? app : window).scrollTo({ top });
     window.dispatchEvent(new Event('chaoxi-layout-change'));
   }
   const panelSize = new ResizeObserver(placePlayer);
   panelSize.observe(panel);
   const caption = mountMusicCaptions(widget, audio, {
-    onReserve: height => reserve(panelSpace, height),
+    onReserve: reserveLyrics,
     onControl(action) {
       if (action === 'close') setLyrics(false);
       else byAction(action).click();
@@ -282,7 +307,6 @@ export function mountBackgroundMusic(host, provider, initialScope = 'site') {
       clearTrack();
       host.replaceChildren();
       document.body.classList.remove('has-bgm-layout');
-      document.body.style.removeProperty('--bgm-panel-space');
       document.body.style.removeProperty('--bgm-caption-space');
     },
   };

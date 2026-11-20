@@ -14,6 +14,8 @@ import { mediaViewerMarkup, mountMediaViewer } from './media-viewer.js';
 import { entryTagsMarkup, mountEntryTags } from './entry-tags-editor.js';
 import { calendarGrid, feedDatePickerMarkup, mountFeedDatePicker, shiftCalendarMonth } from './feed-date-picker.js';
 import { mountTagOverflow } from './feed-tag-overflow.js';
+import { tagDistributionMarkup } from './tag-distribution.js';
+import { mountAnniversarySorter } from './anniversary-sorter.js';
 import { mountEntryBody, mountEntryUpload } from './entry-editor-controls.js';
 import { entryEmojiMarkup, mountEntryEmoji } from './entry-emojis.js';
 import { renderAdminActivity } from './admin-activity.js';
@@ -43,7 +45,7 @@ let state = { currentUser: null, users: [], entries: [], settings: {} }, loginPe
 let reconnectPending = false, reconnectError = null, reconnectAttempt, recoveryEpoch = 0;
 let searchTimer, toastTimer, dialogReturnFocus, draftTimer;
 let editorAttachments = [], editorId = null, editorTags = null, previewUrls = [];
-let unmountEntryBody, unmountEntryUpload, unmountEntryEmoji, unmountTagOverflow, unmountEntryPreviews;
+let unmountEntryBody, unmountEntryUpload, unmountEntryEmoji, unmountTagOverflow, unmountEntryPreviews, unmountAnniversarySorter;
 const expandedEntries = new Set();
 let feedTagsExpanded = false;
 let adminActivity = { days: 30, pending: false };
@@ -128,6 +130,8 @@ function syncAssistant(locked = false) {
 }
 
 function render() {
+  unmountAnniversarySorter?.();
+  unmountAnniversarySorter = null;
   unmountTagOverflow?.();
   unmountTagOverflow = null;
   unmountEntryPreviews?.();
@@ -201,6 +205,7 @@ function render() {
   for (const [selector, top] of scrollPositions) { const region = app.querySelector(selector); if (region) region.scrollTop = top; }
   if (active) { const el = document.getElementById(active); if (el) { el.focus({ preventScroll: true }); if (typeof selection === 'number' && el.setSelectionRange) el.setSelectionRange(selection, selection); } }
   mountDatePickers(app);
+  unmountAnniversarySorter = mountAnniversarySorter(app.querySelector('#anniversary-fields'));
   unmountTagOverflow = mountTagOverflow(app.querySelector('.tag-filter-list'), feedTagsExpanded,
     expanded => { feedTagsExpanded = expanded; });
   syncAssistant();
@@ -268,8 +273,9 @@ function renderFeed(rows, trash = false) {
   return `<div class="timeline">${rows.map(entry => { const month = dayKey(entry.occurredAt).slice(0, 7); const marker = month !== lastMonth ? `<div class="month-marker"><span>${month.slice(0, 4)} 年 ${Number(month.slice(5))} 月</span></div>` : ''; lastMonth = month; return marker + renderEntry(entry, trash); }).join('')}</div>`;
 }
 function memoryConfirmationState(memory) {
-  if (memory?.complete) return { label: '回忆已确认', hint: '双方已确认，发帖者获得 5 分。', confirmed: true };
-  if (memory?.confirmed_by?.includes(state.currentUser.id)) return { label: '待对方确认', hint: '等对方确认后，发帖者获得 5 分。', confirmed: true };
+  if (memory?.confirmed_by?.includes(state.currentUser.id)) {
+    return { label: memory.complete ? '回忆已确认' : '待对方确认', hint: '再次点击取消你的确认。', confirmed: true };
+  }
   return { label: '确认回忆', hint: '双方确认后，发帖者获得 5 分。', confirmed: false };
 }
 function updateMemoryConfirmations(summary) {
@@ -278,18 +284,18 @@ function updateMemoryConfirmations(summary) {
     const { label, hint, confirmed } = memoryConfirmationState(memories.get(button.dataset.id));
     button.querySelector('span').textContent = label;
     button.title = hint;
-    button.setAttribute('aria-disabled', String(confirmed));
+    button.setAttribute('aria-pressed', String(confirmed));
   }
 }
 function renderEntry(entry, trash = false) {
   const author = user(entry.authorId), liked = entry.reactionBy?.includes(state.currentUser.id), saved = entry.favoriteBy?.includes(state.currentUser.id);
   const askButton = provider?.askAssistant && ['note', 'event'].includes(entry.type) && !entry.deletedAt
-    ? `<button class="reaction-button comment-button" data-action="ask-guazi" data-id="${esc(entry.id)}">问瓜子</button>` : '';
+    ? `<button class="reaction-button comment-button" data-action="ask-guazi" data-id="${esc(entry.id)}">${icon('cat')}<span>问瓜子</span></button>` : '';
   const allowConfirm = pointsUi && state.currentUser.role === 'member' && author.role === 'member'
     && entry.status !== 'draft' && ['note', 'event'].includes(entry.type) && !entry.deletedAt && !trash;
   const memory = allowConfirm ? memoryConfirmationState(pointsUi.getSummary()?.memories?.find(row => row.entry_id === entry.id)) : null;
   const confirmButton = memory ? `<button type="button" class="memory-confirm-button" data-action="points-confirm-memory"
-    data-id="${esc(entry.id)}" aria-disabled="${memory.confirmed}" title="${memory.hint}">${icon('star')}<span>${memory.label}</span></button>` : '';
+    data-id="${esc(entry.id)}" aria-pressed="${memory.confirmed}" title="${memory.hint}">${icon('star')}<span>${memory.label}</span></button>` : '';
   return `<article class="memory-card ${entry.type === 'event' ? 'event-card' : entry.type === 'whisper' ? 'whisper-card' : ''}">
     <div class="memory-meta">${avatar(author, true)}<div><strong>${esc(author.name)}</strong><time datetime="${esc(entry.occurredAt)}">${dateLabel(entry.occurredAt, false, true)}${entry.createdAt && dayKey(entry.createdAt) !== dayKey(entry.occurredAt) ? ' · 补记' : ''}</time></div><span class="entry-kind" ${entry.type === 'whisper' ? 'title="仅作者和管理员可见"' : ''}>${entry.type === 'event' ? `${icon('calendar')}事件` : entry.type === 'whisper' ? `${icon('lock')}悄悄话` : '随记'}</span>${canEdit(entry) && !trash ? `<button class="icon-button" data-action="edit" data-id="${esc(entry.id)}" aria-label="编辑${esc(entry.title || '这条回忆')}">${icon('edit')}</button>` : ''}</div>
     ${entry.title ? `<h2>${esc(entry.title)}</h2>` : ''}${entryPreviewMarkup(entry)}
@@ -325,7 +331,8 @@ function renderStats() {
   return `${heading('时光有迹可循', '我们留下的，是认真生活的痕迹。', false)}<div class="stats-toolbar"><label class="select-field">统计月份 <input id="filter-month" type="month" value="${esc(filters.month)}" /></label><button class="text-button" data-action="clear-filters">全部时间</button></div>
     <div class="stats-strip">${[['留下的回忆', stats.total, '条'], ['记录过的日子', stats.days, '天'], ['重要的事件', stats.events, '件'], ['记录的照片', stats.images, '张']].map(([name, value, unit]) => `<div><span>${name}</span><strong class="num">${value}<small>${unit}</small></strong></div>`).join('')}</div>
     <div class="stats-grid"><section class="stat-panel"><h2>每个月的小事</h2><p class="muted">按发生日期统计，删除的记录不计入。</p><div class="chart-legend" aria-label="心情颜色">${['happy', 'neutral', 'sad', 'unset'].map(m => `<span class="mood-${m}"><i></i>${moodNames[m]}</span>`).join('')}</div><div class="bar-chart" role="img" aria-label="${esc(stats.months.map(m => `${m.month}：${m.count}条；${monthlyMoods(m.month).map(part => `${moodNames[part.mood]}${part.count}条`).join('，')}`).join('；') || '还没有记录')}"><div class="chart-scale"><span>${max}</span><span>0 条</span></div><div class="chart-bars">${stats.months.map(m => `<div class="bar-column"><span class="num">${m.count}</span><div class="bar-track"><div class="stacked-bar" style="height:${m.count / max * 100}%">${monthlyMoods(m.month).filter(part => part.count).map(part => `<span class="mood-${part.mood}" style="flex:${part.count}" title="${moodNames[part.mood]}：${part.count} 条"></span>`).join('')}</div></div><small>${esc(m.month.slice(2).replace('-', '.'))}</small></div>`).join('') || '<p class="muted">写下第一条后，这里会有变化。</p>'}</div></div></section>
-    <section class="stat-panel"><h2>写下这些时的心情</h2><p class="muted">${filled} 条填写了心情，${stats.moods.unset} 条未填写。</p><div class="mood-distribution">${['happy', 'neutral', 'sad'].map(m => `<div class="mood-stat mood-${m}">${icon(moodIcons[m])}<span>${moodNames[m]}</span><div class="mood-track"><span style="width:${filled ? stats.moods[m] / filled * 100 : 0}%"></span></div><strong class="num">${stats.moods[m]}<small> 条</small></strong></div>`).join('')}</div><p class="stat-footnote">每次记录都是当时的感受，心情分布不代表关系的好坏。</p></section></div>`;
+    <section class="stat-panel"><h2>写下这些时的心情</h2><p class="muted">${filled} 条填写了心情，${stats.moods.unset} 条未填写。</p><div class="mood-distribution">${['happy', 'neutral', 'sad'].map(m => `<div class="mood-stat mood-${m}">${icon(moodIcons[m])}<span>${moodNames[m]}</span><div class="mood-track"><span style="width:${filled ? stats.moods[m] / filled * 100 : 0}%"></span></div><strong class="num">${stats.moods[m]}<small> 条</small></strong></div>`).join('')}</div><p class="stat-footnote">每次记录都是当时的感受，心情分布不代表关系的好坏。</p></section>
+    ${tagDistributionMarkup(rows)}</div>`;
 }
 function renderAnniversaries() {
   const anniversaries = (state.settings.anniversaries || []).map(a => anniversaryInfo(a, new Date()));
@@ -364,7 +371,7 @@ function renderSettings() {
         <label>一句喜欢的话<input name="subtitle" value="${esc(state.settings.subtitle || '')}" maxlength="80" /></label>
       </fieldset></section>
       <section class="settings-section"><div class="settings-card-head"><h2>纪念日</h2><button type="button" class="text-button" data-action="add-anniversary">${icon('plus')}加一个日子</button></div>
-        <fieldset><div id="anniversary-fields">${(state.settings.anniversaries || []).map(a => anniversaryFields(a)).join('')}</div></fieldset>
+        <fieldset><div id="anniversary-fields">${(state.settings.anniversaries || []).map(a => anniversaryFields(a)).join('')}</div><span class="sr-only" role="status"></span></fieldset>
       </section>
     </form>
     ${provider?.loadMusic ? '<section id="bgm-settings" class="settings-section settings-music"></section><section id="points-bgm-settings" class="settings-section settings-music"></section>' : ''}
@@ -374,7 +381,14 @@ function renderSettings() {
     </div>
   </div>`;
 }
-function anniversaryFields(a = {}) { return `<div class="anniversary-fields" data-anniversary="${esc(a.id || crypto.randomUUID())}"><label><span class="sr-only">纪念日名字</span><input name="ann-title" placeholder="例如：第一次见面" value="${esc(a.title || '')}" maxlength="40" required /></label><label><span class="sr-only">纪念日期</span><input name="ann-date" type="date" value="${esc(a.date || '')}" required /></label><label class="checkbox-label"><input name="ann-yearly" type="checkbox" ${a.yearly ? 'checked' : ''} />每年</label><button type="button" class="icon-button" data-action="remove-anniversary" aria-label="移除纪念日">${icon('close')}</button></div>`; }
+function anniversaryFields(a = {}) {
+  return `<div class="anniversary-fields" data-anniversary="${esc(a.id || crypto.randomUUID())}">
+    <button type="button" class="icon-button anniversary-grip" aria-label="排序${esc(a.title || '此纪念日')}，按上下方向键移动" title="拖动排序">${icon('grip')}</button>
+    <label><span class="sr-only">纪念日名字</span><input name="ann-title" placeholder="例如：第一次见面" value="${esc(a.title || '')}" maxlength="40" required /></label>
+    <label><span class="sr-only">纪念日期</span><input name="ann-date" type="date" value="${esc(a.date || '')}" required /></label>
+    <label class="checkbox-label"><input name="ann-yearly" type="checkbox" ${a.yearly ? 'checked' : ''} />每年</label>
+    <button type="button" class="icon-button" data-action="remove-anniversary" aria-label="移除纪念日">${icon('close')}</button></div>`;
+}
 function renderAdmin(stats) {
   if (state.currentUser.role !== 'admin') return `${heading('这扇门留给维护账号', '日常记录不需要管理员权限。', false)}<a href="#timeline" class="secondary inline-button">回到时光线</a>`;
   const bytes = state.entries.flatMap(e => e.media).reduce((sum, m) => sum + (Number(m.size) || 0), 0);
@@ -634,23 +648,30 @@ document.addEventListener('click', async event => {
       case 'filter-media': filters.mediaType = value; render(); break;
       case 'clear-filters': clearTimeout(searchTimer); Object.assign(filters, { query: '', tag: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all' }); selectedDay = ''; render(); break;
       case 'search-tag': clearTimeout(searchTimer); filters.tag = value; filters.query = ''; filters.type = 'all'; selectedDay = ''; if (route() !== 'timeline') history.pushState(null, '', '#timeline'); render(); break;
+      case 'stats-tag':
+        event.preventDefault();
+        clearTimeout(searchTimer);
+        Object.assign(filters, { tag: value, query: '', type: 'all', mood: 'all', authorId: 'all' });
+        selectedDay = ''; feedTagsExpanded = false;
+        if (filters.month) calendarCursor = filters.month;
+        history.pushState(null, '', '#timeline'); render(); scrollToPageTop();
+        document.getElementById(`filter-tag-value-${encodeURIComponent(value)}`)?.focus({ preventScroll: true });
+        break;
       case 'reaction': button.disabled = true; await provider.toggleReaction(id); render(); break;
       case 'favorite': button.disabled = true; await provider.toggleFavorite(id); render(); break;
       case 'detail': showDetail(id); break;
       case 'reply-comment': setCommentReply(id); break;
       case 'cancel-comment-reply': setCommentReply(null); break;
       case 'points-confirm-memory': {
-        if (button.disabled || button.getAttribute('aria-disabled') === 'true') break;
         const identity = state.currentUser?.id;
-        const entry = visibleEntries().find(row => row.id === id);
+        const confirmed = button.getAttribute('aria-pressed') !== 'true';
         button.disabled = true;
         try {
-          const snapshot = await provider.pointsConfirmMemory(id);
+          const snapshot = await provider.pointsSetMemoryConfirmation(id, confirmed);
           if (state.currentUser?.id !== identity) break;
           pointsUi?.refreshSummary(snapshot);
           const memory = snapshot.memories?.find(entry => entry.entry_id === id);
-          toast(memory?.complete ? (entry?.authorId === identity ? '共同回忆已确认，你获得 5 分。' : '共同回忆已确认，发帖者获得 5 分。')
-            : '你已确认。对方确认后，发帖者获得 5 分。');
+          toast(!confirmed ? '已取消你的确认。' : memory?.complete ? '双方已确认这段回忆。' : '你已确认，等对方确认。');
         } finally { if (button.isConnected) button.disabled = false; }
         break;
       }
@@ -784,6 +805,7 @@ document.addEventListener('submit', async event => {
       const mediaOrder = editorAttachments.map(item => item.kind === 'media' ? { id: item.media.id } : { fileIndex: fileIndex++ });
       const saved = await provider.saveEntry({ ...previous, title: data.title.trim(), content: data.content.trim(), type: data.type, occurredAt: `${data.occurredAt}:00+08:00`, mood: data.mood || null, tags, media: editorAttachments.filter(item => item.kind === 'media').map(item => item.media), mediaOrder }, editorAttachments.filter(item => item.kind === 'file').map(item => item.file));
       sessionStorage.removeItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`); closeModal(false); render(); toast(saved?.cleanupWarning || (editorId ? '细节已经好好收好了。' : '这一刻，已经留住了。'));
+      if (!previous?.id && ['note', 'event'].includes(data.type) && state.currentUser.role === 'member') pointsUi?.refreshSummary();
     } else if (form.id === 'settings-form') {
       if (!state.currentUser) throw new Error('请先登录。');
       const anniversaries = [...form.querySelectorAll('[data-anniversary]')].map(row => ({ id: row.dataset.anniversary, title: row.querySelector('[name="ann-title"]').value.trim(), date: row.querySelector('[name="ann-date"]').value, yearly: row.querySelector('[name="ann-yearly"]').checked }));

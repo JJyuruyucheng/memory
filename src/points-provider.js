@@ -51,7 +51,7 @@ export function makePointsProvider(rpc, checkAdmin) {
     pointsFinishCheckin: token => rpc('points_finish_checkin', { p_token: token }, true),
     pointsRedeem: (productId, version, requestId) => rpc('points_redeem', { p_product_id: productId, p_version: version, p_request_id: requestId }, true),
     pointsUse: id => rpc('points_use', { p_order_id: id }, true),
-    pointsConfirmMemory: id => rpc('points_confirm_memory', { p_entry_id: id }, true),
+    pointsSetMemoryConfirmation: (id, confirmed) => rpc('points_set_memory_confirmation', { p_entry_id: id, p_confirmed: confirmed }, true),
     pointsConfirmChallenge: id => rpc('points_confirm_challenge', { p_challenge_id: id }, true),
     pointsAdminCatalog: () => rpc('points_admin_catalog'),
     pointsAdminReorder: ids => rpc('points_admin_reorder_products', { p_product_ids: ids }, true),

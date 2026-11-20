@@ -2,6 +2,15 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 26, date: '2026-11-20', version: 'v0.17.2', title: '帖子交互、标签统计与拖放',
+    changes: [
+      '共同回忆可再次点击撤销确认，重新确认不会重复发分。帖子按钮统一尺寸，「问瓜子」加上猫咪图标。',
+      '音符按钮放大 10 像素，新增音量调节。浮动播放器展开或吸边时保持页面布局。',
+      '日历签到旁显示可点击的可用积分，商城加大商品间距，商品封面支持拖放上传。',
+      '时光统计新增标签占比图，可跳转到对应标签。设置中的纪念日可拖动排序。',
+    ],
+  },
+  {
     number: 25, date: '2026-11-20', version: 'v0.17.1', title: '精简积分与商城布局',
     changes: [
       '签到倒计时移入日历。积分页缩窄右栏，积分规则改为左侧编号列表。',
