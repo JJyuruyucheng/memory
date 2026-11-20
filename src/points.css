@@ -69,8 +69,11 @@
 .points-receipt .points-cover { flex: 0 0 54px; width: 54px; aspect-ratio: 1; border-radius: 8px; }
 .points-receipt .points-cover > .icon { width: 21px; height: 21px; }
 .points-receipt[data-points-selected] { margin-inline: -7px; padding-inline: 7px; border-radius: 8px; background: #eef3ec; }
-.points-rule-list { margin: 0; padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.points-rule-list { margin: 0; padding-inline-start: 22px; color: var(--muted); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .points-rule-list li + li { margin-top: 5px; }
+.points-admin-rules .points-panel-header { margin-bottom: 8px; }
+.points-admin-rules .points-panel-header h2 { margin-bottom: 0; }
+.points-rules-hint { margin-top: 6px; color: var(--muted); font-size: 12px; }
 .points-feedback { color: var(--muted); font-size: 13px; line-height: 1.65; }
 .points-page .points-error, .points-dialog .points-error { color: var(--negative); }
 .points-bell { position: relative; flex: 0 0 44px; width: 44px; height: 44px; display: inline-grid; place-items: center; border-radius: 8px; color: var(--accent); }
@@ -118,6 +121,7 @@
   .points-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .points-product { padding: 0; }
   .points-dialog { width: 100%; max-width: none; margin: auto 0 0; border-radius: 16px 16px 0 0; max-height: 90dvh; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+  .points-dialog label > .points-rules-input { font-size: 16px; }
   .points-heading { align-items: flex-start; gap: 7px; }
 }
 @media (max-width: 400px) {

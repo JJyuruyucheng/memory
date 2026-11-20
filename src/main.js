@@ -84,7 +84,8 @@ function filtered() {
   return selectedDay && isFeedView(view) ? rows.filter(row => dayKey(row.occurredAt) === selectedDay) : rows;
 }
 const navItems = [['timeline', 'book', '时光线'], ['album', 'photo', '我们的相册'], ['events', 'calendar', '重要时刻'], ['stats', 'chart', '时光统计']];
-function navLink(item) { const [id, symbol, label] = item; return `<a href="#${id}" class="nav-link ${route() === id ? 'active' : ''}" ${route() === id ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${label}</span></a>`; }
+function navLink([id, symbol, label], selected = route() === id) { return `<a href="#${id}" class="nav-link ${selected ? 'active' : ''}" ${selected ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${esc(label)}</span></a>`; }
+const pointsNavLink = () => navLink(['points', 'gift', '积分&商城'], memberPointsRoutes.has(route()));
 
 function clearPoints() {
   stopCheckin?.(); stopCheckin = null;
@@ -180,7 +181,7 @@ function render() {
       <div class="space-label">${icon('lock')} ${esc(state.settings.spaceName || '两个人的小世界')}</div>
       <nav>${navItems.map(navLink).join('')}</nav>
       <div class="sidebar-group"><span class="group-label">好好收藏</span>${navLink(['favorites', 'bookmark', '我的收藏'])}${navLink(['anniversaries', 'heart', '纪念日'])}</div>
-      ${pointsUi && current.role === 'member' ? `<nav aria-label="积分">${navLink(['points', 'star', '我的积分'])}${navLink(['shop', 'gift', '积分商城'])}</nav>` : ''}
+      ${pointsUi && current.role === 'member' ? `<nav aria-label="积分与商城">${pointsNavLink()}</nav>` : ''}
       <div class="sidebar-bottom">${navLink(['us', 'settings', '我们与设置'])}${navLink(['trash', 'trash', '回收站'])}${current.role === 'admin' ? navLink(['admin', 'shield', '管理小屋']) : ''}
       ${pointsUi && current.role === 'admin' ? navLink(['shop-admin', 'gift', '商城管理']) : ''}
       <div class="account-row">${accountProfile}${CONFIG.mode === 'demo' ? `<label class="switch-view" title="切换示例视角">${icon('down')}<span class="sr-only">切换示例视角</span><select id="user-switch">${state.users.map(u => `<option value="${esc(u.id)}" ${u.id === current.id ? 'selected' : ''}>${esc(u.name)}${u.role === 'admin' ? '（管理员）' : ''}</option>`).join('')}</select></label>` : `<button class="icon-button" data-action="logout" aria-label="退出登录">${icon('logout')}</button>`}</div>
@@ -363,7 +364,7 @@ function loadOptionalLoginPhotos(create) {
 function renderSettings() {
   return `<header class="page-heading settings-title"><h1>我们与设置</h1><button class="primary" form="settings-form" type="submit">保存设置</button></header><div class="settings-board" data-ui>
     <nav class="settings-shortcuts" aria-label="更多回忆入口">${navLink(['favorites', 'bookmark', '我的收藏'])}${navLink(['anniversaries', 'heart', '纪念日'])}${navLink(['trash', 'trash', '回收站'])}${state.currentUser.role === 'admin' ? navLink(['admin', 'shield', '管理小屋']) : ''}
-      ${pointsUi ? state.currentUser.role === 'admin' ? navLink(['shop-admin', 'gift', '商城管理']) : navLink(['shop', 'gift', '积分商城']) + navLink(['points', 'star', '我的积分']) : ''}</nav>
+      ${pointsUi ? state.currentUser.role === 'admin' ? navLink(['shop-admin', 'gift', '商城管理']) : pointsNavLink() : ''}</nav>
     <form id="settings-form" class="settings-form">
       <section class="settings-section"><h2>共同空间</h2><fieldset class="settings-space-fields">
         <label>空间名字<input name="spaceName" value="${esc(state.settings.spaceName)}" maxlength="30" required /></label>

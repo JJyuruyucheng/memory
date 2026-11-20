@@ -1,0 +1,39 @@
+.bgm-folders { min-width: 0; margin: 12px 0 4px; }
+.bgm-folder-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
+.bgm-folder-header h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.bgm-folder-header button, .bgm-folder-tools button { min-height: 36px; padding: 4px 9px; font-size: 12px; }
+.bgm-folder-browse { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; gap: 7px; }
+.bgm-folder-browse > button { border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; }
+.bgm-folder-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 136px), 1fr)); gap: 7px; margin: 0; padding: 0; list-style: none; }
+.bgm-folder-item { min-width: 0; display: flex; align-items: stretch; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.bgm-folder-item:has(.bgm-folder-open[aria-pressed='true']), .bgm-folder-browse > button[aria-pressed='true'] { border-color: var(--control); background: var(--active); }
+.bgm-folder-open { flex: 1 1 auto; min-width: 0; min-height: 36px; padding: 5px 8px; color: var(--text); font-size: 12px; text-align: left; overflow-wrap: anywhere; }
+.bgm-folder-open[aria-pressed='true'] { color: var(--primary); font-weight: 600; }
+.bgm-folder-grip { flex: 0 0 34px; display: grid; place-items: center; min-height: 36px; border-radius: 7px; color: var(--muted); cursor: grab; touch-action: none; }
+.bgm-folder-grip:active { cursor: grabbing; }
+.bgm-folder-grip:is(:hover, :focus-visible) { background: var(--raised); color: var(--accent); }
+.bgm-folder-grip .icon { width: 16px; height: 16px; }
+.bgm-folder-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; margin-top: 7px; }
+.bgm-folder-tools[hidden] { display: none; }
+.bgm-folder-view { margin-right: auto; color: var(--primary); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.bgm-folder-picker { max-height: min(46dvh, 420px); padding-inline: 3px; overflow: auto; }
+.bgm-folder-picker label { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 2px; font-size: 13px; overflow-wrap: anywhere; }
+.bgm-folder-picker label + label { border-top: 1px solid var(--rule); }
+.bgm-folder-picker label input { accent-color: var(--accent); }
+.bgm-folder-picker small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+.bgm-folder-dialog form { margin-top: 12px; }
+.bgm-folder-dialog .bgm-feedback:empty { display: none; }
+.bgm-audio-upload { flex: 1 1 154px; min-width: 0; }
+.bgm-audio-drop { display: flex; min-height: 40px; width: 100%; padding: 7px 9px; border-style: dashed; }
+.bgm-audio-drop small { margin-left: auto; }
+.bgm-upload .bgm-audio-drop input { width: 100%; height: 100%; margin: 0; }
+.bgm-audio-drop:is(:hover, :focus-within, .drag-over) { border-color: var(--accent); background: var(--raised); }
+.bgm-audio-drop.drag-over { border-style: solid; background: var(--active); }
+.bgm-audio-selection { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.bgm-audio-selection[data-error='true'] { color: var(--negative); }
+.bgm-grip-spacer { display: block; min-width: 0; }
+@media (max-width: 760px) {
+  .bgm-folder-header button, .bgm-folder-open, .bgm-folder-tools button, .bgm-folder-grip { min-height: 44px; }
+  .bgm-folder-grip { flex-basis: 38px; }
+}
+@media (hover: none) { .bgm-audio-drop small { display: none; } }

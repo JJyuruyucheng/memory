@@ -1,22 +1,13 @@
 import { lyricText, musicFileType, parseLyrics } from './background-music-data.js';
-import { mountMusicSettings } from './music-settings.js';
 
-export function musicLibrary(provider, scope, { signal, onChange, onMessage }) {
-  let state, slot, settings, working = false, sorting = false;
-  const current = () => state?.tracks.find(track => track.id === state.current_id);
-
-  function message(text) {
-    settings?.message(text);
-    onMessage(text);
-  }
+export function musicLibrary(provider, scope, { signal, onChange, onMessage, onFolderSaved }) {
+  let state, working = false, sorting = false;
 
   function apply(next) {
     if (signal.aborted || (state && next.revision <= state.revision)) return;
-    const previous = state;
     state = next;
-    message('');
-    settings?.render(state);
-    onChange(state, previous);
+    onMessage('');
+    onChange();
   }
 
   async function refresh() {
@@ -24,25 +15,29 @@ export function musicLibrary(provider, scope, { signal, onChange, onMessage }) {
     try {
       const next = await provider.loadMusic({ signal, revision: state?.revision, scope });
       if (next && !working && !sorting) apply(next);
-    } catch { if (!state && !signal.aborted) message('歌单暂时无法读取。'); }
+    } catch { if (!state && !signal.aborted) onMessage('歌单暂时无法读取。'); }
   }
 
   async function change(edit) {
     if (!state || working || signal.aborted) return false;
-    working = true; message('');
+    working = true; onMessage('');
     try { await edit(); return true; }
     catch (error) {
-      if (!signal.aborted) { settings?.render(state); message(error.message || '歌单暂时无法保存。'); }
+      if (!signal.aborted) { onChange(); onMessage(error.message || '歌单暂时无法保存。'); }
       return false;
     } finally { working = false; void refresh(); }
   }
 
-  const save = async changes => apply(await provider.saveMusic({ ...state, ...changes }, state.revision, { scope }));
+  async function save(changes, folder) {
+    const next = await provider.saveMusic({ ...state, ...changes }, state.revision, { scope, folder });
+    if (folder) { onFolderSaved(next.folderState); apply(next.music); }
+    else apply(next);
+  }
   const drop = async ids => Promise.all(ids.filter(Boolean).map(id => provider.removeMusicFile(id).catch(() => {})));
   const select = id => state?.current_id !== id && state?.tracks.some(track => track.id === id)
     ? change(() => save({ current_id: id })) : false;
 
-  function editTrack(id, { title, artist, audio: audioFile, lyrics: lyricFile }) {
+  function editTrack(id, { title, artist, audio: audioFile, lyrics: lyricFile }, folder) {
     return change(async () => {
       const existing = state.tracks.find(track => track.id === id);
       const track = existing ? { ...existing } : {
@@ -66,7 +61,7 @@ export function musicLibrary(provider, scope, { signal, onChange, onMessage }) {
           uploaded.push(track[field]);
         }
         const tracks = existing ? state.tracks.map(item => item.id === id ? track : item) : [...state.tracks, track];
-        await save({ tracks, current_id: state.current_id ?? track.id });
+        await save({ tracks, current_id: state.current_id ?? track.id }, folder && { ...folder, trackId: track.id });
       } catch (error) { await drop(uploaded); throw error; }
       await drop(replaced);
     });
@@ -74,13 +69,17 @@ export function musicLibrary(provider, scope, { signal, onChange, onMessage }) {
 
   const actions = {
     select,
-    add: (audio, lyrics, title, artist) => editTrack(null, { audio, lyrics, title, artist }),
+    add: (audio, lyrics, title, artist, folder) => editTrack(null, { audio, lyrics, title, artist }, folder),
     async replace(id, field, file) {
-      if (await editTrack(id, { [field]: file })) message(field === 'lyrics' ? '歌词已保存。' : '音源已保存。');
+      if (await editTrack(id, { [field]: file })) onMessage(field === 'lyrics' ? '歌词已保存。' : '音源已保存。');
     },
     setSorting(value) { sorting = value; },
     reorder(ids) {
-      void change(() => save({ tracks: ids.map(id => state.tracks.find(track => track.id === id)) }));
+      return change(() => {
+        const byId = new Map(state.tracks.map(track => [track.id, track]));
+        if (byId.size !== ids.length || ids.some(id => !byId.has(id))) throw new Error('歌单已更新，请重新排序。');
+        return save({ tracks: ids.map(id => byId.get(id)) });
+      });
     },
     removeLyrics(id) {
       void change(async () => {
@@ -103,17 +102,9 @@ export function musicLibrary(provider, scope, { signal, onChange, onMessage }) {
 
   return {
     get state() { return state; },
-    current, refresh, select,
+    actions, refresh, select,
     changeMode() {
       void change(() => save({ play_mode: state.play_mode === 'shuffle' ? 'sequence' : 'shuffle' }));
     },
-    mountSettings(next) {
-      if (slot === next) return;
-      settings?.destroy();
-      slot = next;
-      settings = next ? mountMusicSettings(next, actions, { scope }) : null;
-      if (settings) { settings.render(state); void refresh(); }
-    },
-    destroy() { settings?.destroy(); },
   };
 }

@@ -43,6 +43,7 @@ function fixture({ before = async () => {}, author = U1, initialMedia = false, p
     comments: [], reactions: [], favorites: [],
     settings: [{ id: 1, spaceName: '朝夕', subtitle: '两个人的小事', startDate: '2026-01-01', anniversaries: [], updatedAt: NOW }],
     background_music: [1, 2].map(id => ({ id, revision: 0, current_id: null, tracks: [], play_mode: 'sequence' })),
+    background_music_folders: [{ id: 1, revision: 0, active_folder_id: null, current_id: null, folders: [] }],
     media: [],
   };
   const objects = new Map();
@@ -91,7 +92,7 @@ function fixture({ before = async () => {}, author = U1, initialMedia = false, p
           selected = selected.filter(row => row.id === user());
         }
         selected.forEach(row => Object.assign(row, this.payload, { updatedAt: new Date(Date.parse(NOW) + ++tick * 1000).toISOString() }));
-        if (this.table === 'background_music') selected.forEach(row => { row.revision++; });
+        if (['background_music', 'background_music_folders'].includes(this.table)) selected.forEach(row => { row.revision++; });
       } else if (this.action === 'delete') {
         assert.ok(['reactions', 'favorites'].includes(this.table), 'records are never physically deleted');
         assert.ok(selected.every(row => row.userId === user()), 'only the current user reaction is removed');
@@ -223,6 +224,32 @@ test('site and points playlists have separate versions and the points instrument
   assert.equal(await (await f.provider.loadMusicFile(pianoId)).text(), 'test-audio');
   await f.provider.removeMusicFile(pianoId);
   assert.equal(globalThis.fetch.mock.callCount(), 1);
+});
+
+test('music folders save a shared selection and upload a track with its folder reference in one RPC', async () => {
+  const f = fixture();
+  await f.signIn();
+  const folderId = '11111111-1111-4111-8111-111111111111';
+  const trackId = '22222222-2222-4222-8222-222222222222';
+  const track = { id: trackId, title: '旅途录音', artist: '', audio: trackId };
+  const initial = await f.provider.loadMusicFolders();
+  const folder = { id: folderId, name: '旅途', track_ids: [] };
+  const saved = await f.provider.saveMusicFolders({ ...initial, active_folder_id: folderId, folders: [folder] }, initial.revision);
+  assert.equal(saved.revision, 1);
+  assert.deepEqual(await f.provider.loadMusicFolders({ revision: 0 }), saved);
+  await assert.rejects(f.provider.saveMusicFolders(initial, 0), error => error.code === 'CONFLICT');
+  const request = { current_id: trackId, play_mode: 'sequence', tracks: [track] };
+  f.client.rpc = (name, args) => {
+    assert.equal(name, 'save_music_to_folder');
+    assert.deepEqual(args, { p_music_revision: 0, p_folder_revision: 1, p_folder_id: folderId,
+      p_track_id: trackId, p_current_id: trackId, p_play_mode: 'sequence', p_tracks: [track] });
+    return { abortSignal: () => Promise.resolve(ok({
+      music: { ...request, revision: 1 }, folderState: { ...saved, revision: 2, folders: [{ ...folder, track_ids: [trackId] }] },
+    })) };
+  };
+  const result = await f.provider.saveMusic({ ...request, revision: 0 }, 0, { folder: { id: folderId, revision: 1, trackId } });
+  assert.deepEqual(result.music, { ...request, revision: 1 });
+  assert.deepEqual(result.folderState.folders[0].track_ids, [trackId]);
 });
 
 test('transient session/profile/data failures keep restoration retryable without a password login', async () => {

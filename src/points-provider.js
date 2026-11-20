@@ -11,6 +11,8 @@ const errors = {
   POINTS_INVALID_PRODUCT: '请核对名称、售价、库存和封面。',
   POINTS_INVALID_CHALLENGE: '请核对挑战标题和奖励分。',
   POINTS_INVALID_REQUEST: '排序未保存，请重新加载商品。',
+  POINTS_INVALID_RULES: '规则需使用纯文本，最多 24 条，每条最多 200 字。',
+  POINTS_RULES_CHANGED: '规则已更新，请关闭窗口并核对最新内容。',
 };
 
 export function pointsError(message) {
@@ -43,6 +45,7 @@ async function prepareCover(file) {
 export function makePointsProvider(rpc, checkAdmin) {
   return {
     pointsSummary: () => rpc('points_summary'),
+    pointsRules: () => rpc('points_rules'),
     pointsCatalog: () => rpc('points_catalog'),
     pointsBackpack: () => rpc('points_backpack'),
     pointsNotifications: () => rpc('points_notifications'),
@@ -57,6 +60,7 @@ export function makePointsProvider(rpc, checkAdmin) {
     pointsAdminReorder: ids => rpc('points_admin_reorder_products', { p_product_ids: ids }, true),
     pointsAdminOrders: () => rpc('points_admin_orders'),
     pointsAdminChallenges: () => rpc('points_admin_challenges'),
+    pointsAdminSaveRules: (lines, version) => rpc('points_admin_save_rules', { p_lines: lines, p_version: version }, true),
     pointsAdminSaveProduct: product => rpc('points_admin_save_product', {
       p_product_id: product.id || null, p_version: product.version ?? null, p_name: product.name,
       p_description: product.description, p_price: product.price, p_stock: product.stock,

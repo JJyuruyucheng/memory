@@ -1,15 +1,16 @@
 .bgm-widget {
+  --bgm-scale: 1;
   position: fixed; inset: 0; z-index: 29; pointer-events: none;
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
 }
 .bgm-trigger {
-  --bgm-trigger-size: 54px;
+  --bgm-trigger-size: calc(54px * var(--bgm-scale));
   position: absolute; display: grid; place-items: center; width: var(--bgm-trigger-size); height: var(--bgm-trigger-size); padding: 0;
   border-radius: 50%; background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--primary);
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: 0 3px 14px #24382a17;
   pointer-events: auto; cursor: grab; touch-action: none; user-select: none; -webkit-touch-callout: none;
 }
-.bgm-trigger .icon { width: 23px; height: 23px; }
+.bgm-trigger .icon { width: calc(23px * var(--bgm-scale)); height: calc(23px * var(--bgm-scale)); }
 .bgm-trigger.is-dragging { cursor: grabbing; }
 .bgm-trigger[aria-expanded='true'], .bgm-widget.is-playing .bgm-trigger { background: var(--primary); color: #fff; }
 .bgm-trigger[data-dock='left'] { clip-path: inset(0 0 0 50%); }
@@ -38,49 +39,57 @@
 
 .bgm-panel {
   position: absolute; width: max-content; max-width: calc(100vw - 24px);
-  display: flex; flex-direction: column; gap: 2px; padding: 3px 7px;
+  display: flex; flex-direction: column; gap: 2px; padding: calc(3px * var(--bgm-scale)) calc(7px * var(--bgm-scale));
   border: 1px solid color-mix(in srgb, var(--control) 68%, transparent); border-radius: 24px;
   color: var(--text); background: color-mix(in srgb, var(--surface) 32%, transparent);
   pointer-events: none;
 }
-.bgm-panel:has(ol:not([hidden])) { max-width: min(370px, calc(100vw - 24px)); border-radius: 17px; }
+.bgm-panel:has(#bgm-list-area:not([hidden])) { max-width: min(calc(430px * var(--bgm-scale)), calc(100vw - 24px)); border-radius: 17px; }
 .bgm-panel [hidden], .bgm-panel[hidden], .bgm-lyrics[hidden], .bgm-lyric-options[hidden], .settings-music [hidden] { display: none; }
-.bgm-controls { display: flex; align-items: center; justify-content: flex-end; gap: 10px; max-width: 100%; }
+.bgm-controls { display: flex; align-items: center; justify-content: flex-end; gap: calc(8px * var(--bgm-scale)); max-width: 100%; }
 .bgm-controls > [data-bgm='close'] { color: var(--muted); }
 .bgm-controls > [data-bgm='close'] .icon { width: 17px; height: 17px; }
-.bgm-now { min-width: 0; max-width: 115px; text-align: right; line-height: 1.22; }
+.bgm-now { min-width: 0; max-width: calc(115px * var(--bgm-scale)); text-align: right; line-height: 1.22; }
 .bgm-now :is(strong, small) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bgm-now strong { font-size: 14px; }
-.bgm-now small { font-size: 10px; color: var(--muted); }
+.bgm-now strong { font-size: calc(14px * var(--bgm-scale)); }
+.bgm-now small { font-size: calc(10px * var(--bgm-scale)); color: var(--muted); }
 .bgm-now small:empty { display: none; }
 .bgm-transport, .bgm-switches { display: flex; align-items: center; justify-content: center; gap: 4px; flex: none; }
 .bgm-controls button {
-  display: inline-grid; place-items: center; flex: none; min-width: 32px; height: 34px; padding: 0 4px;
+  display: inline-grid; place-items: center; flex: none; min-width: calc(31px * var(--bgm-scale)); height: calc(34px * var(--bgm-scale)); padding: 0 4px;
   border-radius: 20px; border: 1px solid transparent; pointer-events: auto;
 }
 .bgm-controls button:hover, .bgm-switches button[aria-expanded='true'], .bgm-switches button[aria-pressed='true'] { border-color: var(--control); color: var(--primary); }
 .bgm-controls [data-bgm='play'] { border-color: var(--control); color: var(--primary); }
 .bgm-controls [data-bgm='play']:hover { border-color: var(--accent); }
-.bgm-switches button { font-size: 12px; font-weight: 650; }
+.bgm-switches button { font-size: calc(12px * var(--bgm-scale)); font-weight: 650; }
+.bgm-controls button .icon { width: calc(18px * var(--bgm-scale)); height: calc(18px * var(--bgm-scale)); }
 .bgm-switches [data-bgm='mode'] { display: inline-flex; gap: 4px; align-items: center; border-radius: 20px; }
 .bgm-switches [data-bgm='mode'] .icon { width: 14px; height: 14px; }
 .bgm-volume {
   display: grid; grid-template-columns: auto minmax(0, 1fr) 4ch; align-items: center; align-self: center; gap: 6px;
-  width: min(170px, 100%); color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums;
+  width: min(calc(170px * var(--bgm-scale)), 100%); color: var(--muted); font-size: calc(11px * var(--bgm-scale)); font-variant-numeric: tabular-nums;
 }
 .bgm-volume input[type='range'] {
   appearance: auto; width: 100%; min-height: 25px; margin: 0; padding: 0;
   accent-color: var(--primary); background: transparent; border: 0; pointer-events: auto; cursor: pointer;
 }
 .bgm-volume-value { text-align: right; }
+.bgm-queue { display: flex; align-items: center; gap: 6px; margin: 1px 3px 4px; color: var(--muted); font-size: calc(11px * var(--bgm-scale)); }
+.bgm-queue span { white-space: nowrap; }
+.bgm-queue select {
+  width: auto; min-width: 0; max-width: calc(100% - 2.5em); height: calc(27px * var(--bgm-scale)); padding: 0 7px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); pointer-events: auto; font: inherit;
+}
+.bgm-queue select:focus-visible { outline-offset: 1px; }
 .bgm-panel ol {
   display: flex; gap: 5px; max-width: 100%; overflow-x: auto; scrollbar-width: thin;
   margin: 0; padding: 0 1px 3px; list-style: none; pointer-events: auto;
 }
 .bgm-panel ol li { flex: none; }
-.bgm-panel ol button { display: flex; align-items: baseline; gap: 5px; min-height: 32px; padding: 4px 7px; border: 1px solid transparent; border-radius: 6px; }
+.bgm-panel ol button { display: flex; align-items: baseline; gap: 5px; min-height: calc(32px * var(--bgm-scale)); padding: 4px 7px; border: 1px solid transparent; border-radius: 6px; }
 .bgm-panel ol button:is(:hover, [aria-pressed='true']) { border-color: var(--control); color: var(--primary); }
-.bgm-panel ol strong { max-width: 7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.bgm-panel ol strong { max-width: 7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--bgm-scale)); }
 .bgm-panel ol small, .bgm-feedback { color: var(--muted); font-size: 11px; }
 .bgm-panel ol small { max-width: 6rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bgm-panel .bgm-feedback { text-align: right; }
@@ -213,6 +222,10 @@
 .bgm-file-label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .bgm-edit-actions .danger { color: var(--negative); }
 .has-bgm .page-heading { padding-right: 41px; }
+@media (any-pointer: fine) {
+  .bgm-widget { --bgm-scale: var(--bgm-size-pref, 1); }
+  .bgm-widget.is-resizing :is(.bgm-trigger, .bgm-panel button, .bgm-queue select) { cursor: nwse-resize; }
+}
 @media (max-width: 760px) {
   .has-bgm .mobile-header { padding-right: 68px; }
   .has-bgm .page-heading { padding-right: 0; }

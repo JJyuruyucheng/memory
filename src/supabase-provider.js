@@ -1,4 +1,4 @@
-import { BGM_BUCKET, MUSIC_UUID, musicFileType, musicState } from './background-music-data.js';
+import { BGM_BUCKET, MUSIC_UUID, musicFileType, musicFoldersState, musicState } from './background-music-data.js';
 import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, toUtcIso, validateEntry } from './domain.js';
 import { planAttachmentOrder, resolveAttachmentOrder } from './attachment-order.js';
 import { MAX_PROFILE_NAME, validAvatarJpeg } from './profile.js';
@@ -353,12 +353,36 @@ export function createSupabaseProvider(config = {}) {
       const value = await result((staleOnly ? lookup.gt('revision', revision).maybeSingle() : lookup.single()).abortSignal(requestSignal), expected, { allowNull: staleOnly });
       return value ? musicState(value) : null;
     },
-    saveMusic: (value, version, { scope = 'site' } = {}) => enqueue(async expected => {
+    saveMusic: (value, version, { scope = 'site', folder } = {}) => enqueue(async expected => {
       const { current_id, play_mode, tracks } = musicState(value);
+      if (folder) {
+        const saved = await result(query(client.rpc('save_music_to_folder', {
+          p_music_revision: version, p_folder_revision: folder.revision, p_folder_id: folder.id,
+          p_track_id: folder.trackId, p_current_id: current_id, p_play_mode: play_mode, p_tracks: tracks,
+        })), expected);
+        return { music: musicState(saved.music), folderState: musicFoldersState(saved.folderState) };
+      }
       const saved = await result(query(client.from('background_music').update({ current_id, play_mode, tracks }).eq('id', scope === 'points' ? 2 : 1)
         .eq('revision', version).select('revision,current_id,play_mode,tracks').maybeSingle()), expected, { allowNull: true });
       if (!saved) throw new SupabaseProviderError('另一位成员刚更新了歌单，请重试。', 'CONFLICT', 409);
       return musicState(saved);
+    }),
+    async loadMusicFolders({ signal, revision } = {}) {
+      const expected = generation;
+      requireUser(expected);
+      const requestSignal = signal ? AbortSignal.any([sessionController.signal, signal]) : sessionController.signal;
+      const lookup = client.from('background_music_folders').select('revision,active_folder_id,current_id,folders').eq('id', 1);
+      const staleOnly = Number.isSafeInteger(revision);
+      const builder = staleOnly ? lookup.gt('revision', revision).maybeSingle() : lookup.single();
+      const value = await result(builder.abortSignal(requestSignal), expected, { allowNull: staleOnly });
+      return value ? musicFoldersState(value) : null;
+    },
+    saveMusicFolders: (value, version) => enqueue(async expected => {
+      const { active_folder_id, current_id, folders } = musicFoldersState(value);
+      const saved = await result(query(client.from('background_music_folders').update({ active_folder_id, current_id, folders }).eq('id', 1)
+        .eq('revision', version).select('revision,active_folder_id,current_id,folders').maybeSingle()), expected, { allowNull: true });
+      if (!saved) throw new SupabaseProviderError('音乐文件夹刚同步了新内容，请重试。', 'CONFLICT', 409);
+      return musicFoldersState(saved);
     }),
     async loadMusicFile(id, { signal } = {}) {
       const expected = generation;

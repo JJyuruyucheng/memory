@@ -122,15 +122,18 @@ function checkinStatus(summary, countdown, failed) {
 
 const calendarBalanceLabel = balance => `可用积分 ${balance}，查看我的积分`;
 
-function rulesMarkup() {
-  return `<ol class="points-rule-list">
-    <li>北京时间每日前台停留 60 秒自动签到，得 0.5 分。</li>
-    <li>每轮连签满 7、30、180、365 天，分别奖同等积分。天数持续累计，断签后重开一轮。</li>
-    <li>发布帖子得1分。收到对方有效点赞、评论或回复，各得 0.2 分。</li>
-    <li>共同回忆双方都确认后，作者得 5 分。共同挑战按设定奖励发放。</li>
-    <li>每年 1 月 1 日发放 50 分纪念日积分。</li>
-    <li>兑换扣积分和库存，兑换及使用不可撤销。现金券与补贴按 1 分抵 1 元线下兑现。</li>
-  </ol>`;
+const rulesLimit = { count: 24, length: 200 };
+
+function rulesMarkup({ lines }) {
+  return `<ol class="points-rule-list">${lines.map(line => `<li>${esc(line)}</li>`).join('')}</ol>`;
+}
+
+function parseRules(text) {
+  const lines = String(text ?? '').split(/\r\n?|\n/u).map(line => line.trim()).filter(Boolean);
+  if (!lines.length) throw new Error('至少填写一条规则。');
+  if (lines.length > rulesLimit.count) throw new Error(`最多填写 ${rulesLimit.count} 条规则。`);
+  if (lines.some(line => [...line].length > rulesLimit.length)) throw new Error(`每条规则最多 ${rulesLimit.length} 字。`);
+  return lines;
 }
 
 function balanceMarkup(summary, extra = '') {
@@ -255,7 +258,7 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
     return typeof match === 'string' ? match : match?.name || '另一位成员';
   };
   const loadMethod = {
-    summary: 'pointsSummary', catalog: 'pointsCatalog', backpack: 'pointsBackpack',
+    summary: 'pointsSummary', rules: 'pointsRules', catalog: 'pointsCatalog', backpack: 'pointsBackpack',
     notifications: 'pointsNotifications', adminCatalog: 'pointsAdminCatalog', adminOrders: 'pointsAdminOrders',
     adminChallenges: 'pointsAdminChallenges',
   };
@@ -304,7 +307,7 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
     if (route === 'points') return dataBody('summary', store, state => `<div class="points-layout">
       <div class="points-wallet">${balanceMarkup(state, `<div class="points-card-actions">${link('shop', '去兑换')}</div>`)}</div>
       <div class="points-stack points-main">
-        ${panel('积分规则', rulesMarkup())}
+        ${panel('积分规则', dataBody('rules', store, rulesMarkup))}
         ${panel('积分明细', ledgerMarkup(state.ledger))}
         ${panel('共同挑战', challengeMarkup(state.challenges, getUser()))}
         ${panel('共同回忆', memoriesMarkup(state.memories, getUser()))}
@@ -331,6 +334,10 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
       <section class="points-admin-products" aria-labelledby="points-admin-products-title">
         <div class="points-panel-header"><h2 id="points-admin-products-title">商品与库存</h2>${button('edit-product', '添加商品', { primary: true, more: ' aria-haspopup="dialog"' })}</div>
         ${dataBody('adminCatalog', store, items => adminProductMarkup(items, Boolean(provider.pointsAdminReorder)))}
+      </section>
+      <section class="points-panel points-admin-rules" aria-labelledby="points-admin-rules-title">
+        <div class="points-panel-header"><h2 id="points-admin-rules-title">积分规则说明</h2>${button('edit-rules', '编辑', { disabled: !store.get('rules')?.value, more: ' aria-haspopup="dialog" aria-label="编辑积分规则说明"' })}</div>
+        ${dataBody('rules', store, rulesMarkup)}
       </section>
       ${panel('共同挑战', `<p>双方确认完成后发放积分。</p><div class="points-card-actions">${button('new-challenge', '发布挑战', { more: ' aria-haspopup="dialog"' })}</div>
         ${dataBody('adminChallenges', store, adminChallengeMarkup)}`)}
@@ -499,8 +506,8 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
     const region = app.querySelector('[data-points-view]');
     const route = region?.dataset.pointsView;
     const dependencies = {
-      points: ['summary'], shop: ['summary', 'catalog'], backpack: ['backpack'],
-      'shop-admin': ['adminCatalog', 'adminOrders', 'adminChallenges'],
+      points: ['summary', 'rules'], shop: ['summary', 'catalog'], backpack: ['backpack'],
+      'shop-admin': ['adminCatalog', 'adminOrders', 'adminChallenges', 'rules'],
     };
     if (key !== 'notifications' && region && dependencies[route]?.includes(key)) {
       if (route === 'shop-admin' && (dragging || savingOrder)) { adminDrawPending = true; return; }
@@ -541,12 +548,14 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
     if (isMember() || isAdmin()) void load('notifications');
     if (isMember()) {
       void load('summary', changed && ['points', 'shop'].includes(route));
+      if (route === 'points') void load('rules', changed);
       if (route === 'shop') void load('catalog', changed);
       if (route === 'backpack') void load('backpack', changed);
     } else if (isAdmin() && route === 'shop-admin') {
       void load('adminCatalog', changed);
       void load('adminOrders', changed);
       void load('adminChallenges', changed);
+      void load('rules', changed);
       focusLinkedOrder();
     }
   }
@@ -608,6 +617,7 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
           if (action === 'redeem') { void load('catalog', true); void load('summary', true); }
           if (action === 'product') void load('adminCatalog', true);
         }
+        if (action === 'rules' && code === 'POINTS_RULES_CHANGED') void load('rules', true);
       }
     } finally {
       if (version === dialogVersion) dialogueBusy = false;
@@ -677,6 +687,14 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
       if (version === dialogVersion) closeDialog();
       toast('已发布共同挑战。');
       void load('adminChallenges', true);
+    },
+    async rules(fields, version) {
+      const lines = parseRules(fields.get('lines'));
+      const value = await provider.pointsAdminSaveRules(lines, Number(fields.get('rules-version')));
+      if (signal.aborted) return;
+      if (version === dialogVersion) closeDialog();
+      set('rules', value);
+      toast('积分规则说明已保存。');
     },
   };
 
@@ -760,6 +778,15 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
       <label>每位成员奖励积分<input name="reward" inputmode="decimal" required /></label>`, '发布挑战', 'challenge'), origin);
   }
 
+  function editRules(origin) {
+    const current = store.get('rules')?.value;
+    if (!isAdmin() || !current) return;
+    openDialog('编辑积分规则说明', form(`<input type="hidden" name="rules-version" value="${esc(current.version)}" />
+      <label>规则说明<textarea name="lines" class="points-rules-input" rows="7" maxlength="${rulesLimit.count * (rulesLimit.length * 2 + 1)}"
+        aria-describedby="points-rules-hint" required>${esc(current.lines.join('\n'))}</textarea></label>
+      <p class="points-rules-hint" id="points-rules-hint">说明会显示在成员的「我的积分」中。每行一条，空行跳过，页面自动编号。最多 ${rulesLimit.count} 条，每条 ${rulesLimit.length} 字。</p>`, '保存说明', 'rules'), origin);
+  }
+
   function updateInbox() {
     const region = dialog.querySelector('[data-points-inbox]');
     if (!region) return;
@@ -832,6 +859,7 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
     else if (action === 'confirm-challenge') void confirmChallenge(id, target);
     else if (action === 'edit-product') editProduct(id, target);
     else if (action === 'new-challenge') newChallenge(target);
+    else if (action === 'edit-rules') editRules(target);
   }
 
   app.addEventListener('click', click, { signal });
@@ -843,6 +871,8 @@ export function mountPointsUi({ app, modalRoot, provider, getUser, getUsers = ()
   window.addEventListener('focus', () => {
     if (isMember() || isAdmin()) void load('notifications', true);
     if (isMember()) void load('summary', true);
+    const route = getRoute();
+    if ((isMember() && route === 'points') || (isAdmin() && route === 'shop-admin')) void load('rules', true);
   }, { signal });
   const notificationPoll = setInterval(() => {
     if ((isMember() || isAdmin()) && document.visibilityState === 'visible') void load('notifications', true);

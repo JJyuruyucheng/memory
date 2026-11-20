@@ -2,6 +2,14 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 27, date: '2026-11-20', version: 'v0.17.3', title: '音乐文件夹与积分规则编辑',
+    changes: [
+      '背景音乐汇总全站和积分专属曲目。支持新建、拖动排序、删除文件夹，引用曲库曲目或直接上传。',
+      '播放器可选择文件夹，点「音」展开音量滑杆。电脑端按住鼠标右键拖动可调整播放器大小。',
+      '左侧合并为「积分&商城」。管理员可修改积分页展示的规则说明。',
+    ],
+  },
+  {
     number: 26, date: '2026-11-20', version: 'v0.17.2', title: '帖子交互、标签统计与拖放',
     changes: [
       '共同回忆可再次点击撤销确认，重新确认不会重复发分。帖子按钮统一尺寸，「问瓜子」加上猫咪图标。',

@@ -111,3 +111,38 @@ export function musicState(value) {
   if (value.current_id !== null && !seen.has(value.current_id)) throw new Error('当前曲目无法读取。');
   return { revision: value.revision, current_id: value.current_id, play_mode: value.play_mode === 'shuffle' ? 'shuffle' : 'sequence', tracks };
 }
+
+export function musicFoldersState(value) {
+  if (!value || !Number.isSafeInteger(value.revision) || value.revision < 0 || !Array.isArray(value.folders) || value.folders.length > 100) {
+    throw new Error('音乐文件夹格式无法读取。');
+  }
+  const ids = new Set();
+  const isId = id => typeof id === 'string' && MUSIC_UUID.test(id);
+  const folders = value.folders.map(folder => {
+    if (!folder || !isId(folder.id) || ids.has(folder.id) || typeof folder.name !== 'string'
+      || !folder.name.trim() || folder.name.length > 80 || !Array.isArray(folder.track_ids) || folder.track_ids.length > 200
+      || folder.track_ids.some(id => !isId(id)) || new Set(folder.track_ids).size !== folder.track_ids.length) {
+      throw new Error('音乐文件夹需要名称和有效曲目。');
+    }
+    ids.add(folder.id);
+    return { id: folder.id, name: folder.name.trim(), track_ids: [...folder.track_ids] };
+  });
+  if ((value.active_folder_id !== null && !ids.has(value.active_folder_id))
+    || (value.current_id !== null && !isId(value.current_id))) {
+    throw new Error('当前音乐选择无法读取。');
+  }
+  return { revision: value.revision, active_folder_id: value.active_folder_id, current_id: value.current_id, folders };
+}
+
+export function siteMusicQueue(site, points, foldersState) {
+  const byId = new Map();
+  for (const track of [...(site?.tracks ?? []), ...(points?.tracks ?? [])]) {
+    if (!byId.has(track.id)) byId.set(track.id, track);
+  }
+  const folder = foldersState?.folders.find(item => item.id === foldersState.active_folder_id);
+  const tracks = folder ? folder.track_ids.map(id => byId.get(id)).filter(Boolean) : [...byId.values()];
+  const contains = id => tracks.some(track => track.id === id);
+  const selected = [foldersState?.current_id, site?.current_id].find(contains);
+  const current_id = selected ?? tracks.find(track => track.audio)?.id ?? tracks[0]?.id ?? null;
+  return { tracks, current_id, play_mode: site?.play_mode ?? 'sequence' };
+}
