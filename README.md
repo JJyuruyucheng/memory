@@ -4,7 +4,7 @@
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
-源码版本 **v0.16.0**。发布记录时可以在正文插入 Emoji，或把 GIF 等表情包作为私密附件添加。「问瓜子」可从选中的共享记录读取正文。详见 [修改日志](CHANGELOG.md)、[v0.7.0 验证记录](docs/release-v0.7.0.md) 和 [照片协议](docs/login-photos.md)。
+源码版本 **v0.17.0**。成员可以自动签到、攒积分、在商城兑换并在背包使用。管理员可以管理商品库存和共同挑战，并通过消息铃铛查看兑换。详见 [修改日志](CHANGELOG.md)、[v0.7.0 验证记录](docs/release-v0.7.0.md) 和 [照片协议](docs/login-photos.md)。
 
 **[Cloudflare 正式入口：朝夕](https://memory-awv.pages.dev/)** 已上线；用户已确认使用 `xbl` 完成真实 Turnstile 与口令登录并进入时间线。原生 Auth 已拒绝缺失和伪造验证码，真实用户 JWT 下的记录与私有图片权限探针也已通过。真实验证码 token 的过期与重放拒绝仍待专项验收。[GitHub Pages](https://jjyuruyucheng.github.io/memory/) 继续作为 `preview`：不加载记录、不提交真实口令，也没有跳过登录入口。
 

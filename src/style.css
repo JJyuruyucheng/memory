@@ -6,6 +6,16 @@
 @import url('./assistant-chat.css');
 @import url('./background-music.css');
 @import url('./settings-layout.css');
+@import url('./points.css');
+.points-desktop-bell { position: absolute; top: 35px; right: 14px; }
+.points-memory-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 13px 0; }
+.points-memory-confirm > span, .comment-reply-to { color: var(--muted); font-size: 12px; }
+.comment-reply-to { margin-left: 8px; }
+.comment-actions, .comment-reply-target { display: flex; align-items: center; gap: 10px; }
+.comment-reply-target { justify-content: space-between; color: var(--primary); font-size: 12px; }
+.comment-reply-target[hidden] { display: none; }
+.comment-row.is-reply { padding-inline-start: 12px; border-inline-start: 2px solid var(--border); }
+.comment-row.comment-linked { background: var(--active); border-radius: 8px; }
 .select-field{white-space:nowrap}
 .media-unavailable{display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:150px;background:var(--raised);color:var(--muted);text-align:center;font-size:12px}.album-item:disabled{cursor:default;opacity:1}
 

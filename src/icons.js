@@ -5,6 +5,8 @@ const paths = {
   calendar: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 11h18m-13 5h2m4 0h2"/>',
   chart: '<path d="M4 3v18h17M8 16v-4m5 4V6m5 10V9"/>',
   heart: '<path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 22l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/>',
+  gift: '<rect x="4" y="9" width="16" height="12" rx="2"/><path d="M4 13h16M12 9v12m0-12H8a2.5 2.5 0 1 1 2.2-3.6L12 9Zm0 0h4a2.5 2.5 0 1 0-2.2-3.6L12 9Z"/>',
+  star: '<path d="m12 3 2.8 5.9 6.4.9-4.6 4.5 1.1 6.4-5.7-3-5.7 3 1.1-6.4-4.6-4.5 6.4-.9Z"/>',
   music: '<path d="M9 18V5l12-2v13M9 9l12-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="18" cy="16" rx="3" ry="2"/>',
   play: '<path d="m9 5 11 7-11 7Z" fill="currentColor" stroke-width="1.2"/>',
   pause: '<path d="M9 5v14m6-14v14" stroke-width="2.6"/>',

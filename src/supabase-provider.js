@@ -3,6 +3,7 @@ import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, toUtcIso, validateEntry } fro
 import { planAttachmentOrder, resolveAttachmentOrder } from './attachment-order.js';
 import { MAX_PROFILE_NAME, validAvatarJpeg } from './profile.js';
 import { requestAssistant } from './assistant-api.js';
+import { makePointsProvider, pointsError } from './points-provider.js';
 
 // Inject the official supabase-js client with detectSessionInUrl:false; bounded
 // session persistence belongs to its storage adapter, not this data provider.
@@ -104,13 +105,13 @@ export function createSupabaseProvider(config = {}) {
     if (['23505', '40001'].includes(code)) return new SupabaseProviderError('内容已发生变化，请刷新后核对，避免重复保存。', 'CONFLICT', 409);
     return new SupabaseProviderError(fallback, status === 0 ? 'NETWORK' : 'SUPABASE_ERROR', status);
   }
-  async function result(operation, expected, { fallback, allowNull = false } = {}) {
+  async function result(operation, expected, { fallback, allowNull = false, getError } = {}) {
     requireSession(expected);
     let response;
     try { response = await operation; } catch { requireSession(expected); throw new SupabaseProviderError(fallback || '网络请求未完成，部分操作可能已保存，请刷新核对。', 'NETWORK'); }
     requireSession(expected);
     if (!response || typeof response !== 'object' || !('error' in response)) throw invalid();
-    if (response.error) throw sdkError(response.error, fallback);
+    if (response.error) throw getError?.(response.error) || sdkError(response.error, fallback);
     if (response.data == null && !allowNull) throw invalid();
     return response.data;
   }
@@ -185,9 +186,16 @@ export function createSupabaseProvider(config = {}) {
       // An interrupted file-only upload may leave an empty note placeholder.
       // It must remain readable/deletable; normal saves still use validateEntry.
       if (!['note', 'event', 'whisper'].includes(entry.type) || typeof entry.title !== 'string' || entry.title.length > 120 || (entry.type === 'event' && !entry.title.trim()) || typeof entry.content !== 'string' || entry.content.length > 20000 || ![null, 'happy', 'neutral', 'sad'].includes(entry.mood) || !Array.isArray(entry.tags) || entry.tags.length > 20 || entry.tags.some(value => typeof value !== 'string' || value.length > 40) || entry.media.filter(value => value.type === 'image').length > 9) throw invalid('记录格式不受当前版本支持，已停止加载，避免覆盖原数据。');
-      entry.comments = comments.filter(value => value.entryId === entry.id).map(value => {
+      const entryComments = comments.filter(value => value.entryId === entry.id);
+      const commentIds = new Set(entryComments.map(value => id(value.id)));
+      entry.comments = entryComments.map(value => {
         if (!knownUsers.has(id(value.authorId)) || typeof value.content !== 'string' || !value.content.trim() || value.content.length > 5000) throw invalid();
-        return { id: id(value.id), authorId: value.authorId, content: value.content, createdAt: date(value.createdAt) };
+        const comment = { id: value.id, authorId: value.authorId, content: value.content, createdAt: date(value.createdAt) };
+        if (value.replyToId != null) {
+          if (value.replyToId === comment.id || !commentIds.has(value.replyToId)) throw invalid();
+          comment.replyToId = value.replyToId;
+        }
+        return comment;
       }).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       for (const [values, field] of [[reactions, 'reactionBy'], [favorites, 'favoriteBy']]) entry[field] = [...new Set(values.filter(value => value.entryId === entry.id).map(value => { if (!knownUsers.has(id(value.userId))) throw invalid(); return value.userId; }))];
       return entry;
@@ -320,7 +328,20 @@ export function createSupabaseProvider(config = {}) {
     }
     else if (event === 'INITIAL_SESSION' && authIdentity === null && UUID.test(session?.user?.id ?? '')) authIdentity = session.user.id;
   });
+  const points = makePointsProvider((name, args, write) => {
+    const get = expected => {
+      requireUser(expected);
+      return result(query(client.rpc(name, args)), expected,
+        { fallback: '积分服务暂时无法连接，请稍后刷新核对。', getError: error => pointsError(error.message) });
+    };
+    return write ? enqueue(get) : get(generation);
+  }, () => {
+    const admin = requireUser(generation);
+    if (admin.role !== 'admin') throw new SupabaseProviderError('仅管理员可修改商城。', 'FORBIDDEN', 403);
+    return generation;
+  });
   return {
+    ...points,
     async loadMusic({ signal, revision } = {}) {
       const expected = generation;
       requireUser(expected);
@@ -489,10 +510,24 @@ export function createSupabaseProvider(config = {}) {
     restoreEntry: entryId => enqueue(expected => setDeleted(entryId, null, expected)),
     toggleReaction: entryId => enqueue(expected => toggle(entryId, 'reactions', expected)),
     toggleFavorite: entryId => enqueue(expected => toggle(entryId, 'favorites', expected)),
-    addComment: (entryId, text) => enqueue(async expected => {
-      const user = requireUser(expected); findEntry(entryId, expected);
+    addComment: (entryId, text, replyToId = null, requestId = null) => enqueue(async expected => {
+      const user = requireUser(expected);
+      const entry = findEntry(entryId, expected);
       if (typeof text !== 'string' || !text.trim() || text.trim().length > 5000) throw new SupabaseProviderError('回应不能为空，且最多 5000 个字符。', 'VALIDATION');
-      const saved = await result(query(client.from('comments').insert({ entryId, content: text.trim() }).select('*').single()), expected);
+      const payload = { entryId, content: text.trim() };
+      if (requestId) payload.id = id(requestId);
+      if (replyToId !== null) {
+        if (!entry.comments.some(comment => comment.id === replyToId)) throw new SupabaseProviderError('要回复的回应不存在。', 'VALIDATION');
+        payload.replyToId = replyToId;
+      }
+      let saved;
+      try { saved = await result(query(client.from('comments').insert(payload).select('*').single()), expected); }
+      catch (error) {
+        if (!requestId || error.code !== 'CONFLICT') throw error;
+        saved = await result(query(client.from('comments').select('*').eq('id', requestId).maybeSingle()), expected, { allowNull: true });
+        if (saved?.authorId !== user.id || saved.entryId !== entryId || saved.content !== payload.content
+          || (saved.replyToId ?? null) !== replyToId) throw error;
+      }
       await loadState(expected, user.id); return state.entries.find(value => value.id === entryId)?.comments.find(value => value.id === saved.id);
     }),
     saveSettings: value => enqueue(async expected => {

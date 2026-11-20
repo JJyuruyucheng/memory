@@ -10,6 +10,7 @@
 }
 .bgm-trigger .icon { width: 19px; height: 19px; }
 .bgm-trigger.is-dragging { cursor: grabbing; }
+.bgm-widget.is-shop-suspended .bgm-trigger { visibility: hidden; }
 .bgm-trigger[aria-expanded='true'], .bgm-widget.is-playing .bgm-trigger { background: var(--primary); color: #fff; }
 .bgm-trigger[data-dock='left'] { clip-path: inset(0 0 0 50%); }
 .bgm-trigger[data-dock='left'] .icon { transform: translateX(10px); }

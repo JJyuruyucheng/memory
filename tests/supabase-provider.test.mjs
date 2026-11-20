@@ -563,6 +563,22 @@ test('comments, heart and favorite stay separate and only toggle the current use
   await f.provider.toggleReaction(ENTRY); assert.deepEqual(state.entries[0].reactionBy, []); assert.deepEqual(state.entries[0].favoriteBy, [U1]);
 });
 
+test('replies reference a comment on the same record and preserve legacy top-level comments', async () => {
+  const f = fixture();
+  const otherEntry = '10000000-0000-4000-8000-000000000002';
+  const parentId = '30000000-0000-4000-8000-000000000001';
+  f.tables.entries.push({ ...f.tables.entries[0], id: otherEntry });
+  f.tables.comments.push({ id: parentId, entryId: ENTRY, authorId: U2, content: '旧回应', createdAt: NOW });
+  const state = await f.signIn();
+  assert.equal(state.entries.find(entry => entry.id === ENTRY).comments[0].replyToId, undefined);
+  await assert.rejects(f.provider.addComment(otherEntry, '发到另一条回忆', parentId), error => error.code === 'VALIDATION');
+  const reply = await f.provider.addComment(ENTRY, ' 已读 ', parentId);
+  assert.equal(reply.content, '已读');
+  assert.equal(reply.replyToId, parentId);
+  const writes = f.calls.filter(call => call.table === 'comments' && call.action === 'insert');
+  assert.deepEqual(writes.map(call => call.payload), [{ entryId: ENTRY, content: '已读', replyToId: parentId }]);
+});
+
 test('failed upload cleans its own reservation and preserves existing photos; network failure never reports success', async () => {
   const f = fixture({ initialMedia: true, before: async call => { if (call.action === 'upload') throw new Error('connection lost'); } });
   const state = await f.signIn(), oldEntry = structuredClone(state.entries[0]);

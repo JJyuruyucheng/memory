@@ -42,6 +42,7 @@ export function mountBackgroundMusic(host, provider) {
   let enabled = preference(playPreference) !== 'off', lyricsOn = preference(lyricPreference) === 'on';
   let state, slot, library, working = false, sorting = false, blobUrl, loadedAudio, loading = false, mediaVersion = 0;
   let lyricsKey, lines = [], played = [];
+  let shopSuspended = false, wasPlaying = false;
   let panelSpace = 0, captionSpace = 0;
   const current = () => state?.tracks.find(track => track.id === state.current_id);
 
@@ -95,7 +96,7 @@ export function mountBackgroundMusic(host, provider) {
   }
 
   function showLyrics() {
-    caption.render(lyricsOn ? lines : []);
+    caption.render(lyricsOn && !shopSuspended ? lines : []);
   }
 
   function setLyrics(value) {
@@ -133,6 +134,7 @@ export function mountBackgroundMusic(host, provider) {
   }
 
   async function play() {
+    if (shopSuspended) return;
     try { await audio.play(); message(''); }
     catch (error) {
       if (!signal.aborted && error.name !== 'AbortError') message(error.name === 'NotAllowedError' ? '点播放开启声音。' : '这首音乐暂时无法播放。');
@@ -316,12 +318,26 @@ export function mountBackgroundMusic(host, provider) {
     if (!panel.hidden && !panel.contains(event.target) && !trigger.contains(event.target)) openPanel(false);
   }, { signal });
   for (const event of ['playing', 'pause', 'ended']) audio.addEventListener(event, showPlayback, { signal });
-  audio.addEventListener('ended', () => { if (enabled) step(1, true); }, { signal });
+  audio.addEventListener('ended', () => { if (enabled && !shopSuspended) step(1, true); }, { signal });
   const poll = setInterval(refresh, 5000);
   window.addEventListener('focus', refresh, { signal });
   void refresh();
 
   return {
+    suspendForShop() {
+      if (shopSuspended) return;
+      wasPlaying = !audio.paused && !audio.ended;
+      shopSuspended = true;
+      widget.classList.add('is-shop-suspended');
+      openPanel(false); audio.pause(); showLyrics();
+    },
+    resumeFromShop() {
+      if (!shopSuspended) return;
+      shopSuspended = false;
+      widget.classList.remove('is-shop-suspended');
+      showLyrics();
+      if (wasPlaying && enabled) void (blobUrl ? play() : loadTrack());
+    },
     mountSettings(next) {
       if (slot === next) return;
       library?.destroy(); slot = next;

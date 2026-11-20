@@ -2,6 +2,15 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 24, date: '2026-11-20', version: 'v0.17.0', title: '我们的积分与朝夕小铺',
+    changes: [
+      '登录后前台停留一分钟自动签到，连续 7、30、180、365 天领额外奖励，连签天数持续记录。',
+      '共享首发、伴侣互动、共同回忆、心愿挑战和主纪念日自动记录积分。',
+      '商城首发八款卡通封面商品，支持库存、管理员配置、兑换和背包使用。',
+      '小铃铛汇总发布、点赞、留言、回复和兑换通知。商城有独立的原创钢琴循环。',
+    ],
+  },
+  {
     number: 23, date: '2026-11-19', version: 'v0.16.0', title: '记录表情与瓜子问答修复',
     changes: [
       '发布和编辑记录时可在正文光标处插入 Emoji，也可添加 GIF、PNG 或 WebP 表情包。',

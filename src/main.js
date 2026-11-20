@@ -22,6 +22,9 @@ import { profileEditorMarkup, mountProfileEditor } from './profile-editor.js';
 import { mountAssistant } from './assistant-chat.js';
 import { mountBackgroundMusic } from './background-music.js';
 import { trackActiveUsage } from './active-usage.js';
+import { mountPointsUi } from './points-ui.js';
+import { mountPointsCheckin } from './points-checkin.js';
+import { mountShopMusic } from './shop-music.js';
 import { ALLOWED_FILE_TYPES, escapeHtml as esc, filterEntries, collectEntryTags, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
 
 const app = document.querySelector('#app');
@@ -31,6 +34,8 @@ const musicRoot = document.querySelector('#bgm-root');
 const scrollToPageTop = () => (document.body.classList.contains('has-bgm-layout') ? app : window).scrollTo({ top: 0 });
 let provider, loginVerification, loginPhotos, loginCarousel, loginPhotoEditor, mediaViewer, profileEditor;
 let assistant, assistantIdentity, backgroundMusic, stopUsage;
+let pointsUi, pointsIdentity, shopMusic, stopCheckin;
+let commentRequest;
 const moodNames = { happy: '微笑', neutral: '一般', sad: '难受', unset: '未填写' };
 const moodIcons = { happy: 'smile', neutral: 'neutral', sad: 'sad' };
 const filters = { query: '', tag: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all', favoritesOnly: false, trash: false };
@@ -46,6 +51,7 @@ let adminActivity = { days: 30, pending: false };
 let calendarCursor = dayKey(new Date()).slice(0, 7), selectedDay = '';
 const route = () => location.hash.slice(1).split('?')[0] || 'timeline';
 const isFeedView = view => ['timeline', 'events', 'favorites'].includes(view);
+const pointsRoutes = new Set(['points', 'shop', 'backpack', 'shop-admin']);
 const user = id => state.users.find(u => u.id === id) || { id, name: '已离开的作者', color: 'sage' };
 const dateLabel = (value, full = false, withTime = false) => new Intl.DateTimeFormat('zh-CN', { timeZone: CONFIG.timeZone, ...(full ? { year: 'numeric' } : {}), month: 'long', day: 'numeric', ...(withTime ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } : {}) }).format(new Date(value));
 const avatar = (u, small = false) => {
@@ -77,9 +83,38 @@ function filtered() {
 const navItems = [['timeline', 'book', '时光线'], ['album', 'photo', '我们的相册'], ['events', 'calendar', '重要时刻'], ['stats', 'chart', '时光统计']];
 function navLink(item) { const [id, symbol, label] = item; return `<a href="#${id}" class="nav-link ${route() === id ? 'active' : ''}" ${route() === id ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${label}</span></a>`; }
 
+function clearPoints() {
+  stopCheckin?.(); stopCheckin = null;
+  shopMusic?.destroy(); shopMusic = null;
+  pointsUi?.destroy(); pointsUi = null;
+  pointsIdentity = null;
+}
+
+function preparePoints() {
+  const current = state.currentUser;
+  if (!provider?.pointsSummary || pointsIdentity === current.id) return;
+  clearPoints();
+  pointsIdentity = current.id;
+  pointsUi = mountPointsUi({
+    app, modalRoot, provider, getUser: () => state.currentUser, getUsers: () => state.users,
+    getRoute: route, toast, openNotification: openPointsNotification,
+    music: {
+      setShopActive: value => shopMusic?.setShopActive(value),
+      getShopState: () => shopMusic?.getShopState() || { available: false },
+      toggleShop: () => shopMusic?.toggleShop(),
+    },
+  });
+  const ui = pointsUi;
+  if (current.role === 'member') stopCheckin = mountPointsCheckin(provider, {
+    progress: seconds => ui.updateCheckin(seconds),
+    completed: snapshot => ui.refreshSummary(snapshot),
+  });
+}
+
 function syncAssistant(locked = false) {
   if (!['supabase', 'preview'].includes(CONFIG.mode)) return;
   const identity = locked || reconnectPending || reconnectError ? null : state.currentUser?.id ?? null;
+  if (!identity) clearPoints();
   if (!assistant || assistantIdentity !== identity) {
     assistant?.destroy();
     backgroundMusic?.destroy();
@@ -87,12 +122,16 @@ function syncAssistant(locked = false) {
     assistantIdentity = identity;
     assistant = mountAssistant(assistantRoot, identity && provider?.askAssistant);
     backgroundMusic = identity && provider?.loadMusic && musicRoot ? mountBackgroundMusic(musicRoot, provider) : null;
+    if (identity && pointsUi && state.currentUser.role === 'member') {
+      shopMusic = mountShopMusic(backgroundMusic, () => pointsUi?.refreshMusic());
+    }
     stopUsage = identity && state.currentUser.role === 'member' && provider?.recordActiveMinute ? trackActiveUsage(provider.recordActiveMinute) : null;
     document.body.classList.toggle('has-bgm', Boolean(backgroundMusic));
   }
   backgroundMusic?.mountSettings(app.querySelector('#bgm-settings'));
   const article = identity && modalRoot.querySelector('.detail-dialog[open][data-assistant-article]');
   assistant.setContext(article || assistantRoot, article?.dataset.assistantArticle);
+  if (identity) pointsUi?.sync();
 }
 
 function render() {
@@ -117,6 +156,7 @@ function render() {
   document.body.classList.toggle('is-login', !state?.currentUser && CONFIG.mode !== 'demo');
   document.body.classList.toggle('has-feed-layout', Boolean(state?.currentUser) && feedView);
   if (!state?.currentUser) return renderLogin();
+  preparePoints();
   loginVerification?.destroy(); loginVerification = null;
   loginCarousel?.destroy(); loginCarousel = null;
   const active = document.activeElement?.id, selection = document.activeElement?.selectionStart;
@@ -139,10 +179,13 @@ function render() {
   app.innerHTML = `
     <aside class="sidebar" aria-label="主导航">
       <a class="wordmark" href="#timeline"><img src="./assets/mark.svg" alt="" width="43" height="43" /><span>朝夕<small>我们的记忆</small></span></a>
+      ${pointsUi ? `<div class="points-desktop-bell">${pointsUi.renderBell()}</div>` : ''}
       <div class="space-label">${icon('lock')} ${esc(state.settings.spaceName || '两个人的小世界')}</div>
       <nav>${navItems.map(navLink).join('')}</nav>
       <div class="sidebar-group"><span class="group-label">好好收藏</span>${navLink(['favorites', 'bookmark', '我的收藏'])}${navLink(['anniversaries', 'heart', '纪念日'])}</div>
+      ${pointsUi && current.role === 'member' ? `<nav aria-label="积分">${navLink(['points', 'star', '我的积分'])}${navLink(['shop', 'gift', '积分商城'])}</nav>` : ''}
       <div class="sidebar-bottom">${navLink(['us', 'settings', '我们与设置'])}${navLink(['trash', 'trash', '回收站'])}${current.role === 'admin' ? navLink(['admin', 'shield', '管理小屋']) : ''}
+      ${pointsUi && current.role === 'admin' ? navLink(['shop-admin', 'gift', '商城管理']) : ''}
       <div class="account-row">${accountProfile}${CONFIG.mode === 'demo' ? `<label class="switch-view" title="切换示例视角">${icon('down')}<span class="sr-only">切换示例视角</span><select id="user-switch">${state.users.map(u => `<option value="${esc(u.id)}" ${u.id === current.id ? 'selected' : ''}>${esc(u.name)}${u.role === 'admin' ? '（管理员）' : ''}</option>`).join('')}</select></label>` : `<button class="icon-button" data-action="logout" aria-label="退出登录">${icon('logout')}</button>`}</div>
       <div class="sidebar-utilities"><button class="credits-link" data-action="updates">系统更新信息</button><button class="credits-link" data-action="credits">关于朝夕与素材</button></div></div>
     </aside>
@@ -151,6 +194,7 @@ function render() {
         <a href="#timeline"><img src="./assets/mark.svg" alt="" width="30" height="30" /><strong>朝夕</strong></a>
         <span class="mobile-space-name">${esc(state.settings.spaceName)}</span>
         ${feedView ? `<button type="button" id="mobile-search-button" class="icon-button mobile-search-button${filters.query ? ' is-active' : ''}" data-action="open-search" aria-label="${filters.query ? '搜索回忆，已应用关键词' : '搜索回忆'}" aria-haspopup="dialog">${icon('search')}</button>` : ''}
+        ${pointsUi?.renderBell() || ''}
         ${CONFIG.mode === 'demo' ? `<label class="mobile-account">${avatar(current, true)}${icon('down')}<span class="sr-only">切换示例视角</span><select id="mobile-user-switch">${state.users.map(u => `<option value="${esc(u.id)}" ${u.id === current.id ? 'selected' : ''}>${esc(u.name)}${u.role === 'admin' ? '（管理员）' : ''}</option>`).join('')}</select></label>` : `${mobileProfile}<button class="icon-button" data-action="logout" aria-label="退出登录">${icon('logout')}</button>`}
       </header>
       ${CONFIG.mode === 'demo' ? `<div class="mode-note">${icon('info')}<span>演示空间 · 示例内容与试写仅保存在当前浏览器</span><button data-action="about-mode">了解演示</button></div>` : ''}
@@ -182,6 +226,7 @@ function heading(title, subtitle, action = true) {
   return `<header class="page-heading"><div><h1>${title}</h1>${subtitle ? `<p>${subtitle}</p>` : ''}</div>${searchable ? `<div class="page-heading-actions">${search}${compose}</div>` : compose}</header>`;
 }
 function renderView(stats) {
+  if (pointsRoutes.has(route()) && pointsUi) return pointsUi.renderView(route());
   switch (route()) {
     case 'album': return renderAlbum();
     case 'stats': return renderStats();
@@ -195,6 +240,7 @@ function renderView(stats) {
       const filterControls = renderFilters();
       const rows = filtered();
       return `${heading(title, view === 'favorites' ? '你标记过的片段，都在这里。' : view === 'events' ? '第一次、纪念日，还有一起经历的每一个特别。' : `${dateLabel(new Date(), true)} · ${esc(state.settings.subtitle || '平凡的小事，也值得被记住。')}`)}
+        ${view === 'timeline' ? pointsUi?.renderCheckin() || '' : ''}
         <div class="home-grid"><section class="feed-column" tabindex="0" aria-label="我们的时光线">
         ${filterControls}<div class="feed-summary"><span>${selectedDay ? `${esc(selectedDay)} · ` : ''}共 ${rows.length} 条${view === 'favorites' ? '收藏' : '回忆'}</span>${selectedDay || filters.query || filters.tag || filters.mood !== 'all' || filters.authorId !== 'all' || filters.type !== 'all' || filters.month ? '<button class="text-button" data-action="clear-filters">清除筛选</button>' : '<span>按发生时间排列</span>'}</div>
         ${renderFeed(rows)}</section><aside class="right-rail" tabindex="0" aria-label="共同空间信息">${renderTogether(stats)}${renderCalendar()}${renderUpcoming()}</aside></div>`;
@@ -298,7 +344,8 @@ function loadOptionalLoginPhotos(create) {
 }
 function renderSettings() {
   return `<header class="page-heading settings-title"><h1>我们与设置</h1><button class="primary" form="settings-form" type="submit">保存设置</button></header><div class="settings-board" data-ui>
-    <nav class="settings-shortcuts" aria-label="更多回忆入口">${navLink(['favorites', 'bookmark', '我的收藏'])}${navLink(['anniversaries', 'heart', '纪念日'])}${navLink(['trash', 'trash', '回收站'])}${state.currentUser.role === 'admin' ? navLink(['admin', 'shield', '管理小屋']) : ''}</nav>
+    <nav class="settings-shortcuts" aria-label="更多回忆入口">${navLink(['favorites', 'bookmark', '我的收藏'])}${navLink(['anniversaries', 'heart', '纪念日'])}${navLink(['trash', 'trash', '回收站'])}${state.currentUser.role === 'admin' ? navLink(['admin', 'shield', '管理小屋']) : ''}
+      ${pointsUi ? state.currentUser.role === 'admin' ? navLink(['shop-admin', 'gift', '商城管理']) : navLink(['shop', 'gift', '积分商城']) + navLink(['points', 'star', '我的积分']) : ''}</nav>
     <form id="settings-form" class="settings-form">
       <section class="settings-section"><h2>共同空间</h2><fieldset class="settings-space-fields">
         <label>空间名字<input name="spaceName" value="${esc(state.settings.spaceName)}" maxlength="30" required /></label>
@@ -478,12 +525,52 @@ document.addEventListener('keydown', event => {
   renderEditorPreviews();
   document.querySelector(`.preview-handle[data-key="${item.key}"]`)?.focus({ preventScroll: true });
 });
-function showDetail(id) {
+function showDetail(id, commentId) {
   const entry = visibleEntries().find(e => e.id === id); if (!entry) return;
-  openDialog(`<h2>${esc(entry.title || (entry.type === 'whisper' ? '给自己的一页' : '日常的一页'))}</h2><p class="dialog-description">${esc(user(entry.authorId).name)} · ${dateLabel(entry.occurredAt, true, true)}${entry.type === 'whisper' ? ' · 仅作者和管理员可见' : ''}</p><p class="detail-body">${renderEntryText(entry.title, entry.content)}</p>${entry.comments?.length ? `<section class="comments" aria-label="留言">${entry.comments.map(c => `<div class="comment-row">${avatar(user(c.authorId), true)}<div><strong>${esc(user(c.authorId).name)}</strong><p>${esc(c.content)}</p><time datetime="${esc(c.createdAt)}">${dateLabel(c.createdAt, true, true)}</time></div></div>`).join('')}</section>` : ''}<form id="comment-form" data-id="${esc(id)}"><label class="sr-only" for="comment-content">留言内容</label><textarea id="comment-content" name="content" rows="2" maxlength="2000" required placeholder="看到这段回忆，想起了什么？"></textarea><button class="primary" type="submit">留在这一页</button><p class="form-error" role="alert"></p></form>`, 'detail-dialog');
+  const shared = pointsUi && state.currentUser.role === 'member' && !entry.deletedAt && entry.type !== 'whisper';
+  const comments = entry.comments || [];
+  const commentsMarkup = comments.map(comment => {
+    const author = user(comment.authorId), parent = comments.find(value => value.id === comment.replyToId);
+    return `<div id="comment-${esc(comment.id)}" class="comment-row${comment.replyToId ? ' is-reply' : ''}">${avatar(author, true)}<div><strong>${esc(author.name)}</strong>
+      ${parent ? `<small class="comment-reply-to">回复 ${esc(user(parent.authorId).name)}</small>` : ''}
+      <p>${esc(comment.content)}</p><div class="comment-actions"><time datetime="${esc(comment.createdAt)}">${dateLabel(comment.createdAt, true, true)}</time>
+      ${shared && comment.authorId !== state.currentUser.id ? `<button type="button" class="text-button" data-action="reply-comment" data-id="${esc(comment.id)}">回复</button>` : ''}</div></div></div>`;
+  }).join('');
+  openDialog(`<h2>${esc(entry.title || (entry.type === 'whisper' ? '给自己的一页' : '日常的一页'))}</h2><p class="dialog-description">${esc(user(entry.authorId).name)} · ${dateLabel(entry.occurredAt, true, true)}${entry.type === 'whisper' ? ' · 仅作者和管理员可见' : ''}</p><p class="detail-body">${renderEntryText(entry.title, entry.content)}</p>
+    ${shared ? `<div class="points-memory-confirm"><button type="button" class="secondary" data-action="points-confirm-memory" data-id="${esc(id)}">${icon('heart')} 确认共同回忆</button><span>两人确认后各得 5 分</span></div>` : ''}
+    ${comments.length ? `<section class="comments" aria-label="留言">${commentsMarkup}</section>` : ''}
+    <form id="comment-form" data-id="${esc(id)}"><div class="comment-reply-target" hidden><span></span><button type="button" class="text-button" data-action="cancel-comment-reply">取消回复</button></div>
+    <label class="sr-only" for="comment-content">留言内容</label><textarea id="comment-content" name="content" rows="2" maxlength="2000" required placeholder="看到这段回忆，想起了什么？"></textarea><button class="primary" type="submit">留在这一页</button><p class="form-error" role="alert"></p></form>`, 'detail-dialog');
   const dialog = modalRoot.querySelector('.detail-dialog');
   if (!entry.deletedAt && entry.type !== 'whisper') dialog.dataset.assistantArticle = entry.id;
   syncAssistant();
+  if (commentId) {
+    const comment = document.getElementById(`comment-${commentId}`);
+    if (comment && dialog.contains(comment)) { comment.classList.add('comment-linked'); comment.scrollIntoView({ block: 'nearest' }); }
+  }
+}
+function setCommentReply(id) {
+  const form = modalRoot.querySelector('#comment-form'), target = form?.querySelector('.comment-reply-target');
+  if (!target) return;
+  const comment = visibleEntries().find(entry => entry.id === form.dataset.id)?.comments.find(item => item.id === id);
+  form.dataset.replyTo = comment?.id || '';
+  target.hidden = !comment;
+  target.firstElementChild.textContent = comment ? `回复 ${user(comment.authorId).name}` : '';
+  form.elements.content.focus();
+}
+async function openPointsNotification(item) {
+  if (item.order_id && state.currentUser?.role === 'admin') {
+    closeModal(false);
+    location.hash = `shop-admin?order=${encodeURIComponent(item.order_id)}`;
+    return;
+  }
+  if (!item.entry_id) return;
+  const identity = state.currentUser?.id;
+  await provider.refresh();
+  if (state.currentUser?.id !== identity) return;
+  const entry = visibleEntries().find(row => row.id === item.entry_id && !row.deletedAt && row.type !== 'whisper');
+  if (!entry) { toast('这条记录已不可查看。', true); return; }
+  showDetail(entry.id, item.comment_id);
 }
 function openLinkedEntry() {
   if (!state.currentUser || route() !== 'timeline') return;
@@ -540,6 +627,18 @@ document.addEventListener('click', async event => {
       case 'reaction': button.disabled = true; await provider.toggleReaction(id); render(); break;
       case 'favorite': button.disabled = true; await provider.toggleFavorite(id); render(); break;
       case 'detail': showDetail(id); break;
+      case 'reply-comment': setCommentReply(id); break;
+      case 'cancel-comment-reply': setCommentReply(null); break;
+      case 'points-confirm-memory': {
+        button.disabled = true;
+        try {
+          const snapshot = await provider.pointsConfirmMemory(id);
+          pointsUi?.refreshSummary(snapshot);
+          const memory = snapshot.memories?.find(entry => entry.entry_id === id);
+          toast(memory?.complete ? '共同回忆已确认，各得 5 分。' : '已确认，等对方也确认后一起领分。');
+        } finally { if (button.isConnected) button.disabled = false; }
+        break;
+      }
       case 'ask-guazi': {
         const entry = visibleEntries().find(row => row.id === id && !row.deletedAt && ['note', 'event'].includes(row.type));
         if (entry) assistant?.openForEntry?.(entry.id, entry.title);
@@ -674,7 +773,14 @@ document.addEventListener('submit', async event => {
       if (!state.currentUser) throw new Error('请先登录。');
       const anniversaries = [...form.querySelectorAll('[data-anniversary]')].map(row => ({ id: row.dataset.anniversary, title: row.querySelector('[name="ann-title"]').value.trim(), date: row.querySelector('[name="ann-date"]').value, yearly: row.querySelector('[name="ann-yearly"]').checked }));
       await provider.saveSettings({ ...state.settings, spaceName: data.spaceName.trim(), subtitle: data.subtitle.trim(), startDate: data.startDate, anniversaries }); render(); toast('我们的小世界，已更新。');
-    } else if (form.id === 'comment-form') { await provider.addComment(form.dataset.id, data.content.trim()); const id = form.dataset.id; render(); showDetail(id); toast('你的话，留在这段回忆里了。'); }
+    } else if (form.id === 'comment-form') {
+      const id = form.dataset.id, replyTo = form.dataset.replyTo || null, content = data.content.trim();
+      const key = JSON.stringify([state.currentUser.id, id, replyTo, content]);
+      if (commentRequest?.key !== key) commentRequest = { key, id: crypto.randomUUID() };
+      const saved = await provider.addComment(id, content, replyTo, commentRequest.id);
+      commentRequest = null;
+      render(); showDetail(id, saved?.id); toast(replyTo ? '回复已发送。' : '你的话，留在这段回忆里了。');
+    }
     else {
       if (!['live', 'supabase'].includes(CONFIG.mode) || !loginVerification?.getToken()) throw new Error('请先完成安全验证。');
       loginPending = true; form.setAttribute('aria-busy', 'true');
