@@ -2,6 +2,14 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 28, date: '2026-11-20', version: 'v0.17.4', title: '回收站保留期与界面修复',
+    changes: [
+      '回收站保留 7 天后自动清理，支持手动永久清理记录和附件。上线前的回收站记录自启用起保留至少 7 天。',
+      '修复侧栏和手机导航同时高亮多项的问题。',
+      '歌词、歌单和音量互斥。播放时增加由内向外淡出的波纹，跳动音符随播放器缩放。',
+    ],
+  },
+  {
     number: 27, date: '2026-11-20', version: 'v0.17.3', title: '音乐文件夹与积分规则编辑',
     changes: [
       '背景音乐汇总全站和积分专属曲目。支持新建、拖动排序、删除文件夹，引用曲库曲目或直接上传。',

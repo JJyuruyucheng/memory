@@ -84,8 +84,11 @@ function filtered() {
   return selectedDay && isFeedView(view) ? rows.filter(row => dayKey(row.occurredAt) === selectedDay) : rows;
 }
 const navItems = [['timeline', 'book', '时光线'], ['album', 'photo', '我们的相册'], ['events', 'calendar', '重要时刻'], ['stats', 'chart', '时光统计']];
-function navLink([id, symbol, label], selected = route() === id) { return `<a href="#${id}" class="nav-link ${selected ? 'active' : ''}" ${selected ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${esc(label)}</span></a>`; }
-const pointsNavLink = () => navLink(['points', 'gift', '积分&商城'], memberPointsRoutes.has(route()));
+function navLink([id, symbol, label]) {
+  const selected = id === 'points' ? memberPointsRoutes.has(route()) : route() === id;
+  return `<a href="#${id}" class="nav-link ${selected ? 'active' : ''}" ${selected ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${esc(label)}</span></a>`;
+}
+const pointsNavLink = () => navLink(['points', 'gift', '积分&商城']);
 
 function clearPoints() {
   stopCheckin?.(); stopCheckin = null;
@@ -159,6 +162,7 @@ function render() {
   loginCarousel?.destroy(); loginCarousel = null;
   const active = document.activeElement?.id, selection = document.activeElement?.selectionStart;
   const scrollView = `${state.currentUser.id}:${route()}`;
+  const enteredTrash = route() === 'trash' && app.dataset.scrollView !== scrollView && provider?.purgeTrash;
   const current = state.currentUser;
   const accountLabel = CONFIG.mode === 'demo' ? '示例视角' : current.role === 'admin' ? '维护账号' : '共同空间成员';
   const accountSummary = `${avatar(current)}<div><strong>${esc(current.name)}</strong><small>${accountLabel}</small></div>`;
@@ -210,6 +214,11 @@ function render() {
   unmountTagOverflow = mountTagOverflow(app.querySelector('.tag-filter-list'), feedTagsExpanded,
     expanded => { feedTagsExpanded = expanded; });
   syncAssistant();
+  if (enteredTrash) {
+    void provider.refresh().then(() => {
+      if (route() === 'trash' && state.currentUser?.id === current.id) render();
+    }).catch(() => {});
+  }
   if (route() === 'admin' && current.role === 'admin' && provider?.loadAdminActivity && !adminActivity.started) {
     queueMicrotask(() => { if (!adminActivity.started) loadAdminActivity(); });
   }
@@ -232,7 +241,7 @@ function renderView(stats) {
     case 'us': return renderSettings();
     case 'anniversaries': return renderAnniversaries();
     case 'admin': return renderAdmin(stats);
-    case 'trash': return `${heading('回收站', '误删的片段，可以在这里找回来。', false)}<div class="info-line">保留记录和附件以便恢复；本版未启用自动永久清理。</div>${renderFeed(filtered(), true)}`;
+    case 'trash': return renderTrash();
     default: {
       const view = route();
       const title = view === 'events' ? '那些重要的时刻' : view === 'favorites' ? '舍不得忘的小事' : '把日子，慢慢收藏。';
@@ -288,6 +297,22 @@ function updateMemoryConfirmations(summary) {
     button.setAttribute('aria-pressed', String(confirmed));
   }
 }
+function renderTrash() {
+  const rows = visibleEntries().filter(entry => entry.deletedAt).sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
+  const canPurge = provider?.purgeTrash && rows.some(entry => canEdit(entry) && !entry.purgeRequestedAt);
+  const clearText = state.currentUser.role === 'admin' ? '清空回收站' : '清空我的回收站';
+  return `${heading('回收站', '', false)}<div class="trash-toolbar">
+    <p>${provider?.purgeTrash ? '移入回收站后保留 7 天，期满自动清理。' : '误删的记录可以在这里恢复。'}</p>
+    ${canPurge ? `<button class="secondary danger" data-action="purge-trash">${icon('trash')}${clearText}</button>` : ''}</div>
+    ${renderFeed(rows, true)}`;
+}
+function trashActions(entry) {
+  if (entry.purgeRequestedAt) return '<span class="muted">正在永久清理</span>';
+  if (!canEdit(entry)) return '<span class="muted">由作者恢复</span>';
+  const id = esc(entry.id);
+  return `<button class="text-button" data-action="restore" data-id="${id}">${icon('restore')}恢复</button>
+    ${provider?.purgeTrash ? `<button class="text-button danger" data-action="purge-trash" data-id="${id}">${icon('trash')}永久删除</button>` : ''}`;
+}
 function renderEntry(entry, trash = false) {
   const author = user(entry.authorId), liked = entry.reactionBy?.includes(state.currentUser.id), saved = entry.favoriteBy?.includes(state.currentUser.id);
   const askButton = provider?.askAssistant && ['note', 'event'].includes(entry.type) && !entry.deletedAt
@@ -302,7 +327,7 @@ function renderEntry(entry, trash = false) {
     ${entry.title ? `<h2>${esc(entry.title)}</h2>` : ''}${entryPreviewMarkup(entry)}
     ${renderEntryMedia(entry, safeUrl)}
     ${entry.mood || entry.tags?.length ? `<div class="entry-tags">${entry.mood ? `<span class="mood-tag ${entry.mood}">${icon(moodIcons[entry.mood])}${moodNames[entry.mood] || '未填写'}</span>` : ''}${(entry.tags || []).map(tag => `<button class="tag" data-action="search-tag" data-value="${esc(tag)}"># ${esc(tag)}</button>`).join('')}</div>` : ''}
-    <div class="memory-actions">${trash ? `${canEdit(entry) ? `<button class="text-button" data-action="restore" data-id="${esc(entry.id)}">${icon('restore')}恢复这条回忆</button>` : '<span class="muted">由作者恢复</span>'}` : `<button class="reaction-button ${liked ? 'selected' : ''}" data-action="reaction" data-id="${esc(entry.id)}" aria-pressed="${Boolean(liked)}" aria-label="${liked ? '取消喜欢' : '喜欢这条回忆'}">${icon('heart')}<span>${liked ? '已喜欢' : '喜欢'}</span>${entry.reactionBy?.length ? `<span class="action-count num">${entry.reactionBy.length}</span>` : ''}</button><button class="reaction-button comment-button" data-action="detail" data-id="${esc(entry.id)}">${icon('comment')}<span>留言</span>${entry.comments?.length ? `<span class="action-count num">${entry.comments.length}</span>` : ''}</button>${askButton}<div class="memory-actions-end">${confirmButton}<button class="bookmark-button ${saved ? 'selected' : ''}" data-action="favorite" data-id="${esc(entry.id)}" aria-label="${saved ? '取消收藏' : '收藏这条回忆'}" aria-pressed="${Boolean(saved)}">${icon('bookmark')}<span>${saved ? '已收藏' : '收藏'}</span></button></div>`}</div>
+    <div class="memory-actions">${trash ? trashActions(entry) : `<button class="reaction-button ${liked ? 'selected' : ''}" data-action="reaction" data-id="${esc(entry.id)}" aria-pressed="${Boolean(liked)}" aria-label="${liked ? '取消喜欢' : '喜欢这条回忆'}">${icon('heart')}<span>${liked ? '已喜欢' : '喜欢'}</span>${entry.reactionBy?.length ? `<span class="action-count num">${entry.reactionBy.length}</span>` : ''}</button><button class="reaction-button comment-button" data-action="detail" data-id="${esc(entry.id)}">${icon('comment')}<span>留言</span>${entry.comments?.length ? `<span class="action-count num">${entry.comments.length}</span>` : ''}</button>${askButton}<div class="memory-actions-end">${confirmButton}<button class="bookmark-button ${saved ? 'selected' : ''}" data-action="favorite" data-id="${esc(entry.id)}" aria-label="${saved ? '取消收藏' : '收藏这条回忆'}" aria-pressed="${Boolean(saved)}">${icon('bookmark')}<span>${saved ? '已收藏' : '收藏'}</span></button></div>`}</div>
   </article>`;
 }
 function renderTogether(stats) {
@@ -428,6 +453,16 @@ function openDialog(content, cls = '', returnFocus = document.activeElement) {
   mountDatePickers(dialog);
   dialog.addEventListener('cancel', e => { e.preventDefault(); closeModal(); });
   dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) closeModal(); } });
+}
+function confirmTrashPurge(id, button) {
+  if (!provider?.purgeTrash) return;
+  const title = id ? '永久删除这条记录？' : state.currentUser.role === 'admin' ? '清空回收站？' : '清空我的回收站？';
+  const scope = id ? '这条记录' : state.currentUser.role === 'admin' ? '回收站内的全部记录' : '回收站中你发布的全部记录';
+  openDialog(`<h2>${title}</h2><p class="dialog-description">${scope}及附件将永久删除，无法恢复。</p>
+    <p class="form-error" role="alert"></p>
+    <div class="dialog-footer trash-confirm-actions"><button class="secondary" data-action="close">取消</button>
+    <button class="primary" data-action="purge-trash-confirm"${id ? ` data-id="${esc(id)}"` : ''}>确认永久删除</button></div>`, 'trash-confirm-dialog', button);
+  modalRoot.querySelector('.trash-confirm-actions [data-action="close"]').focus();
 }
 function closeModal(saveDraft = true) {
   if (saveDraft && profileEditor?.isSaving) { toast('个人资料正在保存，请稍候。'); return; }
@@ -689,6 +724,23 @@ document.addEventListener('click', async event => {
       }
       case 'delete': await provider.deleteEntry(id); closeModal(); render(); toast('已移到回收站，可以恢复。'); break;
       case 'restore': await provider.restoreEntry(id); render(); toast('这段回忆已经回来了。'); break;
+      case 'purge-trash': confirmTrashPurge(id, button); break;
+      case 'purge-trash-confirm': {
+        const identity = state.currentUser?.id;
+        button.disabled = true;
+        try {
+          const result = await provider.purgeTrash(id || null);
+          if (state.currentUser?.id !== identity) break;
+          if (button.isConnected) closeModal(false);
+          render();
+          toast(result.pending ? `已永久清理 ${result.deleted} 条，还有 ${result.pending} 条正在处理。`
+            : result.deleted ? `已永久清理 ${result.deleted} 条记录和附件。` : '回收站已更新。');
+        } catch (error) {
+          if (!button.isConnected || state.currentUser?.id !== identity) throw error;
+          button.closest('dialog').querySelector('.form-error').textContent = error.message;
+        } finally { if (button.isConnected) button.disabled = false; }
+        break;
+      }
       case 'remove-media': editorAttachments.splice(Number(index), 1); modalRoot.querySelector('#editor-upload-error').textContent = ''; renderEditorPreviews(); break;
       case 'calendar-day':
         selectedDay = selectedDay === value ? '' : value;
@@ -840,7 +892,7 @@ document.addEventListener('submit', async event => {
 window.addEventListener('hashchange', () => {
   if (bootPending || (!provider && CONFIG.mode !== 'preview')) return;
   clearTimeout(searchTimer);
-  if (modalRoot.querySelector('.search-dialog, .feed-date-dialog, .detail-dialog')) closeModal();
+  if (modalRoot.querySelector('.search-dialog, .feed-date-dialog, .detail-dialog, .trash-confirm-dialog')) closeModal();
   feedTagsExpanded = false;
   expandedEntries.clear();
   selectedDay = '';

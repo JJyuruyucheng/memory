@@ -162,7 +162,7 @@ export function createSupabaseProvider(config = {}) {
     }
     return { id: raw.id, type: raw.type, name: raw.name, size: raw.size, url: cached.url };
   }
-  async function loadState(expected, userId) {
+  async function loadState(expected, userId, retryMissingParent = true) {
     requireIdentity(expected, id(userId));
     const tables = ['profiles', 'entries', 'comments', 'reactions', 'favorites', 'settings', 'media'];
     const results = await Promise.allSettled(tables.map(table => list(table, expected, ['reactions', 'favorites'].includes(table) ? ['entryId', 'userId'] : ['id'])));
@@ -176,15 +176,21 @@ export function createSupabaseProvider(config = {}) {
     if (settingsRows.length !== 1 || settingsRows[0].id !== 1) throw invalid('共同空间尚未完成初始化。');
     const settings = checkedSettings(settingsRows[0]);
     const entryIds = new Set(rows.map(value => id(value.id)));
-    for (const child of [...comments, ...reactions, ...favorites, ...media]) if (!entryIds.has(id(child.entryId))) throw invalid();
+    if ([...comments, ...reactions, ...favorites, ...media].some(child => !entryIds.has(id(child.entryId)))) {
+      // A purge can commit between the independent parent and child reads.
+      if (retryMissingParent) return loadState(expected, userId, false);
+      throw invalid();
+    }
     if (rows.some(raw => !['draft', 'published'].includes(raw.status))) throw invalid('记录的发布状态无效。');
     // RLS is authoritative. Fail closed before downloading any attachment if a
     // misconfigured server unexpectedly returns a hidden whisper or draft.
     if (rows.some(raw => !canReadEntry(raw, currentUser))) throw invalid('服务器返回了当前身份不可见的记录，已停止读取。');
     const hydrated = await mapLimit(rows.filter(raw => raw.status === 'published'), 3, async raw => {
       if (!knownUsers.has(id(raw.authorId))) throw invalid();
-      const attachments = media.filter(value => value.entryId === raw.id).map(value => mediaRow(value, raw, knownUsers)).filter(value => value.status === 'ready' && value.attached).sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
+      const purge = raw.purgeRequestedAt ? { purgeRequestedAt: date(raw.purgeRequestedAt) } : {};
+      const attachments = purge.purgeRequestedAt ? [] : media.filter(value => value.entryId === raw.id).map(value => mediaRow(value, raw, knownUsers)).filter(value => value.status === 'ready' && value.attached).sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
       const entry = { id: id(raw.id), authorId: id(raw.authorId), type: raw.type, title: raw.title, content: raw.content, occurredAt: date(raw.occurredAt), mood: raw.mood, tags: raw.tags, createdAt: date(raw.createdAt), updatedAt: date(raw.updatedAt), deletedAt: raw.deletedAt === null ? null : date(raw.deletedAt), media: await mapLimit(attachments, 3, value => hydrateMedia(value, expected)), comments: [], reactionBy: [], favoriteBy: [] };
+      Object.assign(entry, purge);
       // An interrupted file-only upload may leave an empty note placeholder.
       // It must remain readable/deletable; normal saves still use validateEntry.
       if (!['note', 'event', 'whisper'].includes(entry.type) || typeof entry.title !== 'string' || entry.title.length > 120 || (entry.type === 'event' && !entry.title.trim()) || typeof entry.content !== 'string' || entry.content.length > 20000 || ![null, 'happy', 'neutral', 'sad'].includes(entry.mood) || !Array.isArray(entry.tags) || entry.tags.length > 20 || entry.tags.some(value => typeof value !== 'string' || value.length > 40) || entry.media.filter(value => value.type === 'image').length > 9) throw invalid('记录格式不受当前版本支持，已停止加载，避免覆盖原数据。');
@@ -541,6 +547,28 @@ export function createSupabaseProvider(config = {}) {
     }),
     deleteEntry: entryId => enqueue(expected => setDeleted(entryId, now(), expected)),
     restoreEntry: entryId => enqueue(expected => setDeleted(entryId, null, expected)),
+    purgeTrash: (entryId = null) => enqueue(async expected => {
+      const user = requireUser(expected);
+      if (entryId !== null) {
+        const entry = findEntry(entryId, expected, { editable: true, allowDeleted: true });
+        if (!entry.deletedAt) throw new SupabaseProviderError('只有回收站里的记录可以永久清理。', 'VALIDATION');
+      }
+      const response = await result(client.functions.invoke('memory-recycle', {
+        body: { entryId }, signal: sessionController.signal,
+      }), expected, {
+        fallback: '暂未确认清理结果，请刷新回收站后重试。',
+        getError(error) {
+          const status = error.context?.status;
+          if (status === 403) return new SupabaseProviderError('当前账号没有清理这条记录的权限。', 'FORBIDDEN', status);
+          if (status === 404) return new SupabaseProviderError('这条记录已恢复或已清理，请刷新核对。', 'NOT_FOUND', status);
+        },
+      });
+      const { queued, deleted, pending } = response;
+      if (![queued, deleted, pending].every(value => Number.isSafeInteger(value) && value >= 0)
+        || queued !== deleted + pending) throw invalid('暂未确认清理结果，请刷新回收站。');
+      await loadState(expected, user.id);
+      return { queued, deleted, pending };
+    }),
     toggleReaction: entryId => enqueue(expected => toggle(entryId, 'reactions', expected)),
     toggleFavorite: entryId => enqueue(expected => toggle(entryId, 'favorites', expected)),
     addComment: (entryId, text, replyToId = null, requestId = null) => enqueue(async expected => {

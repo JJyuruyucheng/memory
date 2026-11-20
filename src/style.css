@@ -10,6 +10,10 @@
 @import url('./points.css');
 @import url('./tag-distribution.css');
 .points-desktop-bell { position: absolute; top: 35px; right: 14px; }
+.trash-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; color: var(--muted); }
+.trash-toolbar p { margin: 0; font-size: 13px; }
+.trash-toolbar .danger, .memory-actions .danger { color: var(--negative); }
+.trash-confirm-actions .primary { background: var(--negative); }
 .comment-reply-to { color: var(--muted); font-size: 12px; }
 .comment-reply-to { margin-left: 8px; }
 .comment-actions, .comment-reply-target { display: flex; align-items: center; gap: 10px; }

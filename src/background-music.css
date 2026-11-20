@@ -22,8 +22,22 @@
 .bgm-trigger[data-dock='bottom'] { clip-path: inset(0 0 50%); }
 .bgm-trigger[data-dock='bottom'] .icon { transform: translateY(calc(var(--bgm-trigger-size) / -4)); }
 
-.bgm-sparks { position: absolute; z-index: 1; pointer-events: none; }
-.bgm-sparks i { position: absolute; left: -5px; top: -8px; opacity: 0; font: 600 17px/1 Georgia, serif; }
+.bgm-ripples, .bgm-sparks { position: absolute; pointer-events: none; }
+.bgm-ripples { z-index: -1; }
+.bgm-ripples i {
+  position: absolute; inset: 0; border: 1px solid color-mix(in srgb, var(--accent) 72%, transparent);
+  border-radius: 50%; opacity: 0;
+}
+.bgm-widget.is-playing .bgm-ripples i { animation: bgm-ripple 3.5s cubic-bezier(.2, .55, .4, 1) infinite; }
+.bgm-widget.is-playing .bgm-ripples i:nth-child(2) { animation-delay: 1.14s; }
+.bgm-widget.is-playing .bgm-ripples i:nth-child(3) { animation-delay: 2.28s; }
+@keyframes bgm-ripple {
+  0% { opacity: 0; transform: scale(1.02); }
+  13% { opacity: .43; }
+  100% { opacity: 0; transform: scale(1.95); }
+}
+.bgm-sparks { z-index: 1; }
+.bgm-sparks i { position: absolute; left: calc(-5px * var(--bgm-scale)); top: calc(-8px * var(--bgm-scale)); opacity: 0; font: 600 calc(17px * var(--bgm-scale))/1 Georgia, serif; }
 .bgm-sparks i:nth-child(1) { color: #b26786; --distance: 27px; --twist: -19deg; --delay: 0s; }
 .bgm-sparks i:nth-child(2) { color: #b86d54; --distance: 37px; --twist: 14deg; --delay: .61s; }
 .bgm-sparks i:nth-child(3) { color: #947226; --distance: 22px; --twist: -9deg; --delay: 1.22s; }
@@ -32,9 +46,9 @@
 .bgm-widget.is-playing .bgm-sparks i { animation: bgm-flying-note 3.05s ease-out infinite var(--delay); }
 @keyframes bgm-flying-note {
   0% { opacity: 0; transform: translate(0, 0) scale(.6); }
-  9% { opacity: .97; transform: translate(calc(var(--spark-side) * var(--distance) * .65), calc(var(--spark-rise) * .8)) rotate(var(--twist)) scale(1.04); }
+  9% { opacity: .97; transform: translate(calc(var(--spark-side) * var(--distance) * var(--bgm-scale) * .65), calc(var(--spark-rise) * .8)) rotate(var(--twist)) scale(1.04); }
   36% { opacity: .58; }
-  59%, 100% { opacity: 0; transform: translate(calc(var(--spark-side) * var(--distance)), var(--spark-rise)) rotate(var(--twist)) scale(.74); }
+  59%, 100% { opacity: 0; transform: translate(calc(var(--spark-side) * var(--distance) * var(--bgm-scale)), var(--spark-rise)) rotate(var(--twist)) scale(.74); }
 }
 
 .bgm-panel {
@@ -241,4 +255,6 @@
   .bgm-lyric-choices button, .bgm-lyric-tones button { min-height: 36px; }
   .bgm-track :is(.bgm-grip, .bgm-more) { height: 42px; }
 }
-@media (prefers-reduced-motion: reduce) { .bgm-widget.is-playing .bgm-sparks i { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .bgm-widget.is-playing :is(.bgm-sparks, .bgm-ripples) i { animation: none; }
+}

@@ -32,6 +32,7 @@ export function mountBackgroundMusic(host, provider, initialScope = 'site') {
   const events = new AbortController(), { signal } = events;
   host.innerHTML = `<div class="bgm-widget" data-ui>
     <button type="button" class="bgm-trigger" aria-label="背景音乐" aria-expanded="false" aria-controls="bgm-panel">${icon('music')}</button>
+    <span class="bgm-ripples" aria-hidden="true"><i></i><i></i><i></i></span>
     <span class="bgm-sparks" aria-hidden="true"><i>♪</i><i>♫</i><i>♪</i><i>♫</i><i>♪</i></span>
     <section class="bgm-panel" id="bgm-panel" aria-label="音乐播放器" hidden>
       <div class="bgm-controls">
@@ -53,7 +54,7 @@ export function mountBackgroundMusic(host, provider, initialScope = 'site') {
     <audio preload="none" hidden></audio></div>`;
 
   const widget = host.firstElementChild, trigger = widget.querySelector('.bgm-trigger'), panel = widget.querySelector('.bgm-panel');
-  const sparks = widget.querySelector('.bgm-sparks'), app = document.querySelector('#app');
+  const sparks = widget.querySelector('.bgm-sparks'), ripples = widget.querySelector('.bgm-ripples'), app = document.querySelector('#app');
   const audio = widget.querySelector('audio');
   const now = panel.querySelector('.bgm-now'), panelList = panel.querySelector('ol'), feedback = panel.querySelector('.bgm-feedback');
   const listArea = panel.querySelector('#bgm-list-area'), queueLabel = panel.querySelector('.bgm-queue'), folderChoice = queueLabel.querySelector('select');
@@ -130,12 +131,18 @@ export function mountBackgroundMusic(host, provider, initialScope = 'site') {
   const placePlayer = mountFloatingPosition(widget, trigger, {
     storageKey: 'chaoxi-bgm-position', initial: { x: 1, y: 0 }, half: true, avoidPlayer: false, signal,
     onLayout(frame) {
-      const { left, right, x, y, width, height } = frame;
-      const centerX = x + width / 2;
-      sparks.style.left = `${centerX}px`;
-      sparks.style.top = `${y + height / 2}px`;
-      sparks.style.setProperty('--spark-side', centerX < (left + right) / 2 ? '1' : '-1');
-      sparks.style.setProperty('--spark-rise', y < 0 ? '24px' : `-${Math.min(33, y + 10)}px`);
+      const { left, top, right, x, y, width, height } = frame;
+      const centerX = x + width / 2, centerY = y + height / 2;
+      const side = centerX < (left + right) / 2 ? 1 : -1;
+      const rise = y - top < height * .75 ? 1 : -1;
+      sparks.style.left = `${centerX + side * width * .39}px`;
+      sparks.style.top = `${centerY + rise * height * .34}px`;
+      sparks.style.setProperty('--spark-side', side);
+      sparks.style.setProperty('--spark-rise', `${rise * height * .58}px`);
+      ripples.style.left = `${x}px`;
+      ripples.style.top = `${y}px`;
+      ripples.style.width = `${width}px`;
+      ripples.style.height = `${height}px`;
       if (!panel.hidden) placeAdjacent(panel, frame);
     },
   });
@@ -157,7 +164,7 @@ export function mountBackgroundMusic(host, provider, initialScope = 'site') {
   const caption = mountMusicCaptions(widget, audio, {
     onReserve: reserveLyrics,
     onControl(action) {
-      if (action === 'close') setLyrics(false);
+      if (action === 'close') showFeature(null);
       else byAction(action).click();
     },
   }, signal);
@@ -182,6 +189,16 @@ export function mountBackgroundMusic(host, provider, initialScope = 'site') {
     void readLyrics();
   }
 
+  function showFeature(feature) {
+    const list = feature === 'list', lyrics = feature === 'lyrics';
+    listArea.hidden = !list;
+    byAction('list').setAttribute('aria-expanded', String(list));
+    openVolume(feature === 'volume');
+    if (lyricsOn !== lyrics) setLyrics(lyrics);
+    if (feature === 'volume') volume.focus({ preventScroll: true });
+    placePlayer();
+  }
+
   async function readLyrics() {
     if (!lyricsOn) { showLyrics(); return; }
     const key = current()?.lyrics;
@@ -193,7 +210,10 @@ export function mountBackgroundMusic(host, provider, initialScope = 'site') {
       const lyrics = parseLyrics(await blob.text());
       if (!signal.aborted && lyricsKey === key) { lines = lyrics; showLyrics(); }
     } catch {
-      if (!signal.aborted && lyricsKey === key) { lyricsKey = undefined; message('歌词暂时无法读取。'); }
+      if (!signal.aborted && lyricsKey === key) {
+        lyricsKey = undefined;
+        if (lyricsOn) message('歌词暂时无法读取。');
+      }
     }
   }
 
@@ -345,17 +365,9 @@ export function mountBackgroundMusic(host, provider, initialScope = 'site') {
         else { setEnabled(false); audio.pause(); }
         break;
       case 'mode': libraries[scope].changeMode(); break;
-      case 'list':
-        listArea.hidden = !listArea.hidden; button.setAttribute('aria-expanded', String(!listArea.hidden)); placePlayer();
-        break;
-      case 'volume':
-        openVolume(volumeRow.hidden);
-        if (!volumeRow.hidden) volume.focus({ preventScroll: true });
-        placePlayer();
-        break;
-      case 'lyrics':
-        setLyrics(!lyricsOn);
-        break;
+      case 'list': showFeature(listArea.hidden ? 'list' : null); break;
+      case 'volume': showFeature(volumeRow.hidden ? 'volume' : null); break;
+      case 'lyrics': showFeature(lyricsOn ? null : 'lyrics'); break;
     }
   }, { signal });
   folderChoice.addEventListener('change', async () => {
