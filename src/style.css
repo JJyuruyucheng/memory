@@ -147,6 +147,7 @@
 #mobile-search-form .primary { min-height: 44px; }
 .dialog.feed-date-dialog { width: min(400px, calc(100% - 24px)); padding: 22px; }
 .feed-date-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-right: 42px; }
+.feed-date-dialog .feed-date-title h2 { padding-right: 0; white-space: nowrap; }
 .calendar-footer { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; }
 .calendar-footer:has(.points-checkin) { justify-content: space-between; }
 .right-rail .calendar-footer .calendar-caption { margin: 0; }
