@@ -16,6 +16,8 @@ import { calendarGrid, feedDatePickerMarkup, mountFeedDatePicker, shiftCalendarM
 import { mountTagOverflow } from './feed-tag-overflow.js';
 import { tagDistributionMarkup } from './tag-distribution.js';
 import { mountAnniversarySorter } from './anniversary-sorter.js';
+import { anniversaryFields, mountAnniversaryEditor, readAnniversaries } from './anniversary-editor.js';
+import { lunarDateLabel, solarToLunar } from './lunar-calendar.js';
 import { mountEntryBody, mountEntryUpload } from './entry-editor-controls.js';
 import { entryEmojiMarkup, mountEntryEmoji } from './entry-emojis.js';
 import { renderAdminActivity } from './admin-activity.js';
@@ -26,7 +28,7 @@ import { mountBackgroundMusic } from './background-music.js';
 import { trackActiveUsage } from './active-usage.js';
 import { mountPointsUi } from './points-ui.js';
 import { mountPointsCheckin } from './points-checkin.js';
-import { ALLOWED_FILE_TYPES, escapeHtml as esc, filterEntries, collectEntryTags, computeStats, relationshipDays, anniversaryInfo, dayKey } from './domain.js';
+import { ALLOWED_FILE_TYPES, escapeHtml as esc, filterEntries, collectEntryTags, computeStats, relationshipDays, anniversariesInMonth, anniversaryInfo, dayKey } from './domain.js';
 
 const app = document.querySelector('#app');
 const modalRoot = document.querySelector('#modal-root');
@@ -46,6 +48,7 @@ let reconnectPending = false, reconnectError = null, reconnectAttempt, recoveryE
 let searchTimer, toastTimer, dialogReturnFocus, draftTimer;
 let editorAttachments = [], editorId = null, editorTags = null, previewUrls = [];
 let unmountEntryBody, unmountEntryUpload, unmountEntryEmoji, unmountTagOverflow, unmountEntryPreviews, unmountAnniversarySorter;
+let unmountAnniversaryEditor;
 const expandedEntries = new Set();
 let feedTagsExpanded = false;
 let adminActivity = { days: 30, pending: false };
@@ -134,6 +137,8 @@ function syncAssistant(locked = false) {
 }
 
 function render() {
+  unmountAnniversaryEditor?.();
+  unmountAnniversaryEditor = null;
   unmountAnniversarySorter?.();
   unmountAnniversarySorter = null;
   unmountTagOverflow?.();
@@ -210,7 +215,9 @@ function render() {
   for (const [selector, top] of scrollPositions) { const region = app.querySelector(selector); if (region) region.scrollTop = top; }
   if (active) { const el = document.getElementById(active); if (el) { el.focus({ preventScroll: true }); if (typeof selection === 'number' && el.setSelectionRange) el.setSelectionRange(selection, selection); } }
   mountDatePickers(app);
-  unmountAnniversarySorter = mountAnniversarySorter(app.querySelector('#anniversary-fields'));
+  const anniversaryEditor = app.querySelector('#anniversary-fields');
+  unmountAnniversaryEditor = mountAnniversaryEditor(anniversaryEditor);
+  unmountAnniversarySorter = mountAnniversarySorter(anniversaryEditor);
   unmountTagOverflow = mountTagOverflow(app.querySelector('.tag-filter-list'), feedTagsExpanded,
     expanded => { feedTagsExpanded = expanded; });
   syncAssistant();
@@ -335,12 +342,19 @@ function renderTogether(stats) {
   const days = relationshipDays(state.settings.startDate, new Date());
   return `<section class="together-panel"><div class="couple-avatars">${people.map(u => avatar(u)).join(`<span class="between-heart">${icon('heart')}</span>`)}</div><h2>${people.map(u => esc(u.name)).join('<span class="amp"> & </span>')}</h2><p>一起走过的第</p><div class="together-days num">${Number.isFinite(days) ? days.toLocaleString() : '—'}<small>天</small></div><div class="together-date">从 ${esc(state.settings.startDate || '尚未设置')} 开始</div><div class="together-summary"><span><strong class="num">${stats.total}</strong> 段回忆</span><span><strong class="num">${stats.images}</strong> 张照片</span></div></section>`;
 }
+const monthAnniversaries = month => anniversariesInMonth(state.settings.anniversaries || [], month);
+
 function renderCalendar() {
   const [year, month] = calendarCursor.split('-').map(Number);
   const dates = new Set(visibleEntries().filter(entry => !entry.deletedAt && entry.status !== 'draft').map(entry => dayKey(entry.occurredAt)));
-  return `<section class="calendar-panel"><div class="rail-heading"><h2>${year} 年 ${month} 月</h2><div><button class="icon-button previous" data-action="calendar-prev" aria-label="上个月">${icon('chevron')}</button><button class="icon-button" data-action="calendar-next" aria-label="下个月">${icon('chevron')}</button></div></div>${calendarGrid(calendarCursor, { dates, selectedDay })}<div class="calendar-footer"><p class="calendar-caption"><span></span>有记录的日子</p>${pointsUi?.renderCheckin() || ''}</div></section>`;
+  const anniversaries = monthAnniversaries(calendarCursor);
+  return `<section class="calendar-panel"><div class="rail-heading"><h2>${year} 年 ${month} 月</h2><div><button class="icon-button previous" data-action="calendar-prev" aria-label="上个月">${icon('chevron')}</button><button class="icon-button" data-action="calendar-next" aria-label="下个月">${icon('chevron')}</button></div></div>${calendarGrid(calendarCursor, { dates, selectedDay, anniversaries })}
+    <div class="calendar-footer"><div class="calendar-legend"><p class="calendar-caption"><span></span>有记录的日子</p>${anniversaries.size ? `<p class="calendar-caption calendar-anniversary-caption">${icon('heart')}纪念日</p>` : ''}</div>${pointsUi?.renderCheckin() || ''}</div></section>`;
 }
-function upcoming() { return (state.settings.anniversaries || []).map(a => anniversaryInfo(a, new Date())).filter(a => !a.isPast).sort((a, b) => a.daysUntil - b.daysUntil); }
+function upcoming() {
+  const today = dayKey(new Date());
+  return (state.settings.anniversaries || []).map(a => anniversaryInfo(a, today)).filter(a => a && !a.isPast).sort((a, b) => a.daysUntil - b.daysUntil);
+}
 function renderUpcoming() { return `<section class="upcoming-panel"><div class="rail-heading"><h2>下一个小期待</h2><a class="small-link" href="#anniversaries">查看全部</a></div>${upcoming().slice(0, 2).map(a => `<div class="upcoming-row"><div><strong>${esc(a.title)}</strong><small>${esc(a.nextDate || a.date)}</small></div><span>${a.isToday ? '就是今天' : `<b class="num">${a.daysUntil}</b> 天后`}</span></div>`).join('') || '<p class="muted">设置一个值得期待的日子吧。</p>'}</section>`; }
 
 function renderAlbum() {
@@ -361,8 +375,22 @@ function renderStats() {
     ${tagDistributionMarkup(rows)}</div>`;
 }
 function renderAnniversaries() {
-  const anniversaries = (state.settings.anniversaries || []).map(a => anniversaryInfo(a, new Date()));
-  return `${heading('值得记住的日子', '有些日期，一想到就会嘴角上扬。', false)}<div class="anniversary-grid">${anniversaries.map(a => `<article class="anniversary-card">${icon('calendar')}<h2>${esc(a.title)}</h2><p>${esc(a.date)}${a.yearly ? ' · 每年纪念' : ''}</p><div class="num">${a.isToday ? '今天' : a.isPast ? '已珍藏' : a.daysUntil}<small>${!a.isToday && !a.isPast ? '天后' : ''}</small></div><span>${a.isPast ? '这一页已经成为回忆' : a.isToday ? '把今天也好好记下来' : `下一次：${esc(a.nextDate)}`}</span></article>`).join('') || '<div class="empty-state"><h2>留一个日子，给期待</h2><p>在“我们与设置”中添加纪念日。</p></div>'}</div><a href="#us" class="secondary inline-button">${icon('settings')}管理纪念日</a>`;
+  const requested = new URLSearchParams(location.hash.split('?')[1]).get('day');
+  const day = requested && dayKey(requested) === requested ? requested : '';
+  const today = dayKey(new Date());
+  const anniversaries = day ? monthAnniversaries(day.slice(0, 7)).get(day) || [] :
+    (state.settings.anniversaries || []).map(a => anniversaryInfo(a, today)).filter(Boolean);
+  const cards = anniversaries.map(a => {
+    const date = a.calendar === 'lunar' ? lunarDateLabel(day ? solarToLunar(day) : a.lunar) : day || a.date;
+    return `<article class="anniversary-card">${icon(day ? 'heart' : 'calendar')}<h2>${esc(a.title)}</h2>
+      <p>${esc(date)}${a.yearly ? ' · 每年纪念' : ''}</p>
+      ${day ? '' : `<div class="num">${a.isToday ? '今天' : a.isPast ? '已珍藏' : a.daysUntil}<small>${!a.isToday && !a.isPast ? '天后' : ''}</small></div>
+        <span>${a.isPast ? '这一页已经成为回忆' : a.isToday ? '把今天也好好记下来' : `下一次：${esc(a.nextDate)}`}</span>`}</article>`;
+  }).join('');
+  return `${heading(day ? '当天的纪念日' : '值得记住的日子', day ? dateLabel(day, true) : '有些日期，一想到就会嘴角上扬。', false)}
+    <div class="anniversary-grid">${cards || (day ? '<div class="empty-state"><h2>这一天没有纪念日</h2></div>' : '<div class="empty-state"><h2>留一个日子，给期待</h2><p>在“我们与设置”中添加纪念日。</p></div>')}</div>
+    <div class="anniversary-page-actions">${day ? '<a href="#anniversaries" class="secondary inline-button">查看全部纪念日</a>' : ''}
+    <a href="#us" class="secondary inline-button">${icon('settings')}管理纪念日</a></div>`;
 }
 function renderLoginPhotoSettings() {
   return loginPhotos ? `<section class="settings-section login-photo-settings"><h2>登录页照片</h2><div class="settings-actions"><button class="secondary" data-action="login-photos">${icon('edit')}编辑照片</button></div></section>` : '';
@@ -406,14 +434,6 @@ function renderSettings() {
       <section class="settings-section"><h2>数据与账号</h2><div class="settings-actions"><button class="secondary" data-action="export-mine">${icon('download')}导出我的回忆</button><button class="secondary" data-action="export-all">导出共同档案</button>${CONFIG.mode === 'demo' ? '<button class="text-button danger" data-action="reset-demo">恢复初始示例</button>' : '<button class="text-button" data-action="logout">退出当前账号</button>'}</div></section>
     </div>
   </div>`;
-}
-function anniversaryFields(a = {}) {
-  return `<div class="anniversary-fields" data-anniversary="${esc(a.id || crypto.randomUUID())}">
-    <button type="button" class="icon-button anniversary-grip" aria-label="排序${esc(a.title || '此纪念日')}，按上下方向键移动" title="拖动排序">${icon('grip')}</button>
-    <label><span class="sr-only">纪念日名字</span><input name="ann-title" placeholder="例如：第一次见面" value="${esc(a.title || '')}" maxlength="40" required /></label>
-    <label><span class="sr-only">纪念日期</span><input name="ann-date" type="date" value="${esc(a.date || '')}" required /></label>
-    <label class="checkbox-label"><input name="ann-yearly" type="checkbox" ${a.yearly ? 'checked' : ''} />每年</label>
-    <button type="button" class="icon-button" data-action="remove-anniversary" aria-label="移除纪念日">${icon('close')}</button></div>`;
 }
 function renderAdmin(stats) {
   if (state.currentUser.role !== 'admin') return `${heading('这扇门留给维护账号', '日常记录不需要管理员权限。', false)}<a href="#timeline" class="secondary inline-button">回到时光线</a>`;
@@ -504,7 +524,7 @@ function showFeedDatePicker(button) {
   const entries = visibleEntries().filter(entry => entry.status !== 'draft');
   const dates = new Set(filterEntries(entries, feedScope(route())).map(entry => dayKey(entry.occurredAt)).filter(Boolean));
   openDialog(feedDatePickerMarkup(pointsUi?.renderCheckin()), 'feed-date-dialog', button);
-  mountFeedDatePicker(modalRoot.querySelector('dialog'), { selectedMonth: filters.month, selectedDay, dates });
+  mountFeedDatePicker(modalRoot.querySelector('dialog'), { selectedMonth: filters.month, selectedDay, dates, anniversariesForMonth: monthAnniversaries });
 }
 function showMobileSearch(button) {
   clearTimeout(searchTimer);
@@ -861,7 +881,7 @@ document.addEventListener('submit', async event => {
       if (!previous?.id && ['note', 'event'].includes(data.type) && state.currentUser.role === 'member') pointsUi?.refreshSummary();
     } else if (form.id === 'settings-form') {
       if (!state.currentUser) throw new Error('请先登录。');
-      const anniversaries = [...form.querySelectorAll('[data-anniversary]')].map(row => ({ id: row.dataset.anniversary, title: row.querySelector('[name="ann-title"]').value.trim(), date: row.querySelector('[name="ann-date"]').value, yearly: row.querySelector('[name="ann-yearly"]').checked }));
+      const anniversaries = readAnniversaries(form.querySelector('#anniversary-fields'));
       await provider.saveSettings({ ...state.settings, spaceName: data.spaceName.trim(), subtitle: data.subtitle.trim(), startDate: data.startDate, anniversaries }); render(); toast('我们的小世界，已更新。');
     } else if (form.id === 'comment-form') {
       const id = form.dataset.id, replyTo = form.dataset.replyTo || null, content = data.content.trim();

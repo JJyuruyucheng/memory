@@ -1,0 +1,53 @@
+.calendar-grid a.calendar-day {
+  display: grid;
+  place-items: center;
+  text-decoration: none;
+}
+
+.calendar-day .calendar-anniversary-mark {
+  position: absolute;
+  inset-block-start: -1px;
+  inset-inline-end: -2px;
+  width: 10px;
+  height: 10px;
+  color: #a34c62;
+  fill: currentColor;
+  pointer-events: none;
+}
+
+.calendar-day:is(.today, .selected) .calendar-anniversary-mark {
+  filter: drop-shadow(0 0 1px #fff);
+}
+
+.feed-date-dialog .calendar-day .calendar-anniversary-mark {
+  inset-block-start: 3px;
+  inset-inline-end: 4px;
+}
+
+.calendar-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; }
+.calendar-anniversary-caption .icon { width: 10px; height: 10px; color: #a34c62; fill: currentColor; }
+
+.feed-date-anniversary-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--rule);
+  list-style: none;
+}
+.feed-date-anniversary-links li { max-width: 100%; }
+.feed-date-anniversary-links a {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 36px;
+  padding: 8px;
+  border-radius: 7px;
+  background: #f6ecef;
+  color: #843d51;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.feed-date-anniversary-links a:hover { background: #f3e2e8; }
+.feed-date-anniversary-links time { font-weight: 650; white-space: nowrap; }

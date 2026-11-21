@@ -1,4 +1,4 @@
-import { dayKey, toUtcIso, validateEntry } from './domain.js';
+import { dayKey, normalizeAnniversaryDate, toUtcIso, validateEntry } from './domain.js';
 import { planAttachmentOrder, resolveAttachmentOrder } from './attachment-order.js';
 
 // Memos 26.11.1 REST schema: https://github.com/usememos/memos/tree/26.11.1/proto/api
@@ -69,12 +69,14 @@ function readSettings(space) {
 
 function checkedSettings(value) {
   if (!value || typeof value !== 'object') throw new MemosError('空间设置格式无效。', 'VALIDATION');
-  const settings = { spaceName: value.spaceName, subtitle: value.subtitle, startDate: value.startDate, anniversaries: Array.isArray(value.anniversaries) ? value.anniversaries.map(item => item && ({ id: item.id, title: item.title, date: item.date, yearly: item.yearly })) : value.anniversaries };
+  const { spaceName, subtitle, startDate, anniversaries } = value;
+  const settings = { spaceName, subtitle, startDate, anniversaries };
   if (typeof settings.spaceName !== 'string' || !settings.spaceName.trim() || settings.spaceName.length > 60 || typeof settings.subtitle !== 'string' || settings.subtitle.length > 300 || typeof settings.startDate !== 'string' || (settings.startDate && dayKey(settings.startDate) !== settings.startDate) || !Array.isArray(settings.anniversaries) || settings.anniversaries.length > 100) throw new MemosError('空间名称、开始日期或纪念日设置无效。', 'VALIDATION');
-  for (const anniversary of settings.anniversaries) {
-    if (!anniversary || typeof anniversary.title !== 'string' || !anniversary.title.trim() || dayKey(anniversary.date) !== anniversary.date || typeof anniversary.yearly !== 'boolean') throw new MemosError('纪念日需要名称和有效日期。', 'VALIDATION');
-    anniversary.id ||= crypto.randomUUID();
-  }
+  settings.anniversaries = settings.anniversaries.map(anniversary => {
+    const date = normalizeAnniversaryDate(anniversary);
+    if (!date || typeof anniversary.title !== 'string' || !anniversary.title.trim() || typeof anniversary.yearly !== 'boolean') throw new MemosError('纪念日需要名称和有效日期。', 'VALIDATION');
+    return { id: anniversary.id || crypto.randomUUID(), title: anniversary.title, ...date, yearly: anniversary.yearly };
+  });
   settings.spaceName = settings.spaceName.trim();
   return settings;
 }

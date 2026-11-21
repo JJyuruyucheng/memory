@@ -2,6 +2,13 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 29, date: '2026-11-21', version: 'v0.17.5', title: '农历纪念日与日历标记',
+    changes: [
+      '纪念日支持公历、农历和闰月。填写农历时显示对应的公历日期，可按农历每年重复。',
+      '首页月历用心形标记纪念日，点击日期打开当天的纪念日。手机端可从日期筛选查看并打开。',
+    ],
+  },
+  {
     number: 28, date: '2026-11-20', version: 'v0.17.4', title: '回收站保留期与界面修复',
     changes: [
       '回收站保留 7 天后自动清理，支持手动永久清理记录和附件。上线前的回收站记录自启用起保留至少 7 天。',

@@ -1,3 +1,5 @@
+import { lunarAnniversaryInYear, lunarToSolar, solarToLunar, LUNAR_MIN_YEAR, LUNAR_MAX_YEAR } from './lunar-calendar.js';
+
 const DAY_MS = 86400000;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_ZONE = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,9})?)?(?:Z|[+-](?:0\d|1[0-4]):[0-5]\d)$/i;
@@ -60,24 +62,67 @@ export function relationshipDays(startDate, now = new Date()) {
   return Number.isFinite(elapsed) ? Math.max(0, elapsed + 1) : 0;
 }
 
-export function anniversaryInfo(anniversary, now = new Date()) {
+export function normalizeAnniversaryDate(anniversary) {
   if (!anniversary || !dateParts(anniversary.date)) return null;
+  const { date, calendar, lunar } = anniversary;
+  if (calendar !== 'lunar') return (calendar === undefined || calendar === 'solar') && lunar === undefined ? { date } : null;
+  if (!lunar || lunarToSolar(lunar) !== date) return null;
+  const { year, month, day, leap } = lunar;
+  return { date, calendar, lunar: { year, month, day, leap } };
+}
+
+function anniversaryYear(anniversary) {
+  return anniversary.lunar?.year ?? Number(anniversary.date.slice(0, 4));
+}
+
+function occurrence(anniversary, year) {
+  if (year < anniversaryYear(anniversary)) return '';
+  if (anniversary.calendar === 'lunar') return lunarAnniversaryInYear(anniversary.lunar, year);
+  const candidate = `${year}-${anniversary.date.slice(5)}`;
+  return dateParts(candidate) ? candidate : '';
+}
+
+export function anniversariesInMonth(anniversaries, month) {
+  const result = new Map();
+  if (!dateParts(`${month}-01`)) return result;
+  const year = Number(month.slice(0, 4));
+  for (const item of anniversaries) {
+    const anniversary = normalizeAnniversaryDate(item);
+    if (!anniversary) continue;
+    const dates = !item.yearly ? [anniversary.date] : anniversary.calendar === 'lunar'
+      ? [occurrence(anniversary, year - 1), occurrence(anniversary, year)] : [occurrence(anniversary, year)];
+    for (const date of dates) {
+      if (!date.startsWith(month)) continue;
+      const matches = result.get(date) ?? [];
+      matches.push(item);
+      result.set(date, matches);
+    }
+  }
+  return result;
+}
+
+export function anniversaryInfo(item, now = new Date()) {
+  const anniversary = normalizeAnniversaryDate(item);
+  if (!anniversary) return null;
   const today = dayKey(now);
   if (!today) return null;
-  const original = dateParts(anniversary.date);
-  const thisYear = Number(today.slice(0, 4));
+  const solarYear = Number(today.slice(0, 4));
+  const isLunar = anniversary.calendar === 'lunar';
+  const thisYear = isLunar ? solarToLunar(today)?.year ?? Math.max(LUNAR_MIN_YEAR, Math.min(LUNAR_MAX_YEAR, solarYear)) : solarYear;
+  const originalYear = anniversaryYear(anniversary);
+  let occurrenceYear = originalYear;
   let nextDate = anniversary.date;
-  if (anniversary.yearly) {
-    // February 29 remains February 29: in other years the next valid leap date is used.
-    for (let year = Math.max(thisYear, original.year); year <= thisYear + 8; year += 1) {
-      const candidate = `${year}-${anniversary.date.slice(5)}`;
-      if (dateParts(candidate) && candidate >= today) { nextDate = candidate; break; }
+  if (item.yearly) {
+    const max = isLunar ? Math.min(thisYear + 1, LUNAR_MAX_YEAR) : thisYear + 8;
+    for (let year = Math.max(thisYear, originalYear); year <= max; year += 1) {
+      const candidate = occurrence(anniversary, year);
+      if (candidate && candidate >= today) { nextDate = candidate; occurrenceYear = year; break; }
     }
   }
   const daysUntil = ordinal(nextDate) - ordinal(today);
   return {
-    ...anniversary, nextDate, daysUntil, isToday: daysUntil === 0, isPast: daysUntil < 0,
-    years: Math.max(0, Number(nextDate.slice(0, 4)) - original.year),
+    ...item, nextDate, daysUntil, isToday: daysUntil === 0, isPast: daysUntil < 0,
+    years: occurrenceYear - originalYear,
   };
 }
 

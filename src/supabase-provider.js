@@ -1,5 +1,5 @@
 import { BGM_BUCKET, MUSIC_UUID, musicFileType, musicFoldersState, musicState } from './background-music-data.js';
-import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, toUtcIso, validateEntry } from './domain.js';
+import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, normalizeAnniversaryDate, toUtcIso, validateEntry } from './domain.js';
 import { planAttachmentOrder, resolveAttachmentOrder } from './attachment-order.js';
 import { MAX_PROFILE_NAME, validAvatarJpeg } from './profile.js';
 import { requestAssistant } from './assistant-api.js';
@@ -33,8 +33,12 @@ function checkedSettings(value) {
   const output = { spaceName: value.spaceName, subtitle: value.subtitle, startDate: value.startDate, anniversaries: value.anniversaries };
   if (typeof output.spaceName !== 'string' || !output.spaceName.trim() || output.spaceName.length > 60 || typeof output.subtitle !== 'string' || output.subtitle.length > 300 || typeof output.startDate !== 'string' || (output.startDate && dayKey(output.startDate) !== output.startDate) || !Array.isArray(output.anniversaries) || output.anniversaries.length > 100) throw new SupabaseProviderError('空间名称、开始日期或纪念日设置无效。', 'VALIDATION');
   output.anniversaries = output.anniversaries.map(item => {
-    if (!item || typeof item.title !== 'string' || !item.title.trim() || item.title.length > 120 || typeof item.date !== 'string' || dayKey(item.date) !== item.date || typeof item.yearly !== 'boolean') throw new SupabaseProviderError('纪念日需要名称、有效日期和重复方式。', 'VALIDATION');
-    return { id: item.id || crypto.randomUUID(), title: item.title.trim(), date: item.date, yearly: item.yearly };
+    const dates = normalizeAnniversaryDate(item);
+    if (!dates || typeof item.title !== 'string' || !item.title.trim() || item.title.length > 120
+      || typeof item.yearly !== 'boolean') {
+      throw new SupabaseProviderError('纪念日需要名称、有效日期和重复方式。', 'VALIDATION');
+    }
+    return { id: item.id || crypto.randomUUID(), title: item.title.trim(), ...dates, yearly: item.yearly };
   });
   output.spaceName = output.spaceName.trim(); return output;
 }

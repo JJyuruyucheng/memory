@@ -4,6 +4,8 @@ import { icon } from './icons.js';
 const firstDay = '1000-01-01';
 const lastDay = '9999-12-31';
 const monthLabel = month => `${month.slice(0, 4)}年${Number(month.slice(5))}月`;
+const anniversaryHref = day => `#anniversaries?day=${encodeURIComponent(day)}`;
+const anniversaryNames = items => (items ?? []).map(anniversary => anniversary.title).join('、');
 
 export function shiftCalendarMonth(month, offset) {
   const [year, number] = month.split('-').map(Number);
@@ -12,23 +14,40 @@ export function shiftCalendarMonth(month, offset) {
   return date.toISOString().slice(0, 7);
 }
 
-export function calendarGrid(month, { dates, selectedDay, today = dayKey(new Date()), focusDay = '', dayAction = 'calendar-day' }) {
+export function calendarGrid(month, { dates, selectedDay, anniversaries, today = dayKey(new Date()), focusDay = '', dayAction = 'calendar-day' }) {
   const [year, number] = month.split('-').map(Number);
   const start = new Date(Date.UTC(year, number - 1, 1));
   const offset = (start.getUTCDay() + 6) % 7;
   const count = new Date(Date.UTC(year, number, 0)).getUTCDate();
   const weekdays = ['一', '二', '三', '四', '五', '六', '日'].map(day => `<span class="weekday">${day}</span>`).join('');
-  const buttons = Array.from({ length: count }, (_, index) => {
+  const days = Array.from({ length: count }, (_, index) => {
     const day = index + 1;
     const key = `${month}-${String(day).padStart(2, '0')}`;
     const recorded = dates.has(key);
     const selected = key === selectedDay;
-    return `<button type="button" data-action="${dayAction}" data-value="${key}"
-      class="calendar-day${recorded ? ' has-memory' : ''}${key === today ? ' today' : ''}${selected ? ' selected' : ''}"
-      aria-label="${key}${recorded ? '，有回忆' : ''}" aria-pressed="${selected}"
-      ${key === today ? 'aria-current="date"' : ''} ${focusDay && key !== focusDay ? 'tabindex="-1"' : ''}>${day}</button>`;
+    const names = anniversaryNames(anniversaries?.get(key));
+    const isLink = Boolean(names) && dayAction === 'calendar-day';
+    const label = `${key}${recorded ? '，有回忆' : ''}${names ? `，纪念日：${names}` : ''}`;
+    const classes = `calendar-day${recorded ? ' has-memory' : ''}${names ? ' has-anniversary' : ''}${key === today ? ' today' : ''}${selected ? ' selected' : ''}`;
+    const attributes = `class="${classes}" aria-label="${esc(label)}" ${names ? `title="${esc(names)}"` : ''}
+      ${key === today ? 'aria-current="date"' : ''} ${focusDay && key !== focusDay ? 'tabindex="-1"' : ''}`;
+    const content = `${day}${names ? icon('heart', 'calendar-anniversary-mark') : ''}`;
+    if (isLink) {
+      return `<a href="${anniversaryHref(key)}" ${attributes}>${content}</a>`;
+    }
+    return `<button type="button" data-action="${dayAction}" data-value="${key}" aria-pressed="${selected}" ${attributes}>${content}</button>`;
   }).join('');
-  return `<div class="calendar-grid">${weekdays}${'<span></span>'.repeat(offset)}${buttons}</div>`;
+  return `<div class="calendar-grid">${weekdays}${'<span></span>'.repeat(offset)}${days}</div>`;
+}
+
+function anniversaryLinks(anniversaries) {
+  if (!anniversaries?.size) return '';
+  const links = [...anniversaries].sort(([left], [right]) => left.localeCompare(right)).map(([date, items]) => {
+    const names = anniversaryNames(items);
+    if (!names) return '';
+    return `<li><a href="${anniversaryHref(date)}"><time datetime="${esc(date)}">${Number(date.slice(8))} 日</time><span>${esc(names)}</span></a></li>`;
+  }).join('');
+  return links ? `<ul class="feed-date-anniversary-links" aria-label="本月纪念日">${links}</ul>` : '';
 }
 
 export function feedDatePickerMarkup(checkin = '') {
@@ -41,7 +60,7 @@ export function feedDatePickerMarkup(checkin = '') {
     </div>`;
 }
 
-export function mountFeedDatePicker(dialog, { selectedMonth, selectedDay, dates }) {
+export function mountFeedDatePicker(dialog, { selectedMonth, selectedDay, dates, anniversariesForMonth }) {
   const grid = dialog.querySelector('#feed-date-options');
   const navigation = dialog.querySelector('.feed-date-navigation');
   const monthButton = dialog.querySelector('#feed-date-whole-month');
@@ -51,6 +70,7 @@ export function mountFeedDatePicker(dialog, { selectedMonth, selectedDay, dates 
   const yearsWithRecords = [...new Set([today.slice(0, 4), ...[...availableMonths].map(value => value.slice(0, 4))])];
   let month = selectedMonth || currentMonth;
   let year = Number(month.slice(0, 4)), choosingMonth = true;
+  let markedMonth, anniversaries;
 
   function render(focus = '') {
     const stepName = choosingMonth ? '年' : '个月';
@@ -74,7 +94,12 @@ export function mountFeedDatePicker(dialog, { selectedMonth, selectedDay, dates 
     } else {
       const tabbableDay = focus.length === 10 && focus.startsWith(month) ? focus
         : [selectedDay, today].find(day => day?.startsWith(`${month}-`)) || `${month}-01`;
-      grid.innerHTML = calendarGrid(month, { dates, selectedDay, today, focusDay: tabbableDay, dayAction: 'apply-feed-date' });
+      if (markedMonth !== month) {
+        markedMonth = month;
+        anniversaries = anniversariesForMonth?.(month);
+      }
+      grid.innerHTML = calendarGrid(month, { dates, selectedDay, anniversaries, today, focusDay: tabbableDay, dayAction: 'apply-feed-date' })
+        + anniversaryLinks(anniversaries);
       monthButton.dataset.value = month;
       monthButton.setAttribute('aria-label', `筛选整月，${monthLabel(month)}`);
     }

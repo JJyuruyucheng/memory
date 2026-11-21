@@ -9,6 +9,8 @@
 @import url('./settings-layout.css');
 @import url('./points.css');
 @import url('./tag-distribution.css');
+@import url('./anniversary-calendar.css');
+.anniversary-page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .points-desktop-bell { position: absolute; top: 35px; right: 14px; }
 .trash-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; color: var(--muted); }
 .trash-toolbar p { margin: 0; font-size: 13px; }

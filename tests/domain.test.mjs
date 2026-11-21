@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { anniversaryInfo, canReadEntry, collectEntryTags, computeStats, dayKey, escapeHtml, filterEntries, relationshipDays, toUtcIso, validateEntry } from '../src/domain.js';
+import { anniversariesInMonth, anniversaryInfo, canReadEntry, collectEntryTags, computeStats, dayKey, escapeHtml, filterEntries, normalizeAnniversaryDate, relationshipDays, toUtcIso, validateEntry } from '../src/domain.js';
+import { lunarToSolar, solarToLunar } from '../src/lunar-calendar.js';
 import { createSampleData } from '../src/sample-data.js';
 
 const valid = (extra = {}) => ({ type: 'note', title: '', content: '把今天记下来。', occurredAt: '2026-11-01T16:10:00.000Z', mood: null, tags: [], media: [], ...extra });
@@ -27,6 +28,30 @@ test('anniversaries roll to the next occurrence and preserve leap dates', () => 
   assert.equal(anniversaryInfo({ date: '2024-02-29', yearly: true }, '2026-11-16').nextDate, '2028-02-29');
   assert.equal(anniversaryInfo({ date: '2025-11-15', yearly: false }, '2026-11-16').isPast, true);
   assert.equal(anniversaryInfo({ date: '2026-02-30', yearly: true }), null);
+});
+
+test('lunar anniversaries validate the original date and resolve yearly leap and short months', () => {
+  const lunar = { year: 2025, month: 6, day: 1, leap: true };
+  const item = { calendar: 'lunar', date: '2025-07-25', lunar, yearly: true };
+  assert.equal(lunarToSolar(lunar), item.date);
+  assert.deepEqual(solarToLunar(item.date), lunar);
+  assert.deepEqual(solarToLunar('2026-02-17'), { year: 2026, month: 1, day: 1, leap: false });
+  assert.equal(normalizeAnniversaryDate({ ...item, date: '2025-07-26' }), null);
+  assert.equal(lunarToSolar({ ...lunar, year: 2026 }), '');
+  const next = anniversaryInfo(item, '2026-01-01');
+  assert.equal(next.nextDate, lunarToSolar({ ...lunar, year: 2026, leap: false }));
+  assert.equal(next.years, 1);
+  const thirtieth = { ...item, date: '2025-09-21', lunar: { year: 2025, month: 7, day: 30, leap: false } };
+  assert.equal(anniversaryInfo(thirtieth, '2026-01-01').nextDate, '2026-09-10');
+});
+
+test('a civil calendar month groups lunar and solar anniversaries on their actual day', () => {
+  const lunar = { title: '腊月纪念', date: '2026-02-16', yearly: true, calendar: 'lunar', lunar: { year: 2025, month: 12, day: 29, leap: false } };
+  const solar = { title: '公历纪念', date: '2024-02-05', yearly: true };
+  const once = { ...lunar, title: '一次性纪念', yearly: false };
+  assert.deepEqual([...anniversariesInMonth([lunar, solar, once], '2027-02')], [['2027-02-05', [lunar, solar]]]);
+  assert.equal(anniversaryInfo(lunar, '2027-02-04T16:00:00Z').isToday, true);
+  assert.equal(anniversaryInfo(lunar, '2027-02-04T15:59:59Z').daysUntil, 1);
 });
 
 test('statistics exclude trash, count moods by records and preserve the unset denominator', () => {

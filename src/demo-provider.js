@@ -1,4 +1,4 @@
-import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, toUtcIso, validateEntry } from './domain.js';
+import { ALLOWED_FILE_TYPES, canReadEntry, dayKey, normalizeAnniversaryDate, toUtcIso, validateEntry } from './domain.js';
 import { createSampleData } from './sample-data.js';
 import { planAttachmentOrder, resolveAttachmentOrder } from './attachment-order.js';
 
@@ -261,8 +261,9 @@ export function createDemoProvider(options = {}) {
         if (typeof value.startDate !== 'string' || dayKey(value.startDate) !== value.startDate) throw new Error('开始日期无效。');
         if (!Array.isArray(value.anniversaries) || value.anniversaries.length > 100) throw new Error('纪念日格式无效，最多保存 100 个。');
         value.anniversaries = value.anniversaries.map(item => {
-          if (!item || typeof item.title !== 'string' || !item.title.trim() || item.title.length > 120 || dayKey(item.date) !== item.date || typeof item.yearly !== 'boolean') throw new Error('请填写真实的纪念日日期、标题和重复方式。');
-          return { id: item.id || uid('anniversary'), title: item.title.trim(), date: item.date, yearly: item.yearly };
+          const date = normalizeAnniversaryDate(item);
+          if (!date || typeof item.title !== 'string' || !item.title.trim() || item.title.length > 120 || typeof item.yearly !== 'boolean') throw new Error('请填写真实的纪念日日期、标题和重复方式。');
+          return { id: item.id || uid('anniversary'), title: item.title.trim(), ...date, yearly: item.yearly };
         });
         value.spaceName = value.spaceName.trim();
         const next = nextState(); next.settings = value;
