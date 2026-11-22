@@ -647,6 +647,23 @@ test('failed upload cleans its own reservation and preserves existing photos; ne
   assert.equal(f.objects.size, 1); assert.ok(f.calls.some(value => value.name === 'discard_media'));
 });
 
+test('an attachment deadline is reported after cleaning up the timed-out upload', async () => {
+  const f = fixture({ initialMedia: true });
+  const storage = f.client.storage.from('memory-media');
+  f.client.storage.from = () => ({
+    ...storage,
+    async upload() {
+      return { data: null, error: { originalError: new DOMException('连接超时', 'TimeoutError') } };
+    },
+  });
+  await f.signIn();
+  await assert.rejects(f.provider.saveEntry({ id: ENTRY, content: '等待上传', media: [] }, [file()]),
+    error => error.code === 'PARTIAL_SAVE' && error.causeCode === 'UPLOAD_TIMEOUT' && error.message.includes('10 分钟'));
+  assert.deepEqual(f.tables.media.map(media => media.id), [MEDIA]);
+  assert.equal(f.objects.size, 1);
+  assert.ok(f.calls.some(call => call.name === 'discard_media'));
+});
+
 test('optimistic updatedAt condition detects another editor instead of overwriting', async () => {
   const f = fixture(), state = await f.signIn();
   f.tables.entries[0].updatedAt = '2026-11-16T03:00:00.000Z'; f.tables.entries[0].content = 'other editor';

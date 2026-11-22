@@ -464,7 +464,8 @@ async function loadAdminActivity(days = adminActivity.days) {
 }
 
 function openDialog(content, cls = '', returnFocus = document.activeElement) {
-  closeModal(); dialogReturnFocus = returnFocus;
+  if (closeModal() === false) return;
+  dialogReturnFocus = returnFocus;
   modalRoot.innerHTML = `<dialog class="dialog ${cls}">${content}<button class="dialog-close icon-button" data-action="close" aria-label="关闭窗口">${icon('close')}</button></dialog>`;
   const dialog = modalRoot.querySelector('dialog');
   const title = dialog.querySelector('h2');
@@ -485,6 +486,7 @@ function confirmTrashPurge(id, button) {
   modalRoot.querySelector('.trash-confirm-actions [data-action="close"]').focus();
 }
 function closeModal(saveDraft = true) {
+  if (saveDraft && modalRoot.querySelector('#entry-form[data-saving]')) return false;
   if (saveDraft && profileEditor?.isSaving) { toast('个人资料正在保存，请稍候。'); return; }
   if (saveDraft && loginPhotoEditor?.isSaving) { toast('照片正在保存，请稍候。'); return; }
   if (saveDraft) persistDraft();
@@ -622,6 +624,7 @@ function showDetail(id, commentId) {
     <form id="comment-form" data-id="${esc(id)}"><div class="comment-reply-target" hidden><span></span><button type="button" class="text-button" data-action="cancel-comment-reply">取消回复</button></div>
     <label class="sr-only" for="comment-content">留言内容</label><textarea id="comment-content" name="content" rows="2" maxlength="2000" required placeholder="看到这段回忆，想起了什么？"></textarea><button class="primary" type="submit">留在这一页</button><p class="form-error" role="alert"></p></form>`, 'detail-dialog');
   const dialog = modalRoot.querySelector('.detail-dialog');
+  if (!dialog) return;
   if (!entry.deletedAt && entry.type !== 'whisper') dialog.dataset.assistantArticle = entry.id;
   syncAssistant();
   if (commentId) {
@@ -867,17 +870,47 @@ document.addEventListener('submit', async event => {
   if (!['entry-form', 'settings-form', 'comment-form', 'login-form'].includes(form.id)) return;
   event.preventDefault();
   if (form.id === 'login-form' && loginPending) return;
+  if (form.id === 'entry-form' && form.hasAttribute('data-saving')) return;
   const submit = form.querySelector('[type="submit"]'); if (submit) submit.disabled = true;
   try {
     const data = Object.fromEntries(new FormData(form));
     if (form.id === 'entry-form') {
       const tags = editorTags.validatedTags();
       if (!tags) return;
-      const previous = editorId ? state.entries.find(e => e.id === editorId) : {};
+      const identity = state.currentUser.id;
+      const previous = editorId ? state.entries.find(entry => entry.id === editorId) : null;
+      const files = editorAttachments.filter(item => item.kind === 'file').map(item => item.file);
+      const media = editorAttachments.filter(item => item.kind === 'media').map(item => item.media);
       let fileIndex = 0;
       const mediaOrder = editorAttachments.map(item => item.kind === 'media' ? { id: item.media.id } : { fileIndex: fileIndex++ });
-      const saved = await provider.saveEntry({ ...previous, title: data.title.trim(), content: data.content.trim(), type: data.type, occurredAt: `${data.occurredAt}:00+08:00`, mood: data.mood || null, tags, media: editorAttachments.filter(item => item.kind === 'media').map(item => item.media), mediaOrder }, editorAttachments.filter(item => item.kind === 'file').map(item => item.file));
-      sessionStorage.removeItem(`memory-draft:${CONFIG.mode}:${state.currentUser.id}`); closeModal(false); render(); toast(saved?.cleanupWarning || (editorId ? '细节已经好好收好了。' : '这一刻，已经留住了。'));
+      const locked = [...form.closest('dialog').querySelectorAll('.editor-layout, .editor-tags, .delete-entry, .dialog-close')].filter(element => !element.inert);
+      const draftStatus = form.querySelector('#draft-status'), previousLabel = submit.innerHTML;
+      clearTimeout(draftTimer); persistDraft();
+      const previousStatus = draftStatus.textContent;
+      form.dataset.saving = '';
+      locked.forEach(element => { element.inert = true; });
+      form.querySelector('#form-error').textContent = '';
+      submit.textContent = files.length ? '正在上传附件…' : '正在保存…';
+      submit.setAttribute('aria-busy', 'true');
+      draftStatus.classList.add('sr-only');
+      draftStatus.textContent = submit.textContent;
+      let saved;
+      try {
+        saved = await provider.saveEntry({ ...previous, title: data.title.trim(), content: data.content.trim(), type: data.type,
+          occurredAt: `${data.occurredAt}:00+08:00`, mood: data.mood || null, tags, media, mediaOrder }, files);
+      } finally {
+        if (form.isConnected) {
+          delete form.dataset.saving;
+          locked.forEach(element => { element.inert = false; });
+          submit.innerHTML = previousLabel;
+          submit.removeAttribute('aria-busy');
+          draftStatus.classList.remove('sr-only');
+          draftStatus.textContent = previousStatus;
+        }
+      }
+      if (!form.isConnected || state.currentUser?.id !== identity) return;
+      sessionStorage.removeItem(`memory-draft:${CONFIG.mode}:${identity}`);
+      closeModal(false); render(); toast(saved?.cleanupWarning || (previous ? '细节已经好好收好了。' : '这一刻，已经留住了。'));
       if (!previous?.id && ['note', 'event'].includes(data.type) && state.currentUser.role === 'member') pointsUi?.refreshSummary();
     } else if (form.id === 'settings-form') {
       if (!state.currentUser) throw new Error('请先登录。');
@@ -906,7 +939,16 @@ document.addEventListener('submit', async event => {
       }
       form.reset(); render(); openLinkedEntry();
     }
-  } catch (error) { if (!state.currentUser && form.id !== 'login-form') { clearDrafts(); closeModal(false); render(); toast('登录已失效，请重新登录。', true); } else { const target = form.id === 'login-form' ? document.querySelector('#login-form .form-error') : form.querySelector('.form-error'); if (target) target.textContent = error.message; else toast(error.message, true); } }
+  } catch (error) {
+    if (form.id === 'entry-form' && !form.isConnected) return;
+    if (!state.currentUser && form.id !== 'login-form') {
+      clearDrafts(); closeModal(false); render(); toast('登录已失效，请重新登录。', true);
+    } else {
+      const target = form.id === 'login-form' ? document.querySelector('#login-form .form-error')
+        : form.querySelector(form.id === 'entry-form' ? '#form-error' : '.form-error');
+      if (target) target.textContent = error.message; else toast(error.message, true);
+    }
+  }
   finally { if (submit?.isConnected) submit.disabled = form.id === 'login-form' ? !loginVerification?.getToken() : false; }
 });
 window.addEventListener('hashchange', () => {

@@ -2,6 +2,13 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 30, date: '2026-11-22', version: 'v0.17.6', title: '延长记录附件上传时限',
+    changes: [
+      '记录中的图片和视频每个文件最多可上传 10 分钟，修复慢速上传在 30 秒被提前中止的问题。',
+      '保存时显示附件正在上传，超时后保留当前编辑内容并提示重试。',
+    ],
+  },
+  {
     number: 29, date: '2026-11-21', version: 'v0.17.5', title: '农历纪念日与日历标记',
     changes: [
       '纪念日支持公历、农历和闰月。填写农历时显示对应的公历日期，可按农历每年重复。',

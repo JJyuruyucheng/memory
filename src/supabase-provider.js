@@ -273,7 +273,10 @@ export function createSupabaseProvider(config = {}) {
         mediaRow(reserved, { id: entryId, authorId }, new Set(state.users.map(value => value.id)));
         if (reserved.status !== 'pending' || reserved.attached) throw invalid();
         const reservation = reserved; addedMedia.push(reservation);
-        await result(client.storage.from(bucket).upload(reservation.storagePath, file, { contentType: file.type, upsert: false, cacheControl: '0' }), expected);
+        await result(client.storage.from(bucket).upload(reservation.storagePath, file, { contentType: file.type, upsert: false, cacheControl: '0' }), expected, {
+          getError: error => (error.originalError ?? error).name === 'TimeoutError'
+            ? new SupabaseProviderError('附件上传超过 10 分钟。请检查网络后重试。', 'UPLOAD_TIMEOUT') : null,
+        });
         const ready = await result(query(client.rpc('finalize_media', { p_media_id: reservation.id })), expected);
         if (ready?.id !== reservation.id || ready.status !== 'ready' || ready.attached) throw invalid();
     }
@@ -297,7 +300,8 @@ export function createSupabaseProvider(config = {}) {
       if (expected === generation && !publicationAttempted) for (const added of [...addedMedia].reverse()) {
         try { await removeMedia(added, expected); } catch { /* Preserve registrations when physical removal could not be confirmed. */ }
       }
-      const partial = new SupabaseProviderError('保存未完整完成，部分文字或附件可能已改变。请刷新核对后再重试。', 'PARTIAL_SAVE', error.status || 0);
+      const message = error.code === 'UPLOAD_TIMEOUT' ? error.message : '保存未完整完成，部分文字或附件可能已改变。请刷新核对后再重试。';
+      const partial = new SupabaseProviderError(message, 'PARTIAL_SAVE', error.status || 0);
       partial.causeCode = error.code; throw partial;
     }
   }

@@ -4,7 +4,7 @@
 
 本项目独立保存在唯一目标仓库 [JJyuruyucheng/memory](https://github.com/JJyuruyucheng/memory)，源代码与部署配置均在该仓库内维护。
 
-源码版本 **v0.17.5**。纪念日支持公历和农历，首页月历可打开当天的纪念日。农历换算覆盖农历 1900 至 2100 年，使用 [lunar-javascript v1.7.8](https://github.com/6tail/lunar-javascript/releases/tag/v1.7.8) 的月历数据。详见 [修改日志](CHANGELOG.md)、[v0.7.0 验证记录](docs/release-v0.7.0.md) 和 [照片协议](docs/login-photos.md)。
+源码版本 **v0.17.6**。记录附件每个文件最多可上传 10 分钟。纪念日支持公历和农历，首页月历可打开当天的纪念日。农历换算覆盖农历 1900 至 2100 年，使用 [lunar-javascript v1.7.8](https://github.com/6tail/lunar-javascript/releases/tag/v1.7.8) 的月历数据。详见 [修改日志](CHANGELOG.md)、[v0.7.0 验证记录](docs/release-v0.7.0.md) 和 [照片协议](docs/login-photos.md)。
 
 **[Cloudflare 正式入口：朝夕](https://memory-awv.pages.dev/)** 已上线；用户已确认使用 `xbl` 完成真实 Turnstile 与口令登录并进入时间线。原生 Auth 已拒绝缺失和伪造验证码，真实用户 JWT 下的记录与私有图片权限探针也已通过。真实验证码 token 的过期与重放拒绝仍待专项验收。[GitHub Pages](https://jjyuruyucheng.github.io/memory/) 继续作为 `preview`：不加载记录、不提交真实口令，也没有跳过登录入口。
 
