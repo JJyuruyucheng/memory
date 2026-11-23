@@ -41,7 +41,7 @@ export async function createBrowserSupabaseClient(config) {
     globalThis.dispatchEvent(new Event('memory:session-ended'));
     globalThis.location.reload();
   };
-  const storage = createRememberedSessionStorage({ storage: browserStorage, key: storageKey, onExpired: reopen, onExternalChange: reopen });
+  const storage = createRememberedSessionStorage({ storage: browserStorage, key: storageKey, onExternalChange: reopen });
   client = sdk.createClient(config.supabaseUrl, config.supabasePublishableKey, {
     auth: { storage, storageKey, persistSession: true, detectSessionInUrl: false, autoRefreshToken: true },
     global: { fetch: createServiceFetch(config.supabaseUrl), headers: { 'X-Client-Info': 'chaoxi-memory/0.6' } },

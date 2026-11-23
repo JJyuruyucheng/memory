@@ -16,9 +16,9 @@ const articles = [
 ];
 
 function request(options = {}) {
-  const { method = 'POST', body = payload, site = origin, authorized = true, headers = {} } = options;
+  const { method = 'POST', body = payload, site = origin, authorized = true, headers = {}, signal } = options;
   return new Request(`${origin}/api/assistant`, {
-    method, headers: { 'Content-Type': 'application/json', ...(site ? { Origin: site } : {}),
+    method, signal, headers: { 'Content-Type': 'application/json', ...(site ? { Origin: site } : {}),
       ...(authorized ? { Authorization: `Bearer ${token}` } : {}), ...headers },
     ...(method === 'POST' ? { body: typeof body === 'string' ? body : JSON.stringify(body) } : {}),
   });
@@ -111,8 +111,8 @@ test('经成员认证后才返回公开索引和回复，历史和来源经过�
   const privateRequest = await handle(request({ body: { messages: followUp, articleSlug: 'private-draft' } }), { ...env, OPENAI_MODEL: 'test-model' });
   assert.deepEqual((await privateRequest.json()).sources, []);
   assert.deepEqual(upstream[1].input, followUp);
-  assert.equal(upstream[1].model, 'test-model');
-  assert.match(upstream[1].instructions, /test-model/);
+  assert.equal(upstream[1].model, 'gpt-6.1-terra', 'an absent configured preference cannot override a confirmed model catalog');
+  assert.match(upstream[1].instructions, /gpt-6\.1-terra/);
 });
 
 test('拒绝客户端指定角色、模型、文章内容及越界输入', async () => {
@@ -137,7 +137,8 @@ test('限流拒绝并发重复提交，过期后允许再次请求', async () =>
   const active = new Promise(resolve => { began = resolve; });
   const delayed = new Promise(resolve => { release = resolve; });
   let calls = 0;
-  const { handle } = setup({ now: () => time, fetchOpenAI: async () => {
+  const { handle } = setup({ now: () => time, fetchOpenAI: async url => {
+    if (url.endsWith('/models')) return Response.json({ data: [{ id: 'gpt-6.1-terra' }] });
     if (++calls === 1) { began(); await delayed; }
     return respond();
   } });
@@ -161,7 +162,7 @@ test('未配置、额度不足、服务超时及空答复发送本地化错误',
   assert.deepEqual(missing.upstream, []);
   for (const [fetchOpenAI, code] of [
     [async () => Response.json({ error: { code: 'insufficient_quota', message: 'upstream-diagnostics' } }, { status: 429 }), 'OPENAI_QUOTA'],
-    [async () => Response.json({}, { status: 401 }), 'OPENAI_CONFIGURATION'],
+    [async () => Response.json({}, { status: 401 }), 'OPENAI_AUTHENTICATION'],
     [async () => Response.redirect('https://unexpected.example/'), 'OPENAI_UNAVAILABLE'],
     [async () => { throw new DOMException('upstream-diagnostics', 'TimeoutError'); }, 'OPENAI_TIMEOUT'],
     [async () => respond(''), 'EMPTY_REPLY'],
@@ -171,6 +172,138 @@ test('未配置、额度不足、服务超时及空答复发送本地化错误',
     assert.equal(value.error.code, code);
     assert.ok(!value.error.message.includes('upstream-diagnostics'));
   }
+});
+
+test('成功模型目录只广告交集，缺席偏好使用首个可用模型，没有交集时不猜测', async () => {
+  for (const [listed, expected] of [
+    [['gpt-5-mini', 'unconfigured-model'], { models: ['gpt-5-mini'], defaultModel: 'gpt-5-mini' }],
+    [['unconfigured-model'], { models: [], defaultModel: '' }],
+  ]) {
+    const generated = [];
+    const { handle } = setup({ fetchOpenAI: async (url, options) => {
+      if (url.endsWith('/models')) return Response.json({ data: listed.map(id => ({ id })) });
+      generated.push(JSON.parse(options.body).model); return respond();
+    } });
+    const catalog = await (await handle(request({ method: 'GET' }), env)).json();
+    assert.deepEqual({ models: catalog.models, defaultModel: catalog.defaultModel }, expected);
+    const response = await handle(request(), env);
+    if (expected.models.length) {
+      assert.equal(response.status, 200); assert.deepEqual(generated, ['gpt-5-mini']);
+      assert.equal((await response.json()).model, 'gpt-5-mini');
+    } else {
+      assert.equal((await response.json()).error.code, 'MODEL_UNAVAILABLE'); assert.deepEqual(generated, []);
+    }
+  }
+});
+
+test('模型目录不受支持或暂不可用时只展示配置默认，不假称其他模型可用', async () => {
+  for (const listing of [async () => Response.json({}, { status: 403 }), async () => { throw new TypeError('synthetic unavailable'); }]) {
+    const { handle } = setup({ fetchOpenAI: listing });
+    const value = await (await handle(request({ method: 'GET' }), { ...env, OPENAI_MODEL: 'gpt-5-mini' })).json();
+    assert.deepEqual(value.models, ['gpt-5-mini']); assert.equal(value.defaultModel, 'gpt-5-mini');
+  }
+});
+
+test('明确模型拒绝只回退一次，保留输入与总超时并返回实际模型', async () => {
+  for (const [status, error] of [[404, { code: 'model_not_found' }], [400, { code: 'unsupported_model' }], [403, { code: 'forbidden', param: 'model' }]]) {
+    const attempts = [], signals = [];
+    const { handle } = setup({ fetchOpenAI: async (url, options) => {
+      if (url.endsWith('/models')) return Response.json({ data: [{ id: 'gpt-6.1-terra' }, { id: 'gpt-5-mini' }] });
+      attempts.push(JSON.parse(options.body)); signals.push(options.signal);
+      return attempts.length === 1 ? Response.json({ error: { ...error, message: 'private upstream diagnostics' } }, { status }) : respond('回退后成功。');
+    } });
+    const response = await handle(request({ body: { ...payload, model: 'gpt-5-mini' } }), env);
+    const value = await response.json();
+    assert.equal(response.status, 200); assert.equal(value.model, 'gpt-6.1-terra');
+    assert.deepEqual(attempts.map(value => value.model), ['gpt-5-mini', 'gpt-6.1-terra']);
+    assert.deepEqual(attempts[0].input, attempts[1].input); assert.equal(signals[0], signals[1]);
+    assert.match(attempts[1].instructions, /gpt-6\.1-terra/);
+    assert.ok(!JSON.stringify(value).includes('private upstream diagnostics'));
+  }
+});
+
+test('默认模型失效可使用已确认的替代，但不循环尝试所有模型', async () => {
+  const attempts = [];
+  const { handle } = setup({ fetchOpenAI: async (url, options) => {
+    if (url.endsWith('/models')) return Response.json({ data: [{ id: 'gpt-6.1-terra' }, { id: 'gpt-6.2-sol' }, { id: 'gpt-5-mini' }] });
+    attempts.push(JSON.parse(options.body).model);
+    return Response.json({ error: { code: 'model_not_found', message: 'never expose' } }, { status: 404 });
+  } });
+  const result = await handle(request(), env);
+  assert.equal((await result.json()).error.code, 'MODEL_UNAVAILABLE');
+  assert.deepEqual(attempts, ['gpt-6.1-terra', 'gpt-6.2-sol']);
+});
+
+test('回退优先选择本密钥曾成功且仍在目录中的模型', async () => {
+  const attempts = [];
+  const { handle } = setup({ fetchOpenAI: async (url, options) => {
+    if (url.endsWith('/models')) return Response.json({ data: [{ id: 'gpt-6.1-terra' }, { id: 'gpt-6.2-sol' }, { id: 'gpt-5-mini' }] });
+    const model = JSON.parse(options.body).model; attempts.push(model);
+    return model === 'gpt-6.1-terra' ? Response.json({ error: { code: 'model_not_found' } }, { status: 404 }) : respond();
+  } });
+  assert.equal((await handle(request({ body: { ...payload, model: 'gpt-5-mini' } }), env)).status, 200);
+  const response = await handle(request(), env);
+  assert.equal((await response.json()).model, 'gpt-5-mini');
+  assert.deepEqual(attempts, ['gpt-5-mini', 'gpt-6.1-terra', 'gpt-5-mini']);
+});
+
+test('密钥、额度、限流、普通403及超时不触发模型回退，错误不泄漏上游原文', async () => {
+  const cases = [
+    [401, { code: 'invalid_api_key', param: 'model' }, 'OPENAI_AUTHENTICATION'],
+    [429, { code: 'insufficient_quota' }, 'OPENAI_QUOTA'],
+    [429, { code: 'credit_balance_exhausted' }, 'OPENAI_QUOTA'],
+    [429, { code: 'rate_limit_exceeded' }, 'OPENAI_LIMIT'],
+    [403, { code: 'unsupported_country_region_territory' }, 'OPENAI_ACCESS_DENIED'],
+    [404, { code: 'not_found' }, 'OPENAI_UNAVAILABLE'],
+    [503, { code: 'server_is_overloaded' }, 'OPENAI_UNAVAILABLE'],
+    [0, null, 'OPENAI_TIMEOUT'],
+  ];
+  for (const [status, error, expected] of cases) {
+    let calls = 0;
+    const { handle } = setup({ fetchOpenAI: async url => {
+      if (url.endsWith('/models')) return Response.json({ data: [{ id: 'gpt-6.1-terra' }, { id: 'gpt-5-mini' }] });
+      calls++;
+      if (!status) throw new DOMException('private upstream diagnostics', 'TimeoutError');
+      return Response.json({ error: { ...error, message: 'private upstream diagnostics' } }, { status, headers: { 'Retry-After': '23' } });
+    } });
+    const response = await handle(request(), env), body = await response.json();
+    assert.equal(body.error.code, expected); assert.equal(calls, 1);
+    assert.ok(!JSON.stringify(body).includes('private upstream diagnostics'));
+    if ([429, 503].includes(status) && expected !== 'OPENAI_QUOTA') assert.equal(response.headers.get('Retry-After'), '23');
+  }
+});
+
+test('目录按密钥隔离缓存，轮换后不继续广告旧密钥的模型', async () => {
+  let calls = 0;
+  const { handle } = setup({ fetchOpenAI: async (_url, options) => {
+    calls++;
+    const model = options.headers.Authorization === 'Bearer test-key' ? 'gpt-6.1-terra' : 'gpt-5-mini';
+    return Response.json({ data: [{ id: model }] });
+  } });
+  const first = await (await handle(request({ method: 'GET' }), env)).json();
+  const second = await (await handle(request({ method: 'GET' }), { OPENAI_API_KEY: 'different-synthetic-key' })).json();
+  assert.deepEqual(first.models, ['gpt-6.1-terra']); assert.deepEqual(second.models, ['gpt-5-mini']); assert.equal(calls, 2);
+});
+
+test('限流的HTTP日期提示转换为有限等待秒数，异常提示不转发', async () => {
+  for (const [retry, expected] of [['Thu, 01 Jan 1970 00:01:00 GMT', '60'], ['not-a-delay', null], ['999999', null]]) {
+    const { handle } = setup({ now: () => 0, fetchOpenAI: async url => url.endsWith('/models')
+      ? Response.json({ data: [{ id: 'gpt-6.1-terra' }] })
+      : Response.json({ error: { code: 'rate_limit_exceeded' } }, { status: 429, headers: { 'Retry-After': retry } }) });
+    const result = await handle(request(), env);
+    assert.equal((await result.json()).error.code, 'OPENAI_LIMIT'); assert.equal(result.headers.get('Retry-After'), expected);
+  }
+});
+
+test('首次模型拒绝时预算已耗尽，不再发出回退请求', async () => {
+  const controller = new AbortController(); let calls = 0;
+  const { handle } = setup({ fetchOpenAI: async url => {
+    if (url.endsWith('/models')) return Response.json({ data: [{ id: 'gpt-6.1-terra' }, { id: 'gpt-5-mini' }] });
+    calls++; controller.abort(new DOMException('synthetic deadline', 'TimeoutError'));
+    return Response.json({ error: { code: 'model_not_found' } }, { status: 404 });
+  } });
+  const response = await handle(request({ signal: controller.signal }), env);
+  assert.equal((await response.json()).error.code, 'OPENAI_TIMEOUT'); assert.equal(calls, 1);
 });
 
 test('成员服务返回重定向时停止校验，不联系模型', async () => {

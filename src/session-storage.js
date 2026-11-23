@@ -1,88 +1,101 @@
-// This browser retains official Auth tokens for 30 absolute days, never passwords.
-// Only an explicit sign-in can open a new lease; refresh can only update that lease.
-export const REMEMBER_FOR_MS = 30 * 24 * 60 * 60 * 1000;
-
-export function createRememberedSessionStorage({ storage, key, now = Date.now, onExpired = () => {}, onExternalChange = () => {} }) {
-  const fallback = new Map();
-  let memoryOnly = !storage, timer, watching = false, target;
+// Supabase controls session validity. The local lease protects against stale
+// cross-tab writes after sign-out or a different sign-in.
+export function createRememberedSessionStorage({ storage, key, onExternalChange = () => {} }) {
+  // Keep the SDK's logical key so its refresh lock stays shared. The old app
+  // only knows the legacy location and cannot delete the migrated session.
+  const persistentKey = `${key}-persistent`;
+  let fallback = null, memoryOnly = !storage;
   let knownLease = null, mayStart = false, blocked = false, notified = false;
   const rawRead = () => {
-    if (memoryOnly) return fallback.get(key) ?? null;
-    try { return storage.getItem(key); } catch { memoryOnly = true; return fallback.get(key) ?? null; }
+    if (memoryOnly) return fallback;
+    try { return storage.getItem(persistentKey); } catch { memoryOnly = true; return fallback; }
   };
-  const rawRemove = () => { fallback.delete(key); if (!memoryOnly) try { storage.removeItem(key); } catch { /* Storage may be unavailable. */ } };
+  const rawRemove = () => { fallback = null; if (!memoryOnly) try { storage.removeItem(persistentKey); } catch { /* Storage may be unavailable. */ } };
   const rawWrite = value => {
     if (!memoryOnly) {
-      try { storage.setItem(key, value); return; }
-      catch { memoryOnly = true; try { storage.removeItem(key); } catch { /* No persisted stale refresh token when removal is possible. */ } }
+      try { storage.setItem(persistentKey, value); return; }
+      catch { memoryOnly = true; try { storage.removeItem(persistentKey); } catch { /* Storage may be unavailable. */ } }
     }
-    fallback.set(key, value);
+    fallback = value;
   };
   const sessionUser = value => {
     try { const session = JSON.parse(value); return typeof session?.access_token === 'string' && typeof session.refresh_token === 'string' && typeof session.user?.id === 'string' ? session.user.id : null; }
     catch { return null; }
   };
-  const fingerprint = record => `${record.leaseId}:${record.expiresAt}:${sessionUser(record.session)}`;
-  function invalidate(expired = false) {
-    blocked = true; mayStart = false; clearTimeout(timer);
-    if (!notified) { notified = true; queueMicrotask(() => { if (blocked) (expired ? onExpired : onExternalChange)(); }); }
+  function decode(raw) {
+    try {
+      const { version, leaseId, session } = JSON.parse(raw);
+      if (version === 1 && typeof leaseId === 'string' && leaseId && sessionUser(session)) return { version, leaseId, session };
+    } catch { /* Unrecognized data cannot be restored. */ }
+    return null;
+  }
+  if (!memoryOnly) {
+    try {
+      const legacy = storage.getItem(key);
+      if (legacy !== null) {
+        const record = decode(legacy);
+        if (record && rawRead() === null) rawWrite(JSON.stringify(record));
+        if (!memoryOnly) storage.removeItem(key);
+      }
+    } catch { /* Browser storage may be unavailable. */ }
+  }
+  const fingerprint = record => record && `${record.leaseId}:${sessionUser(record.session)}`;
+  function invalidate() {
+    blocked = true; mayStart = false;
+    if (!notified) { notified = true; queueMicrotask(() => { if (blocked) onExternalChange(); }); }
   }
   function read() {
     if (blocked) return null;
     const raw = rawRead();
     if (!raw) { if (knownLease && !mayStart) invalidate(); return null; }
-    let record;
-    try { record = JSON.parse(raw); } catch { rawRemove(); if (knownLease) invalidate(); return null; }
-    if (record?.version !== 1 || typeof record.leaseId !== 'string' || !record.leaseId || !Number.isSafeInteger(record.expiresAt) || record.expiresAt > now() + REMEMBER_FOR_MS || !sessionUser(record.session)) {
+    const record = decode(raw);
+    if (!record) {
       rawRemove(); if (knownLease) invalidate(); return null;
     }
-    if (record.expiresAt <= now()) { rawRemove(); invalidate(true); return null; }
     const lease = fingerprint(record);
     if (knownLease && knownLease !== lease && !mayStart) { invalidate(); return null; }
     knownLease = lease; return record;
   }
-  function schedule() {
-    clearTimeout(timer);
-    if (!watching) return;
-    const record = read();
-    if (record) { timer = setTimeout(schedule, Math.min(record.expiresAt - now() + 1, 2_147_483_647)); timer.unref?.(); }
-  }
-  const check = event => { if (!event || event.type !== 'storage' || event.key === key || event.key === null) schedule(); };
+  const check = event => { if (event.type !== 'storage' || event.key === persistentKey || event.key === null) read(); };
   return {
     getItem(name) { return name === key ? read()?.session ?? null : null; },
     setItem(name, value) {
       if (name !== key || !sessionUser(value) || blocked) return;
       let record;
       if (mayStart) {
-        record = { version: 1, leaseId: crypto.randomUUID(), expiresAt: now() + REMEMBER_FOR_MS, session: value };
+        record = { version: 1, leaseId: crypto.randomUUID(), session: value };
         mayStart = false; knownLease = fingerprint(record);
       } else {
         record = read();
         if (!record || blocked || fingerprint(record) !== knownLease || sessionUser(record.session) !== sessionUser(value)) return;
-        record.session = value; // Rotation never changes leaseId or expiresAt.
+        record.session = value; // Rotation never changes which sign-in owns the lease.
       }
-      rawWrite(JSON.stringify(record)); schedule();
+      rawWrite(JSON.stringify(record));
     },
     removeItem(name) {
       if (name !== key) return;
       let ownsStoredLease = memoryOnly;
       if (!memoryOnly) {
         const raw = rawRead();
-        try { ownsStoredLease = !raw || (knownLease !== null && fingerprint(JSON.parse(raw)) === knownLease); }
-        catch { ownsStoredLease = false; }
+        ownsStoredLease = !raw || (knownLease !== null && fingerprint(decode(raw)) === knownLease);
       }
-      mayStart = false; blocked = true; knownLease = null; clearTimeout(timer);
-      if (ownsStoredLease) rawRemove(); else invalidate();
+      if (ownsStoredLease) {
+        if (!memoryOnly && knownLease !== null) {
+          // Do not restore a legacy copy written by a still-open older tab.
+          try { storage.removeItem(key); } catch { /* Storage may be unavailable. */ }
+        }
+        rawRemove();
+      }
+      mayStart = false; blocked = true; knownLease = null;
+      if (!ownsStoredLease) invalidate();
     },
-    beginSignIn() { blocked = false; notified = false; mayStart = true; knownLease = null; clearTimeout(timer); },
-    watch(eventTarget = globalThis) {
-      target = eventTarget; watching = true;
+    beginSignIn() { blocked = false; notified = false; mayStart = true; knownLease = null; },
+    watch(target = globalThis) {
       target.addEventListener?.('visibilitychange', check);
       target.addEventListener?.('pageshow', check);
       target.addEventListener?.('storage', check);
-      schedule();
+      read();
       return () => {
-        watching = false; clearTimeout(timer);
         target.removeEventListener?.('visibilitychange', check);
         target.removeEventListener?.('pageshow', check);
         target.removeEventListener?.('storage', check);

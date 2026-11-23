@@ -8,6 +8,7 @@ const WELCOME = `你好，我是${TITLE}。可以问我朝夕里的共享记录�
 const QUESTIONS = ['这篇文章讲了什么？', '这篇文章有哪些值得注意的点？'];
 const timeLabel = new Intl.DateTimeFormat('zh-CN', { timeZone: CONFIG.timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const models = { 'gpt-6.1-terra': 'GPT-6.1 Terra', 'gpt-6.2-sol': 'GPT-6.2 Sol', 'gpt-6-luna': 'GPT-6 Luna', 'gpt-5-mini': 'GPT-5 mini', 'gpt-4.1-mini': 'GPT-4.1 mini' };
+const modelName = id => Object.hasOwn(models, id) ? models[id] : id;
 const avatar = `<img src="${art('launcher')}" width="74" height="74" alt="" draggable="false" />`;
 
 export function mountAssistant(host, ask) {
@@ -74,6 +75,7 @@ export function mountAssistant(host, ask) {
     for (const button of quick.children) button.disabled = Boolean(pending);
     clear.disabled = !turn && !transcript.length && !input.value;
     send.disabled = Boolean(pending) || !input.value.trim();
+    select.disabled = Boolean(pending) || select.options.length < 2;
     form.setAttribute('aria-busy', String(Boolean(pending)));
   }
 
@@ -82,10 +84,11 @@ export function mountAssistant(host, ask) {
     loadingOptions = ask(null, { signal }).then(data => {
       options = data;
       if (data.models.length) {
-        select.replaceChildren(...data.models.map(id => new Option(Object.hasOwn(models, id) ? models[id] : id, id)));
-        select.value = data.defaultModel || data.models[0];
+        const current = select.value;
+        select.replaceChildren(...data.models.map(id => new Option(modelName(id), id)));
+        select.value = data.models.includes(current) ? current : data.defaultModel || data.models[0];
         select.title = select.value;
-        select.disabled = data.models.length < 2;
+        updateControls();
       }
     }).catch(() => {}).finally(() => { loadingOptions = null; });
   }
@@ -98,7 +101,7 @@ export function mountAssistant(host, ask) {
     retry.hidden = kind !== 'retry';
   }
 
-  function showMessage(role, content, sources = [], incomplete = false) {
+  function showMessage(role, content, sources = [], incomplete = false, fallbackModel = '') {
     const row = document.createElement('div');
     row.className = `tabby-message tabby-message-${role}`;
     const text = document.createElement('p');
@@ -107,6 +110,11 @@ export function mountAssistant(host, ask) {
     if (incomplete) {
       const note = document.createElement('small');
       note.textContent = '回复未完整返回，可以继续追问。';
+      row.append(note);
+    }
+    if (fallbackModel) {
+      const note = document.createElement('small');
+      note.textContent = `本次改用 ${modelName(fallbackModel)} 回复。`;
       row.append(note);
     }
     if (sources.length) {
@@ -147,6 +155,7 @@ export function mountAssistant(host, ask) {
     let answered = false;
     const attemptSignal = AbortSignal.any([attempt.signal, signal]);
     const messages = requestHistory(transcript, question);
+    const requestedModel = select.value || undefined;
     pending = attempt;
     empty.hidden = true;
     motion.setThinking(true);
@@ -154,11 +163,17 @@ export function mountAssistant(host, ask) {
     updateControls();
     scrollToLatest();
     try {
-      const { reply, sources, incomplete } = await ask({ messages, articleSlug: context, referenceSlug: previous,
-        model: select.value || undefined }, { signal: attemptSignal });
+      const { reply, sources, incomplete, model } = await ask({ messages, articleSlug: context, referenceSlug: previous,
+        model: requestedModel }, { signal: attemptSignal });
       if (attemptSignal.aborted || pending !== attempt) return;
+      if (model && model !== requestedModel) {
+        if (![...select.options].some(option => option.value === model)) select.add(new Option(modelName(model), model));
+        [...select.options].find(option => option.value === (requestedModel ?? ''))?.remove();
+        select.value = model;
+        select.title = model;
+      }
       transcript.push({ role: 'user', content: question }, { role: 'assistant', content: reply });
-      showMessage('assistant', reply, sources, incomplete);
+      showMessage('assistant', reply, sources, incomplete, requestedModel && model !== requestedModel ? model : '');
       answered = true;
       if (sources.length === 1 && sources[0].href.startsWith('#timeline?entry=')) referenceSlug = sources[0].href.slice(16);
       turn = null;

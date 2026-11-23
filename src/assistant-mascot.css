@@ -43,11 +43,11 @@
 .tabby-launcher[data-pose='annoyed'] .tabby-pose-annoyed { animation: tabby-flick .49s ease-in-out 3; }
 
 .tabby-snooze {
-  position: absolute; top: 30%; left: 21%; display: none; width: 38px; height: 30px;
-  color: var(--tabby-accent); font: 600 17px Georgia, serif;
+  position: absolute; bottom: 76%; left: 21%; z-index: 1; display: none; width: 38px; height: 30px;
+  color: var(--tabby-accent); font: 600 17px/1 Georgia, serif;
 }
 .tabby-snooze span { position: absolute; left: 0; bottom: 0; animation: tabby-snooze 2.8s ease-in-out infinite; }
-.tabby-snooze span + span { left: 13px; bottom: 8px; font-size: 20px; animation-delay: .75s; }
+.tabby-snooze span + span { left: 13px; bottom: 6px; font-size: 20px; animation-delay: .75s; }
 .tabby-launcher[data-pose='sleeping'] .tabby-snooze { display: block; }
 .tabby-launcher.is-dragging:not([data-dock]) .tabby-pose-active { opacity: 1; animation: none; transform: translateY(-4px) rotate(-5deg); }
 .tabby-launcher.is-dragging:not([data-dock]) :is(.tabby-pose-thinking, .tabby-pose-sleeping, .tabby-pose-annoyed, .tabby-motion, .tabby-snooze) { display: none; }
@@ -79,9 +79,9 @@
   66% { transform: rotate(5deg); }
 }
 @keyframes tabby-snooze {
-  0%, 100% { opacity: 0; transform: translate(-2px, 5px) scale(.8); }
+  0%, 100% { opacity: 0; transform: translate(-2px, 3px) scale(.8); }
   35% { opacity: .95; }
-  80% { opacity: 0; transform: translate(6px, -12px) scale(1.08); }
+  80% { opacity: 0; transform: translate(6px, -8px) scale(1.08); }
 }
 @keyframes tabby-peek {
   0%, 77%, 100% { transform: rotate(var(--peek-angle, 0deg)); }

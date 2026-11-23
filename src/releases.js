@@ -2,6 +2,14 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 32, date: '2026-11-23', version: 'v0.17.8', title: '长期登录与瓜子体验优化',
+    changes: [
+      '移除本设备的 30 天登录期限，已有有效会话可接续，令牌自动更新。',
+      '瓜子优化模型列表和错误提示。遇到明确的模型不可用错误时，可尝试一个可用的备用模型。',
+      '睡着后的 ZZZ 移到猫咪头顶上方。',
+    ],
+  },
+  {
     number: 31, date: '2026-11-23', version: 'v0.17.7', title: '小标签搜索与发帖趋势',
     changes: [
       '编辑记录时，已有小标签会随输入实时筛选，点选即可加入。',
