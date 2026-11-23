@@ -28,7 +28,7 @@ function respond(reply = '好呀。') {
   return Response.json({ status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: reply }] }] });
 }
 
-function setup({ account = 200, profiles = [ { id } ], entries = [], countResponse, ...overrides } = {}) {
+function setup({ account = 200, profiles = [ { id } ], entries = [], memories = [], currentVersions, countResponse, ...overrides } = {}) {
   const verified = [], upstream = [];
   const authorize = createSupabaseAssistantAuthorization(project, async (url, options) => {
     const target = new URL(url);
@@ -40,6 +40,10 @@ function setup({ account = 200, profiles = [ { id } ], entries = [], countRespon
     assert.equal(options.cache, undefined);
     verified.push(target.pathname);
     if (target.pathname === '/auth/v1/user') return Response.json({ id }, { status: account });
+    if (target.pathname === '/rest/v1/assistant_memories') {
+      const selected = target.searchParams.get('entry_id');
+      return Response.json(selected ? memories.filter(row => selected.includes(row.entry_id)) : memories);
+    }
     if (target.pathname === '/rest/v1/entries') {
       assert.equal(target.searchParams.get('status'), 'eq.published');
       assert.equal(target.searchParams.get('type'), 'in.(note,event)');
@@ -50,12 +54,16 @@ function setup({ account = 200, profiles = [ { id } ], entries = [], countRespon
         assert.equal(target.searchParams.get('limit'), '1');
         return countResponse ?? new Response(null, { headers: { 'Content-Range': '*/0' } });
       }
+      const selected = target.searchParams.get('id');
+      if (target.searchParams.get('select') === 'id,updatedAt') {
+        return Response.json((currentVersions ?? entries).filter(row => selected.includes(row.id)));
+      }
       // PostgREST also sees favorites and reactions as relationships to profiles.
       if (!target.searchParams.get('select').includes('author:profiles!entries_authorId_fkey(name)')) {
         return Response.json({ code: 'PGRST201' }, { status: 300 });
       }
-      const selected = target.searchParams.get('id');
       if (selected) return Response.json(entries.filter(row => selected.includes(row.id)));
+      if (target.searchParams.has('or')) return Response.json(entries);
       assert.ok(!target.searchParams.get('select').includes('content'));
       return Response.json(entries.map(({ content, ...row }) => row));
     }
@@ -375,7 +383,7 @@ test('按作者和标题读取共享记录，不发送悄悄话、草稿、回�
   const input = JSON.stringify(upstream[0].input);
   assert.match(input, /可分析的共享文字/u);
   assert.doesNotMatch(input, /wrong-author|private-whisper|unfinished-draft|deleted-text|irrelevant-private-media/);
-  assert.deepEqual(verified.slice(-2), ['/rest/v1/entries', '/rest/v1/entries']);
+  assert.deepEqual(verified.slice(-3), ['/rest/v1/entries', '/rest/v1/assistant_memories', '/rest/v1/entries']);
   const hidden = await handle(request({ body: { ...body, articleSlug: entries[2].id } }), env);
   assert.deepEqual((await hidden.json()).sources, []);
   assert.equal(upstream.length, 1);
@@ -393,10 +401,35 @@ test('从无标题的共享随记发起提问，短问题也读取所选正文�
   } }), env);
   assert.equal(response.status, 200);
   assert.deepEqual((await response.json()).sources, [{ title: '2026-11-19 的随记', href: `#timeline?entry=${selected.id}` }]);
-  assert.deepEqual(verified, ['/auth/v1/user', '/rest/v1/profiles', '/rest/v1/entries']);
+  assert.deepEqual(verified, ['/auth/v1/user', '/rest/v1/profiles', '/rest/v1/entries', '/rest/v1/assistant_memories']);
   const input = upstream[0].input[0].content;
   assert.match(input, /示例成员/u);
   assert.match(input, /朋友会不会带一张明信片/u);
+});
+
+test('按长期记忆主题检索，核对原文版本，并在来源失效时丢弃模型答复', async () => {
+  const entry = {
+    id: '20000000-0000-4000-8000-000000000001', authorId: id, title: '出门', author: { name: '示例成员' },
+    occurredAt: '2026-11-19T04:10:00Z', updatedAt: '2026-11-19T04:10:00+00:00', status: 'published', type: 'note',
+    deletedAt: null, content: '看了一眼长椅，等了很久。', tags: ['周末'],
+  };
+  const saved = { entry_id: entry.id, source_updated_at: entry.updatedAt, memory: { summary: '留意候鸟', themes: ['候鸟观察'], statedFeelings: [] } };
+  const body = { page: 'timeline', messages: [{ role: 'user', content: '还记得我们以前的候鸟观察吗？' }] };
+  const normal = setup({ entries: [entry], memories: [saved] });
+  const result = await (await normal.handle(request({ body }), env)).json();
+  assert.deepEqual(result.sources, [{ title: '出门', href: `#timeline?entry=${entry.id}` }]);
+  assert.match(normal.upstream[0].input[0].content, /候鸟观察/u);
+  assert.match(normal.upstream[0].input[0].content, /看了一眼长椅/u);
+
+  const outdated = setup({ entries: [entry], memories: [{ ...saved, source_updated_at: '2026-11-18' }] });
+  const stale = await (await outdated.handle(request({ body: { ...body, articleSlug: entry.id } }), env)).json();
+  assert.equal(stale.sources.length, 1);
+  assert.doesNotMatch(outdated.upstream[0].input[0].content, /候鸟/u);
+
+  const removed = setup({ entries: [entry], memories: [saved], currentVersions: [] });
+  const withdrawn = await (await removed.handle(request({ body }), env)).json();
+  assert.deepEqual(withdrawn.sources, []);
+  assert.match(withdrawn.reply, /发生了变动/u);
 });
 
 test('实时天气只向天气服务查询城市和坐标，无需发送聊天记录', async () => {

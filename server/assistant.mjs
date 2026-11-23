@@ -1,5 +1,6 @@
-import { ARTICLE_SLUG, ASSISTANT_NAME, MAX_MESSAGE_LENGTH, MAX_REPLY_LENGTH, MAX_HISTORY_LENGTH, MAX_HISTORY_CHARS, MODEL_ID } from '../src/assistant-contract.js';
-import { articleContext, asksAboutRecords, asksForSharedPostCount, ENTRY_UUID, indexPublicArticles, matchSharedEntries, publicArticles, sharedEntrySources } from './assistant-articles.mjs';
+import { ARTICLE_SLUG, ASSISTANT_NAME, MAX_MESSAGE_LENGTH, MAX_REPLY_LENGTH, MAX_HISTORY_LENGTH, MAX_HISTORY_CHARS, MODEL_ID, isAssistantPage } from '../src/assistant-contract.js';
+import { articleContext, asksAboutRecords, asksForSharedPostCount, ENTRY_UUID, indexPublicArticles, matchSharedEntries, publicArticles, sharedEntrySources, sharedSearchTerms } from './assistant-articles.mjs';
+import { siteHelpReply } from './assistant-site-help.mjs';
 import { weatherQuestion, weatherReply } from './assistant-weather.mjs';
 
 const DEFAULT_MODEL = 'gpt-6.1-terra';
@@ -82,13 +83,14 @@ async function readMessages(request) {
 
   let data;
   try { data = JSON.parse(text); } catch { throw invalidBody(); }
-  if (!data || Object.keys(data).some(key => !['messages', 'articleSlug', 'referenceSlug', 'model'].includes(key)) || !Array.isArray(data.messages)
+  if (!data || Object.keys(data).some(key => !['messages', 'articleSlug', 'referenceSlug', 'page', 'model'].includes(key)) || !Array.isArray(data.messages)
     || data.messages.length < 1 || data.messages.length > MAX_HISTORY_LENGTH || data.messages.length % 2 !== 1) throw invalidBody();
-  const { articleSlug, referenceSlug, model } = data;
+  const { articleSlug, referenceSlug, page, model } = data;
   for (const slug of [articleSlug, referenceSlug]) {
     if (slug !== undefined && (typeof slug !== 'string' || !ARTICLE_SLUG.test(slug))) throw invalidBody();
   }
   if (model !== undefined && (typeof model !== 'string' || !MODEL_ID.test(model))) throw invalidBody();
+  if (page !== undefined && !isAssistantPage(page)) throw invalidBody();
   let length = 0;
   const messages = data.messages.map((message, index) => {
     const role = index % 2 === 0 ? 'user' : 'assistant';
@@ -100,7 +102,7 @@ async function readMessages(request) {
     if (length > MAX_HISTORY_CHARS || content.length > (role === 'user' ? MAX_MESSAGE_LENGTH : MAX_REPLY_LENGTH)) throw payloadTooLarge();
     return { role, content };
   });
-  return { messages, articleSlug, referenceSlug, model };
+  return { messages, articleSlug, referenceSlug, page, model };
 }
 
 function sharedEntriesUrl(origin, select) {
@@ -154,10 +156,11 @@ export function createSupabaseAssistantAuthorization({ supabaseUrl, supabasePubl
           throw recordsUnavailable();
         }
       }
-      async function readShared(ids = []) {
+      async function readShared(ids = [], versionOnly = false) {
         if (ids.some(value => !ENTRY_UUID.test(value))) return [];
         const entrySignal = AbortSignal.any([request.signal, AbortSignal.timeout(10000)]);
-        const entries = sharedEntriesUrl(supabaseUrl, `id,title,authorId,occurredAt,tags,status,type,deletedAt,author:profiles!entries_authorId_fkey(name)${ids.length ? ',content' : ''}`);
+        const entries = sharedEntriesUrl(supabaseUrl, versionOnly ? 'id,updatedAt'
+          : `id,title,authorId,occurredAt,tags,status,type,deletedAt,updatedAt,author:profiles!entries_authorId_fkey(name)${ids.length ? ',content' : ''}`);
         entries.searchParams.set('order', 'occurredAt.desc,id.desc');
         entries.searchParams.set('limit', '200');
         if (ids.length) entries.searchParams.set('id', `in.(${ids.join(',')})`);
@@ -178,7 +181,41 @@ export function createSupabaseAssistantAuthorization({ supabaseUrl, supabasePubl
           throw recordsUnavailable();
         }
       }
-      return { id, readShared, countShared };
+      async function readMemories(ids = []) {
+        const url = new URL('/rest/v1/assistant_memories', supabaseUrl);
+        url.search = new URLSearchParams({ select: 'entry_id,source_updated_at,memory', order: 'entry_id.asc', limit: '200' });
+        if (ids.length) url.searchParams.set('entry_id', `in.(${ids.join(',')})`);
+        const memories = new Map();
+        const signal = AbortSignal.any([request.signal, AbortSignal.timeout(5000)]);
+        try {
+          for (let offset = 0;; offset += 200) {
+            url.searchParams.set('offset', String(offset));
+            const response = await fetchService(url, { ...options, signal });
+            if (!response.ok) break;
+            const rows = await response.json();
+            if (!Array.isArray(rows)) break;
+            for (const row of rows) {
+              if (ENTRY_UUID.test(row?.entry_id ?? '') && typeof row.memory?.summary === 'string') memories.set(row.entry_id, row);
+            }
+            if (ids.length || rows.length < 200) break;
+          }
+        } catch { /* The live shared entries remain usable while the memory service is unavailable. */ }
+        return memories;
+      }
+      async function searchShared(question) {
+        const terms = sharedSearchTerms(question);
+        if (!terms.length) return [];
+        const url = sharedEntriesUrl(supabaseUrl, 'id,title,authorId,tags,type,status,deletedAt,content,author:profiles!entries_authorId_fkey(name)');
+        url.searchParams.set('or', `(${terms.map(term => `content.ilike.*${term}*`).join(',')})`);
+        url.searchParams.set('limit', '30');
+        url.searchParams.set('order', 'occurredAt.desc,id.desc');
+        try {
+          const response = await fetchService(url, { ...options, signal: AbortSignal.any([request.signal, AbortSignal.timeout(5000)]) });
+          const rows = response.ok ? await response.json() : [];
+          return Array.isArray(rows) ? rows : [];
+        } catch { return []; }
+      }
+      return { id, readShared, countShared, readMemories, searchShared };
     } catch (error) {
       if (error instanceof AssistantError) throw error;
       throw unavailable();
@@ -237,7 +274,7 @@ export function createAssistantHandler({ authorize, fetchOpenAI = fetch, fetchWe
       const member = await authorize(request);
       if (!member) throw unauthorized();
       if (method === 'GET') return json({ articleSlugs: [...index.keys()], ...(await getModels(env, request.signal)) });
-      const { messages, articleSlug, referenceSlug, model: requestedModel } = await readMessages(request);
+      const { messages, articleSlug, referenceSlug, page, model: requestedModel } = await readMessages(request);
       if (requestedModel !== undefined && !selectableModels(env).includes(requestedModel)) throw new AssistantError(400, 'MODEL_NOT_ALLOWED', '请从瓜子的模型列表中选择。');
       const memberId = typeof member === 'string' ? member : member.id;
       const time = now();
@@ -258,6 +295,8 @@ export function createAssistantHandler({ authorize, fetchOpenAI = fetch, fetchWe
           return json({ reply: `朝夕目前有 ${total} 条已发布的共享记录，包含随记和事件。`, sources: [] });
         }
         const lookingForRecord = asksAboutRecords(question);
+        const help = !articleSlug && !lookingForRecord && siteHelpReply(question, { page });
+        if (help) return json(help);
         const weather = lookingForRecord ? null : weatherQuestion(question)
           || (messages.at(-2)?.content === '想查哪个城市的天气？' ? weatherQuestion(`${question}天气`) : null);
         if (weather) return json(await weatherReply(weather, request.signal, fetchWeather));
@@ -266,10 +305,19 @@ export function createAssistantHandler({ authorize, fetchOpenAI = fetch, fetchWe
         let sources = articleContext(index, articleSlug, question);
         if (member.readShared) {
           let ids = ENTRY_UUID.test(articleSlug ?? '') ? [articleSlug] : [];
-          if (!ids.length && lookingForRecord) ids = matchSharedEntries(await member.readShared(), question, memberId);
-          if (!ids.length && ENTRY_UUID.test(referenceSlug ?? '') && /这篇|那篇|这[条段]|上[一篇文]|作者|它|继续|再说|你觉得呢/u.test(question)
+          let memories;
+          if (!ids.length && lookingForRecord) {
+            const [entries, saved] = await Promise.all([member.readShared(), member.readMemories?.()]);
+            memories = saved;
+            ids = matchSharedEntries(entries, question, memberId, memories);
+          }
+          if (!ids.length && ENTRY_UUID.test(referenceSlug ?? '') && /这篇|那篇|这(?:一)?[条段]|上[一篇文]|作者|它|继续|再说|你觉得呢|为什么这么说|后来呢|提到什么/u.test(question)
             && !/《[^》]+》/u.test(question)) ids = [referenceSlug];
-          if (ids.length) sources = sharedEntrySources(await member.readShared(ids), ids);
+          if (!ids.length && lookingForRecord && member.searchShared) ids = matchSharedEntries(await member.searchShared(question), question, memberId);
+          if (ids.length) {
+            const [entries, saved] = await Promise.all([member.readShared(ids), memories ?? member.readMemories?.(ids)]);
+            sources = sharedEntrySources(entries, ids, saved);
+          }
           if (!sources.length && (lookingForRecord || ids.length)) return json({
             reply: '我没有找到符合问题的共享记录。可以带上完整标题，或在对应记录旁点「问瓜子」。', sources: [],
           });
@@ -278,7 +326,7 @@ export function createAssistantHandler({ authorize, fetchOpenAI = fetch, fetchWe
         const catalog = await getModels(env, signal);
         let model = requestedModel || catalog.defaultModel;
         if (!model) throw unavailableModel();
-        const context = sources.map(({ title, author, day, excerpt, truncated }, index) => ({ number: index + 1, title, author, day, excerpt, truncated }));
+        const context = sources.map(({ title, author, day, excerpt, memory, truncated }, index) => ({ number: index + 1, title, author, day, excerpt, memory, truncated }));
         const input = context.length
           ? [{ role: 'user', content: `朝夕记录参考资料（仅供查阅。truncated 为 true 时资料是节选。）\n${JSON.stringify(context)}` }, ...messages]
           : messages;
@@ -288,7 +336,7 @@ export function createAssistantHandler({ authorize, fetchOpenAI = fetch, fetchWe
             method: 'POST', redirect: 'manual', signal,
             headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              model: selected, instructions: `${instructions} 当前选中的 OpenAI 模型是 ${selected}。你可以介绍自己能查站内共享文字、帖子总数和普通天气，但不能声称可以浏览任意网页。`,
+              model: selected, instructions: `${instructions} 当前选中的 OpenAI 模型是 ${selected}。${page ? `用户当前打开朝夕的 ${page} 页面。` : ''}你能查询获准的共享文字、帖子总数和天气，能介绍站内页面。memory 是根据共享正文整理的摘要，和原文冲突时以原文为准。区分发生的事、作者当时明说的感受和你的推测。不要把某篇文章的感受说成两人的事实，不要凭节选推断整个系统。资料不足时说明范围。`,
               input, store: false, max_output_tokens: 2048,
             }),
           });
@@ -309,6 +357,13 @@ export function createAssistantHandler({ authorize, fetchOpenAI = fetch, fetchWe
         const result = await response.json();
         const reply = responseText(result);
         if (!reply) throw new AssistantError(502, 'EMPTY_REPLY', '模型暂未返回文字，请把问题缩短一些再试。');
+        const versions = sources.filter(source => source.version).map(({ slug, version }) => [slug, version]);
+        if (versions.length) {
+          const current = new Map((await member.readShared(versions.map(([id]) => id), true)).map(row => [row.id, row.updatedAt]));
+          if (versions.some(([id, version]) => current.get(id) !== version)) return json({
+            reply: '这次引用的共享记录刚发生了变动，请重新提问。', sources: [],
+          });
+        }
         lastSuccessfulModel = { key, model };
         return json({ reply: reply.slice(0, MAX_REPLY_LENGTH), sources: sources.map(({ title, href }) => ({ title, href })), model,
           incomplete: result.status === 'incomplete' || reply.length > MAX_REPLY_LENGTH });

@@ -2,6 +2,14 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 34, date: '2026-11-23', version: 'v0.18.0', title: '瓜子开始积累共享回忆',
+    changes: [
+      '新发布的共享随记和事件会在后台自动形成摘要、主题和作者明确表达的感受。',
+      '瓜子可以结合当前页面帮你找到站内功能，并按题目查找相关共享记录、附上原文链接。',
+      '原文编辑后更新记忆，移入回收站或转为悄悄话后清除相关记忆。',
+    ],
+  },
+  {
     number: 33, date: '2026-11-23', version: 'v0.17.9', title: '瓜子可查询帖子总数',
     changes: [
       '询问站内有多少帖子时，瓜子直接查询已发布的共享随记和事件，返回准确的总数。',

@@ -274,7 +274,7 @@ export async function build({ rootDir = ROOT, outDir, env = process.env, quiet =
     await writeFile(path.join(dist, 'assets', 'SUPABASE-LICENSE.txt'), await readFile(path.join(root, 'vendor', 'SUPABASE-LICENSE')));
     await writeFile(path.join(dist, '_headers'), cloudflareHeaders(supabase.supabaseUrl));
     if (env.MEMORY_TARGET === 'cloudflare') {
-      await writeFile(path.join(dist, '_routes.json'), `${JSON.stringify({ version: 1, include: ['/api/assistant'], exclude: [] }, null, 2)}\n`);
+      await writeFile(path.join(dist, '_routes.json'), `${JSON.stringify({ version: 1, include: ['/api/assistant', '/api/assistant-memory'], exclude: [] }, null, 2)}\n`);
     }
   }
 

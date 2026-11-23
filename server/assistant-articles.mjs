@@ -8,7 +8,7 @@ const published = row => row?.status === 'published' && ['note', 'event'].includ
   && row.deletedAt === null && typeof row.id === 'string' && ENTRY_UUID.test(row.id);
 const quotedTitles = question => [...question.matchAll(/《([^》]{1,120})》/gu)].map(match => normalize(match[1]));
 export const asksAboutRecords = question => quotedTitles(question).length > 0
-  || /站内|朝夕.{0,6}(?:随记|记录|文章|帖子)|发的|发过|这篇|那篇|这[条段]|哪篇|记录[里中]|帖子[里中]|发表的|发布的|共享记录|(?:查找|搜索|找找|解读|分析|总结).{0,32}(?:文章|帖子|随记|记录|事件)/u.test(question);
+  || /站内|朝夕.{0,6}(?:随记|记录|文章|帖子)|发的|发过|这篇|那篇|这[条段]|哪篇|记录[里中]|帖子[里中]|发表的|发布的|共享(?:记录|回忆)|(?:查找|搜索|找找|解读|分析|总结|回顾).{0,32}(?:文章|帖子|随记|记录|事件|回忆)|(?:还记得|记不记得).{0,12}(?:以前|上次|那次|去过|我们|一起)|(?:我们|我).{0,6}(?:有没有|是否|曾经|以前).{0,8}(?:写过|提到|记过|记录过)/u.test(question);
 
 export function asksForSharedPostCount(question) {
   const text = question.normalize('NFKC').replace(/[\s,.。!?！？]/gu, '');
@@ -19,7 +19,7 @@ export function asksForSharedPostCount(question) {
     || /^(?:帖子|贴子|帖文|文章|共享记录|记录)的?(?:(?:总数|总量|数量)(?:(?:有|是)?多少)?|(?:一共|总共)?(?:有|是)?(?:多少|几[条篇个]))[了吗呢呀啊]*$/u.test(query);
 }
 
-export function sharedEntrySources(rows, ids) {
+export function sharedEntrySources(rows, ids, memories = new Map()) {
   const byId = new Map(rows.filter(published).map(row => [row.id, row]));
   let budget = 12_000;
   return ids.flatMap(id => {
@@ -29,16 +29,32 @@ export function sharedEntrySources(rows, ids) {
     const excerpt = content.slice(0, Math.min(8000, budget));
     budget -= excerpt.length;
     const day = String(row.occurredAt || '').slice(0, 10);
-    return [{ slug: id, title: row.title?.trim() || (day ? `${day} 的随记` : '随记'), author: row.author?.name?.slice(0, 60),
-      day, excerpt, truncated: excerpt.length < content.length, href: `#timeline?entry=${id}` }];
+    const saved = memories.get(id);
+    const memory = saved && saved.source_updated_at === row.updatedAt ? saved.memory : undefined;
+    return [{ slug: id, version: row.updatedAt, title: row.title?.trim() || (day ? `${day} 的随记` : '随记'), author: row.author?.name?.slice(0, 60),
+      day, excerpt, memory, truncated: excerpt.length < content.length, href: `#timeline?entry=${id}` }];
   });
 }
 
-export function matchSharedEntries(rows, question, memberId) {
+const genericTerms = new Set(terms('我们 他们 你们 之前 最近 以前 记得 回忆 共享 帖子 随记 记录 文章 发布 发表 查找 搜索 分析 总结 回顾 一些 哪些 什么 怎么 关于 一起 是不是 有没有 经历 当时 那次 帮我 瓜子 朝夕 系统'));
+
+function matchText(text, query) {
+  const available = terms(text);
+  return query.filter(word => available.has(word)).length;
+}
+
+export function sharedSearchTerms(question) {
+  if (quotedTitles(question).length) return [];
+  return [...terms(question)].filter(word => !genericTerms.has(word) && /^[\p{Script=Han}a-z0-9]{2,32}$/u.test(word)).slice(-12);
+}
+
+export function matchSharedEntries(rows, question, memberId, memories = new Map()) {
   const phrase = normalize(question), named = quotedTitles(question);
   const available = rows.filter(published);
   const names = [...new Set(available.map(row => normalize(row.author?.name)))].filter(name => name.length >= 2 && phrase.includes(name));
   const own = /我(?:发|写|记)的/u.test(question);
+  const query = [...terms(question)].filter(word => !genericTerms.has(word) && !names.some(name => name.includes(word)));
+  const browse = /(?:最近|最新).{0,6}(?:随记|记录|帖子|文章|动态)|(?:总结|回顾|汇总).{0,8}(?:最近|近期)/u.test(question);
   const matches = [];
   for (const row of available) {
     const author = normalize(row.author?.name);
@@ -48,7 +64,12 @@ export function matchSharedEntries(rows, question, memberId) {
     if (named.length && !exact) continue;
     const tag = Array.isArray(row.tags) && row.tags.map(normalize).some(value => value.length >= 2 && phrase.includes(value));
     const searchByAuthor = (own || names.length) && /(?:总结|汇总|最近|哪些|所有|找|发过)/u.test(question);
-    if (exact || tag || searchByAuthor) matches.push({ id: row.id, score: exact ? 100 + title.length : tag ? 20 : 10 });
+    const saved = memories.get(row.id);
+    const memory = saved && saved.source_updated_at === row.updatedAt ? saved.memory : undefined;
+    const themes = Array.isArray(memory?.themes) && memory.themes.map(normalize).some(value => value.length >= 2 && phrase.includes(value));
+    const related = matchText([row.title, row.content, memory?.summary, ...(memory?.statedFeelings ?? [])].filter(Boolean).join(' '), query);
+    const score = exact ? 100 + title.length : tag ? 40 : themes ? 30 : related >= 2 ? 12 + Math.min(related, 15) : searchByAuthor || browse ? 1 : 0;
+    if (score) matches.push({ id: row.id, score });
   }
   return matches.sort((a, b) => b.score - a.score).slice(0, 3).map(match => match.id);
 }

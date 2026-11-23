@@ -1,10 +1,10 @@
 import { icon } from './icons.js';
 import { CONFIG } from './config.js';
-import { ARTICLE_SLUG, ASSISTANT_NAME as TITLE, MAX_MESSAGE_LENGTH, requestHistory } from './assistant-contract.js';
+import { ARTICLE_SLUG, ASSISTANT_NAME as TITLE, MAX_MESSAGE_LENGTH, assistantContext, isAssistantPage, requestHistory } from './assistant-contract.js';
 import { mountAssistantPosition } from './assistant-position.js';
 import { mascotMarkup, mountAssistantMascot, tabbyArt as art } from './assistant-mascot.js';
 
-const WELCOME = `你好，我是${TITLE}。可以问我朝夕里的共享记录，也可以查天气。`;
+const WELCOME = `你好，我是${TITLE}。可以问我站内功能、共享记录，也可以查天气。`;
 const QUESTIONS = ['这篇文章讲了什么？', '这篇文章有哪些值得注意的点？'];
 const timeLabel = new Intl.DateTimeFormat('zh-CN', { timeZone: CONFIG.timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const models = { 'gpt-6.1-terra': 'GPT-6.1 Terra', 'gpt-6.2-sol': 'GPT-6.2 Sol', 'gpt-6-luna': 'GPT-6 Luna', 'gpt-5-mini': 'GPT-5 mini', 'gpt-4.1-mini': 'GPT-4.1 mini' };
@@ -65,7 +65,7 @@ export function mountAssistant(host, ask) {
   const select = root.querySelector('.tabby-model');
   const reference = root.querySelector('.tabby-context');
   const transcript = [];
-  let articleSlug = '', selectedRecord, referenceSlug, options, loadingOptions, turn, pending;
+  let articleSlug = '', currentPage, selectedRecord, referenceSlug, options, loadingOptions, turn, pending;
   const currentArticle = () => selectedRecord?.id || articleSlug;
 
   function updateControls() {
@@ -120,7 +120,7 @@ export function mountAssistant(host, ask) {
     if (sources.length) {
       const links = document.createElement('ol');
       links.className = 'tabby-sources';
-      links.setAttribute('aria-label', '参考文章');
+      links.setAttribute('aria-label', '参考链接');
       for (const { title, href } of sources) {
         const item = document.createElement('li');
         const link = document.createElement('a');
@@ -143,13 +143,14 @@ export function mountAssistant(host, ask) {
 
   function scrollToLatest() { conversation.scrollTop = conversation.scrollHeight; }
 
-  async function submit(question, contextSlug = currentArticle(), previous = referenceSlug) {
+  async function submit(question, contextSlug = currentArticle(), previous = referenceSlug, page = currentPage) {
     question = question.trim().slice(0, MAX_MESSAGE_LENGTH);
     if (!question || pending) return;
     const context = ARTICLE_SLUG.test(contextSlug ?? '') ? contextSlug : undefined;
-    if (turn?.question !== question || turn?.context !== context) {
+    const pageHint = isAssistantPage(page) ? page : undefined;
+    if (turn?.question !== question || turn?.context !== context || turn?.page !== pageHint) {
       turn?.node.remove();
-      turn = { question, context, previous, node: showMessage('user', question) };
+      turn = { question, context, previous, page: pageHint, node: showMessage('user', question) };
     }
     const attempt = new AbortController();
     let answered = false;
@@ -163,7 +164,7 @@ export function mountAssistant(host, ask) {
     updateControls();
     scrollToLatest();
     try {
-      const { reply, sources, incomplete, model } = await ask({ messages, articleSlug: context, referenceSlug: previous,
+      const { reply, sources, incomplete, model } = await ask({ messages, ...assistantContext({ page: pageHint, articleSlug: context, referenceSlug: previous }),
         model: requestedModel }, { signal: attemptSignal });
       if (attemptSignal.aborted || pending !== attempt) return;
       if (model && model !== requestedModel) {
@@ -172,7 +173,8 @@ export function mountAssistant(host, ask) {
         select.value = model;
         select.title = model;
       }
-      transcript.push({ role: 'user', content: question }, { role: 'assistant', content: reply });
+      transcript.push({ role: 'user', content: question }, { role: 'assistant', content: reply,
+        citesSharedRecord: sources.some(source => /^#timeline\?entry=/.test(source.href)) });
       showMessage('assistant', reply, sources, incomplete, requestedModel && model !== requestedModel ? model : '');
       answered = true;
       if (sources.length === 1 && sources[0].href.startsWith('#timeline?entry=')) referenceSlug = sources[0].href.slice(16);
@@ -237,7 +239,7 @@ export function mountAssistant(host, ask) {
     void submit(question);
   }, { signal });
   for (const button of quick.children) button.addEventListener('click', () => void submit(button.textContent), { signal });
-  retry.addEventListener('click', () => { if (turn) void submit(turn.question, turn.context || '', turn.previous); }, { signal });
+  retry.addEventListener('click', () => { if (turn) void submit(turn.question, turn.context || '', turn.previous, turn.page); }, { signal });
   clear.addEventListener('click', () => {
     pending?.abort();
     pending = null;
@@ -264,8 +266,9 @@ export function mountAssistant(host, ask) {
       updateControls();
       open();
     },
-    setContext(contextHost, slug) {
+    setContext(contextHost, slug, page = currentPage) {
       articleSlug = typeof slug === 'string' && ARTICLE_SLUG.test(slug) ? slug : '';
+      currentPage = isAssistantPage(page) ? page : undefined;
       if (root.parentElement !== contextHost) {
         const focused = root.contains(document.activeElement) && document.activeElement;
         contextHost.append(root);

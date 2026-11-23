@@ -133,7 +133,7 @@ function syncAssistant(locked = false) {
   backgroundMusic?.setScope(musicScope());
   backgroundMusic?.mountSettings(app.querySelector('#bgm-settings'), app.querySelector('#points-bgm-settings'));
   const article = identity && modalRoot.querySelector('.detail-dialog[open][data-assistant-article]');
-  assistant.setContext(article || assistantRoot, article?.dataset.assistantArticle);
+  assistant.setContext(article || assistantRoot, article?.dataset.assistantArticle, route());
   if (identity) pointsUi?.sync();
 }
 
