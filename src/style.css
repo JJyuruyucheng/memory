@@ -9,6 +9,7 @@
 @import url('./settings-layout.css');
 @import url('./points.css');
 @import url('./tag-distribution.css');
+@import url('./post-trend.css');
 @import url('./anniversary-calendar.css');
 .anniversary-page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .points-desktop-bell { position: absolute; top: 35px; right: 14px; }

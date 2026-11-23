@@ -27,7 +27,9 @@ export function mountEntryTags(root, { tags = [], tagText = '', onChange }) {
   const input = root.querySelector('#entry-tag-text');
   const chips = root.querySelector('.entry-tag-chips');
   const error = root.querySelector('#entry-tag-error');
-  const suggestions = root.querySelectorAll('[data-suggest-tag]');
+  const suggestions = [...root.querySelectorAll('[data-suggest-tag]')];
+  const library = root.querySelector('.entry-tag-suggestions');
+  const libraryLabel = root.querySelector('#entry-tag-library-label');
   const savedTags = Array.isArray(tags) ? tags.filter(tag => typeof tag === 'string') : [];
   let committed = [...new Set(savedTags.map(tag => tag.trim()).filter(Boolean))];
   let showError = false;
@@ -44,6 +46,22 @@ export function mountEntryTags(root, { tags = [], tagText = '', onChange }) {
     </span>`).join('');
     const current = new Set(committed);
     for (const button of suggestions) button.setAttribute('aria-pressed', String(current.has(button.dataset.suggestTag)));
+  }
+
+  function pendingQuery() {
+    return tagFromText(input.value.split(separators).at(-1)).toLowerCase();
+  }
+
+  function renderSuggestions() {
+    const query = pendingQuery();
+    const selected = new Set(committed.map(tag => tag.toLowerCase()));
+    const ranked = suggestions.map((button, index) => {
+      const tag = button.dataset.suggestTag.toLowerCase();
+      button.hidden = Boolean(query && (!tag.includes(query) || selected.has(tag)));
+      return { button, index, rank: !query || tag === query ? 0 : tag.startsWith(query) ? 1 : 2 };
+    }).sort((a, b) => a.rank - b.rank || a.index - b.index);
+    library?.append(...ranked.map(item => item.button));
+    if (libraryLabel) libraryLabel.textContent = query ? ranked.some(item => !item.button.hidden) ? '匹配标签' : '没有匹配标签' : '已有标签';
   }
 
   function values() {
@@ -67,6 +85,7 @@ export function mountEntryTags(root, { tags = [], tagText = '', onChange }) {
 
   function changed(chipsChanged = true) {
     if (chipsChanged) renderChips();
+    renderSuggestions();
     updateValidity();
     onChange();
   }
@@ -117,12 +136,18 @@ export function mountEntryTags(root, { tags = [], tagText = '', onChange }) {
     if (!button) return;
     if (button.dataset.suggestTag !== undefined) {
       const tag = button.dataset.suggestTag;
-      const index = committed.indexOf(tag);
-      if (index === -1) committed.push(tag);
-      else committed.splice(index, 1);
-      const pending = tagFromText(input.value);
-      if (pending === tag || (index === -1 && tag.startsWith(pending))) input.value = '';
+      if (pendingQuery()) {
+        const parts = input.value.split(separators); parts.pop();
+        add([...parts, tag]);
+        input.value = '';
+      } else {
+        const index = committed.indexOf(tag);
+        if (index === -1) committed.push(tag);
+        else committed.splice(index, 1);
+        if (index === -1) input.value = '';
+      }
       changed();
+      input.focus({ preventScroll: true });
     } else if (button.dataset.editTag !== undefined) {
       add(input.value.split(separators));
       editTag(Number(button.dataset.editTag));
@@ -134,6 +159,7 @@ export function mountEntryTags(root, { tags = [], tagText = '', onChange }) {
   });
 
   renderChips();
+  renderSuggestions();
   updateValidity();
   return {
     draft: () => ({ tags: [...committed], tagText: input.value }),

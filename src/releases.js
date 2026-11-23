@@ -2,6 +2,13 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 31, date: '2026-11-23', version: 'v0.17.7', title: '小标签搜索与发帖趋势',
+    changes: [
+      '编辑记录时，已有小标签会随输入实时筛选，点选即可加入。',
+      '时光统计新增两位成员的发帖趋势对比，默认按月查看近 6 个月，选择月份后每 7 天为一组。',
+    ],
+  },
+  {
     number: 30, date: '2026-11-22', version: 'v0.17.6', title: '延长记录附件上传时限',
     changes: [
       '记录中的图片和视频每个文件最多可上传 10 分钟，修复慢速上传在 30 秒被提前中止的问题。',
