@@ -1,5 +1,5 @@
 import { ARTICLE_SLUG, ASSISTANT_NAME, MAX_MESSAGE_LENGTH, MAX_REPLY_LENGTH, MAX_HISTORY_LENGTH, MAX_HISTORY_CHARS, MODEL_ID } from '../src/assistant-contract.js';
-import { articleContext, asksAboutRecords, ENTRY_UUID, indexPublicArticles, matchSharedEntries, publicArticles, sharedEntrySources } from './assistant-articles.mjs';
+import { articleContext, asksAboutRecords, asksForSharedPostCount, ENTRY_UUID, indexPublicArticles, matchSharedEntries, publicArticles, sharedEntrySources } from './assistant-articles.mjs';
 import { weatherQuestion, weatherReply } from './assistant-weather.mjs';
 
 const DEFAULT_MODEL = 'gpt-6.1-terra';
@@ -28,6 +28,7 @@ const json = (value, status = 200, headers = {}) => Response.json(value, {
 const invalidBody = () => new AssistantError(400, 'INVALID_INPUT', '请输入有效的聊天内容。');
 const payloadTooLarge = () => new AssistantError(413, 'INPUT_TOO_LONG', '消息过长，请缩短后发送。');
 const unauthorized = () => new AssistantError(401, 'SIGN_IN_REQUIRED', '请先登录朝夕后再使用助手。');
+const recordsUnavailable = () => new AssistantError(503, 'RECORDS_UNAVAILABLE', '共享记录暂时无法读取，请稍后重试。');
 const unavailableModel = () => new AssistantError(503, 'MODEL_UNAVAILABLE', '当前模型暂时不可用，请切换模型后重试。');
 
 async function upstreamProblem(response) {
@@ -102,6 +103,12 @@ async function readMessages(request) {
   return { messages, articleSlug, referenceSlug, model };
 }
 
+function sharedEntriesUrl(origin, select) {
+  const url = new URL('/rest/v1/entries', origin);
+  url.search = new URLSearchParams({ select, status: 'eq.published', type: 'in.(note,event)', deletedAt: 'is.null' }).toString();
+  return url;
+}
+
 export function createSupabaseAssistantAuthorization({ supabaseUrl, supabasePublishableKey, authReady }, fetchService = fetch) {
   if (!/^https:\/\/[a-z]{20}\.supabase\.co$/.test(supabaseUrl) || !/^sb_publishable_[A-Za-z0-9_-]{20,200}$/.test(supabasePublishableKey)) {
     throw new Error('AI 助手的成员校验尚未配置。');
@@ -129,14 +136,28 @@ export function createSupabaseAssistantAuthorization({ supabaseUrl, supabasePubl
       if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.id !== id) {
         throw new AssistantError(403, 'MEMBER_REQUIRED', '仅共同空间成员可使用助手。');
       }
-      return { id, readShared: async (ids = []) => {
+      async function countShared() {
+        const entries = sharedEntriesUrl(supabaseUrl, 'id');
+        entries.searchParams.set('limit', '1');
+        try {
+          const response = await fetchService(entries, {
+            ...options, method: 'HEAD', headers: { ...headers, Prefer: 'count=exact' },
+            signal: AbortSignal.any([request.signal, AbortSignal.timeout(10000)]),
+          });
+          if (response.status === 401) throw unauthorized();
+          const range = /^(?:\*|\d+-\d+)\/(\d+)$/.exec(response.headers.get('Content-Range') ?? '');
+          const total = range ? Number(range[1]) : NaN;
+          if (!response.ok || !Number.isSafeInteger(total)) throw recordsUnavailable();
+          return total;
+        } catch (error) {
+          if (error instanceof AssistantError) throw error;
+          throw recordsUnavailable();
+        }
+      }
+      async function readShared(ids = []) {
         if (ids.some(value => !ENTRY_UUID.test(value))) return [];
         const entrySignal = AbortSignal.any([request.signal, AbortSignal.timeout(10000)]);
-        const entries = new URL('/rest/v1/entries', supabaseUrl);
-        entries.searchParams.set('select', `id,title,authorId,occurredAt,tags,status,type,deletedAt,author:profiles!entries_authorId_fkey(name)${ids.length ? ',content' : ''}`);
-        entries.searchParams.set('status', 'eq.published');
-        entries.searchParams.set('type', 'in.(note,event)');
-        entries.searchParams.set('deletedAt', 'is.null');
+        const entries = sharedEntriesUrl(supabaseUrl, `id,title,authorId,occurredAt,tags,status,type,deletedAt,author:profiles!entries_authorId_fkey(name)${ids.length ? ',content' : ''}`);
         entries.searchParams.set('order', 'occurredAt.desc,id.desc');
         entries.searchParams.set('limit', '200');
         if (ids.length) entries.searchParams.set('id', `in.(${ids.join(',')})`);
@@ -154,9 +175,10 @@ export function createSupabaseAssistantAuthorization({ supabaseUrl, supabasePubl
           }
         } catch (error) {
           if (error instanceof AssistantError) throw error;
-          throw new AssistantError(503, 'RECORDS_UNAVAILABLE', '共享记录暂时无法读取，请稍后重试。');
+          throw recordsUnavailable();
         }
-      } };
+      }
+      return { id, readShared, countShared };
     } catch (error) {
       if (error instanceof AssistantError) throw error;
       throw unavailable();
@@ -230,6 +252,11 @@ export function createAssistantHandler({ authorize, fetchOpenAI = fetch, fetchWe
       usage.set(memberId, recent);
       try {
         const question = messages.at(-1).content;
+        if (asksForSharedPostCount(question)) {
+          if (!member.countShared) throw recordsUnavailable();
+          const total = await member.countShared();
+          return json({ reply: `朝夕目前有 ${total} 条已发布的共享记录，包含随记和事件。`, sources: [] });
+        }
         const lookingForRecord = asksAboutRecords(question);
         const weather = lookingForRecord ? null : weatherQuestion(question)
           || (messages.at(-2)?.content === '想查哪个城市的天气？' ? weatherQuestion(`${question}天气`) : null);
@@ -261,7 +288,7 @@ export function createAssistantHandler({ authorize, fetchOpenAI = fetch, fetchWe
             method: 'POST', redirect: 'manual', signal,
             headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              model: selected, instructions: `${instructions} 当前选中的 OpenAI 模型是 ${selected}。你可以介绍自己能查站内共享文字和普通天气，但不能声称可以浏览任意网页。`,
+              model: selected, instructions: `${instructions} 当前选中的 OpenAI 模型是 ${selected}。你可以介绍自己能查站内共享文字、帖子总数和普通天气，但不能声称可以浏览任意网页。`,
               input, store: false, max_output_tokens: 2048,
             }),
           });

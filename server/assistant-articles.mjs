@@ -10,6 +10,15 @@ const quotedTitles = question => [...question.matchAll(/《([^》]{1,120})》/gu
 export const asksAboutRecords = question => quotedTitles(question).length > 0
   || /站内|朝夕.{0,6}(?:随记|记录|文章|帖子)|发的|发过|这篇|那篇|这[条段]|哪篇|记录[里中]|帖子[里中]|发表的|发布的|共享记录|(?:查找|搜索|找找|解读|分析|总结).{0,32}(?:文章|帖子|随记|记录|事件)/u.test(question);
 
+export function asksForSharedPostCount(question) {
+  const text = question.normalize('NFKC').replace(/[\s,.。!?！？]/gu, '');
+  const query = text.replace(/^(?:瓜子|请问|请|麻烦|帮我(?:查一下|数一下|看一下)?|你看看?|(?:在)?(?:我们(?:的)?|这个|本)?(?:朝夕|系统|网站|站点|站内)(?:[上里内中])?|我们(?:的)?|截至目前|现在|目前|已经|一共|总共|总计|合计|共计|累计)+/u, '');
+  // Match the whole question so a date, author or tag qualifier cannot turn
+  // a narrower request into the site's overall total.
+  return /^(?:有|发了|发过|发表了|发布了|写了)?(?:几|多少)[条篇个]?(?:帖子|贴子|帖文|文章|共享记录|记录)[了吗呢呀啊]*$/u.test(query)
+    || /^(?:帖子|贴子|帖文|文章|共享记录|记录)的?(?:(?:总数|总量|数量)(?:(?:有|是)?多少)?|(?:一共|总共)?(?:有|是)?(?:多少|几[条篇个]))[了吗呢呀啊]*$/u.test(query);
+}
+
 export function sharedEntrySources(rows, ids) {
   const byId = new Map(rows.filter(published).map(row => [row.id, row]));
   let budget = 12_000;

@@ -2,6 +2,12 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 33, date: '2026-11-23', version: 'v0.17.9', title: '瓜子可查询帖子总数',
+    changes: [
+      '询问站内有多少帖子时，瓜子直接查询已发布的共享随记和事件，返回准确的总数。',
+    ],
+  },
+  {
     number: 32, date: '2026-11-23', version: 'v0.17.8', title: '长期登录与瓜子体验优化',
     changes: [
       '移除本设备的 30 天登录期限，已有有效会话可接续，令牌自动更新。',

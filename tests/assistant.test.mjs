@@ -28,7 +28,7 @@ function respond(reply = '好呀。') {
   return Response.json({ status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: reply }] }] });
 }
 
-function setup({ account = 200, profiles = [ { id } ], entries = [], ...overrides } = {}) {
+function setup({ account = 200, profiles = [ { id } ], entries = [], countResponse, ...overrides } = {}) {
   const verified = [], upstream = [];
   const authorize = createSupabaseAssistantAuthorization(project, async (url, options) => {
     const target = new URL(url);
@@ -44,6 +44,12 @@ function setup({ account = 200, profiles = [ { id } ], entries = [], ...override
       assert.equal(target.searchParams.get('status'), 'eq.published');
       assert.equal(target.searchParams.get('type'), 'in.(note,event)');
       assert.equal(target.searchParams.get('deletedAt'), 'is.null');
+      if (options.method === 'HEAD') {
+        assert.equal(options.headers.Prefer, 'count=exact');
+        assert.equal(target.searchParams.get('select'), 'id');
+        assert.equal(target.searchParams.get('limit'), '1');
+        return countResponse ?? new Response(null, { headers: { 'Content-Range': '*/0' } });
+      }
       // PostgREST also sees favorites and reactions as relationships to profiles.
       if (!target.searchParams.get('select').includes('author:profiles!entries_authorId_fkey(name)')) {
         return Response.json({ code: 'PGRST201' }, { status: 300 });
@@ -313,6 +319,44 @@ test('成员服务返回重定向时停止校验，不联系模型', async () =>
   assert.equal((await result.json()).error.code, 'MEMBER_CHECK_UNAVAILABLE');
   assert.deepEqual(verified, ['/auth/v1/user']);
   assert.deepEqual(upstream, []);
+});
+
+test('帖子总数从同一成员权限的共享记录精确查询，无需联系模型', async () => {
+  for (const question of ['你看我们的系统上，有多少帖子了', '瓜子，朝夕一共发布了几篇文章？', '站内帖子总数是多少', '目前有多少条共享记录']) {
+    const { handle, verified } = setup({
+      countResponse: new Response(null, { status: 206, headers: { 'Content-Range': '0-0/1234' } }),
+      fetchOpenAI: async () => assert.fail('a direct count must not call OpenAI'),
+    });
+    const result = await handle(request({ body: { messages: [{ role: 'user', content: question }] } }), {});
+    assert.equal(result.status, 200);
+    assert.deepEqual(await result.json(), { reply: '朝夕目前有 1234 条已发布的共享记录，包含随记和事件。', sources: [] });
+    assert.deepEqual(verified, ['/auth/v1/user', '/rest/v1/profiles', '/rest/v1/entries']);
+  }
+});
+
+test('零条、无效计数和失效会话分别处理', async () => {
+  const body = { messages: [{ role: 'user', content: '站内有多少帖子？' }] };
+  const empty = setup();
+  const emptyResult = await empty.handle(request({ body }), {});
+  assert.equal(emptyResult.status, 200);
+  assert.equal((await emptyResult.json()).reply, '朝夕目前有 0 条已发布的共享记录，包含随记和事件。');
+  const rejected = setup({ account: 401 });
+  assert.equal((await rejected.handle(request({ body }), {})).status, 401);
+  assert.deepEqual(rejected.verified, ['/auth/v1/user']);
+  for (const response of [new Response(null), new Response(null, { status: 503 }), new Response(null, { headers: { 'Content-Range': '0-0/*' } })]) {
+    const failing = setup({ countResponse: response });
+    const result = await failing.handle(request({ body }), {});
+    assert.equal(result.status, 503);
+    assert.equal((await result.json()).error.code, 'RECORDS_UNAVAILABLE');
+  }
+});
+
+test('带时间、作者或分类的提问不替换成全站总数', async () => {
+  for (const question of ['今天有多少帖子？', 'Bunny 发了几篇帖子？', '我发了多少帖子？', '有多少帖子带旅行标签？', '多少帖子才算活跃？']) {
+    const { handle } = setup({ countResponse: new Response(null, { headers: { 'Content-Range': '0-0/9876' } }) });
+    const value = await (await handle(request({ body: { messages: [{ role: 'user', content: question }] } }), env)).json();
+    assert.doesNotMatch(value.reply, /9876/);
+  }
 });
 
 test('按作者和标题读取共享记录，不发送悄悄话、草稿、回收站或附件', async () => {
