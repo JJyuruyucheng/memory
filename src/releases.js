@@ -2,6 +2,12 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 36, date: '2026-11-24', version: 'v0.18.2', title: '相册可查看原帖',
+    changes: [
+      '相册缩略图可打开附件预览，卡片下方与预览窗口都可进入对应原帖。',
+    ],
+  },
+  {
     number: 35, date: '2026-11-24', version: 'v0.18.1', title: '常用标签与卡片交互',
     changes: [
       '首页和记录弹窗的可选标签按使用次数从高到低排列。',

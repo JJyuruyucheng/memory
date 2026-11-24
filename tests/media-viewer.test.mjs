@@ -30,6 +30,9 @@ test('preview escapes user metadata and omits media/download sources for rejecte
   assert.ok(markup.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
   assert.ok(markup.includes('data-id="&quot; onclick=evil"'));
   assert.ok(markup.includes('download="script.png"'));
+  assert.ok(!markup.includes('查看原帖'));
+  const album = mediaViewerMarkup({ file: { type: 'image', url: './photo.png' }, entryId: '回忆&"1', linkToEntry: true }, base);
+  assert.ok(album.includes('href="#timeline?entry=%E5%9B%9E%E5%BF%86%26%221">查看原帖</a>'));
   const rejected = mediaViewerMarkup({ file: { type: 'image', url: 'https://other.example/a.png' } }, base);
   assert.ok(!rejected.includes('href='));
   assert.ok(!rejected.includes('<img'));

@@ -24,13 +24,14 @@ export function mediaDownloadName(value, type = 'image') {
   return `${Array.from(name).slice(0, 100).join('')}.${suffix}`;
 }
 
-export function mediaViewerMarkup({ file, title = '', date = '', index = 0, count = 1, entryId = '' }, base) {
+export function mediaViewerMarkup({ file, title = '', date = '', index = 0, count = 1, entryId = '', linkToEntry = false }, base) {
   const url = mediaViewerUrl(file?.url, base), video = file?.type === 'video';
   const download = url ? `<a class="media-viewer-download" href="${esc(url)}" download="${esc(mediaDownloadName(file?.name, file?.type))}">${icon('download')}<span>下载</span></a>` : '';
+  const entryLink = linkToEntry && entryId ? `<a class="media-viewer-post" href="#timeline?entry=${encodeURIComponent(entryId)}">查看原帖</a>` : '';
   return `<div class="media-viewer-stage ${video ? 'is-video' : ''}" data-media-stage ${video ? '' : 'tabindex="0" role="region" aria-label="图片预览，可缩放和拖动"'}>${url ? video ? `<video controls playsinline preload="metadata" src="${esc(url)}"></video>` : `<div class="media-viewer-canvas"><img class="media-viewer-image" src="${esc(url)}" alt="${esc(file?.name || title || '回忆照片')}" draggable="false" /></div>` : '<p class="media-viewer-invalid">这份附件暂时无法显示。</p>'}</div>
     <div class="media-viewer-toolbar">${!video && url ? `<div class="media-viewer-zoom" aria-label="图片缩放"><button type="button" data-viewer-action="zoom-out" aria-label="缩小图片" disabled><span aria-hidden="true">−</span></button><output data-media-scale aria-label="缩放比例">100%</output><button type="button" data-viewer-action="zoom-in" aria-label="放大图片" disabled>${icon('plus')}</button><button type="button" class="media-viewer-fit" data-viewer-action="reset" disabled>适应</button></div>` : ''}${download}</div>
     ${!video && url ? '<div class="media-viewer-status" role="status"><span data-media-message>正在准备缩放…</span><button type="button" data-viewer-action="retry" hidden>重试</button></div>' : ''}
-    <div class="media-viewer-caption"><div><strong>${esc(title || '日常的一帧')}</strong><small>${esc(date)} · ${index + 1} / ${count}</small></div><div class="media-viewer-navigation">${index > 0 ? `<button type="button" class="previous" data-action="media" data-id="${esc(entryId)}" data-index="${index - 1}" aria-label="上一张">${icon('chevron')}</button>` : ''}${index < count - 1 ? `<button type="button" data-action="media" data-id="${esc(entryId)}" data-index="${index + 1}" aria-label="下一张">${icon('chevron')}</button>` : ''}</div></div>`;
+    <div class="media-viewer-caption"><div><strong>${esc(title || '日常的一帧')}</strong><small>${esc(date)} · ${index + 1} / ${count}</small></div><div class="media-viewer-navigation">${entryLink}${index > 0 ? `<button type="button" class="previous" data-action="media" data-id="${esc(entryId)}" data-index="${index - 1}" aria-label="上一张">${icon('chevron')}</button>` : ''}${index < count - 1 ? `<button type="button" data-action="media" data-id="${esc(entryId)}" data-index="${index + 1}" aria-label="下一张">${icon('chevron')}</button>` : ''}</div></div>`;
 }
 
 const loadPanzoom = () => loadLocalScript({ url: new URL('../assets/panzoom-4.6.2.js', import.meta.url), read: () => typeof globalThis.Panzoom === 'function' ? globalThis.Panzoom : null, label: '图片缩放组件' });

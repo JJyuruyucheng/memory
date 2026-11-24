@@ -379,15 +379,20 @@ function renderAlbum() {
   const items = media.map(file => {
     const title = file.entry.title || '日常的一帧', video = file.type === 'video';
     const actionLabel = file.unavailable ? '重新加载附件' : video ? '播放视频' : '查看照片';
-    return `<button type="button" class="album-item${file.unavailable ? ' is-unavailable' : ''}" data-action="${file.unavailable ? 'retry-media' : 'media'}" data-id="${esc(file.entry.id)}" data-index="${file.index}" aria-label="${actionLabel}：${esc(title)}，${dateLabel(file.entry.occurredAt, true)}，第 ${file.index + 1} 个附件" title="${esc(title)}">
-      <span class="album-image-wrap">${file.unavailable
-        ? `<span class="media-unavailable">附件暂时无法加载<small>${esc(file.error || '检查网络后重试')}</small><span>点击重新加载</span></span>`
-        : video ? `<video class="album-photo" src="${safeUrl(file.url)}" preload="metadata" muted playsinline></video><span class="album-video-mark">${icon('play')}<span>视频</span></span>`
-          : `<img class="album-photo" src="${safeUrl(file.url)}" alt="${esc(file.name || title)}" loading="lazy" decoding="async" />`}
-        ${file.unavailable ? '' : `<span class="album-open-cue" aria-hidden="true">${video ? icon('play') : icon('photo')}<span>${actionLabel}</span></span>`}
-      </span>
-      <span class="album-caption"><span class="album-date-row"><time datetime="${esc(file.entry.occurredAt)}">${dateLabel(file.entry.occurredAt)}</time>${file.entry.media.length > 1 ? `<span class="album-position num" aria-hidden="true">${file.index + 1} / ${file.entry.media.length}</span>` : ''}</span><span class="album-title-row"><strong>${esc(title)}</strong>${icon('arrow', 'album-caption-arrow')}</span></span>
-    </button>`;
+    return `<div class="album-card">
+      <button type="button" class="album-item${file.unavailable ? ' is-unavailable' : ''}" data-action="${file.unavailable ? 'retry-media' : 'media'}" data-id="${esc(file.entry.id)}" data-index="${file.index}" aria-label="${actionLabel}：${esc(title)}，${dateLabel(file.entry.occurredAt, true)}，第 ${file.index + 1} 个附件">
+        <span class="album-image-wrap">${file.unavailable
+          ? `<span class="media-unavailable">附件暂时无法加载<small>${esc(file.error || '检查网络后重试')}</small><span>点击重新加载</span></span>`
+          : video ? `<video class="album-photo" src="${safeUrl(file.url)}" preload="metadata" muted playsinline></video><span class="album-video-mark">${icon('play')}<span>视频</span></span>`
+            : `<img class="album-photo" src="${safeUrl(file.url)}" alt="${esc(file.name || title)}" loading="lazy" decoding="async" />`}
+          ${file.unavailable ? '' : `<span class="album-open-cue" aria-hidden="true">${video ? icon('play') : icon('photo')}<span>${actionLabel}</span></span>`}
+        </span>
+      </button>
+      <div class="album-caption">
+        <div class="album-date-row"><time datetime="${esc(file.entry.occurredAt)}">${dateLabel(file.entry.occurredAt)}</time>${file.entry.media.length > 1 ? `<span class="album-position num" aria-hidden="true">${file.index + 1} / ${file.entry.media.length}</span>` : ''}</div>
+        <a class="album-source-link" href="#timeline?entry=${encodeURIComponent(file.entry.id)}" aria-label="查看原帖：${esc(title)}" title="${esc(title)}"><strong>${esc(title)}</strong><span class="album-source-action" aria-hidden="true">原帖${icon('arrow', 'album-caption-arrow')}</span></a>
+      </div>
+    </div>`;
   }).join('');
   return `${heading('光影里的我们', `${media.length} 个${filters.mediaType === 'video' ? '视频' : filters.mediaType === 'image' ? '照片' : '片段'}，把那天再看一遍。`)}<div class="album-toolbar album-collection-toolbar"><div class="segmented" aria-label="附件类型">${[['all', '全部'], ['image', '图片'], ['video', '视频']].map(([id, name]) => `<button data-action="filter-media" data-value="${id}" aria-pressed="${filters.mediaType === id}">${name}<span class="filter-count num">${counts[id]}</span></button>`).join('')}</div><label class="select-field">月份 <input id="filter-month" type="month" value="${esc(filters.month)}" /></label><button class="text-button" data-action="clear-filters">显示全部</button></div>${media.length ? `<div class="album-grid album-photo-wall">${items}</div>` : `<div class="empty-state"><h2>${allMedia.length ? '这个分类里还没有片段' : '照片会慢慢装满这里'}</h2><p>${allMedia.length ? '试试其他附件类型，或者记录一个新片段。' : '记录时选一张喜欢的照片或一段短视频吧。'}</p><button class="secondary" data-action="new">记录一个片段</button></div>`}`;
 }
@@ -637,7 +642,7 @@ document.addEventListener('keydown', event => {
   renderEditorPreviews();
   document.querySelector(`.preview-handle[data-key="${item.key}"]`)?.focus({ preventScroll: true });
 });
-function showDetail(id, commentId) {
+function showDetail(id, commentId, { focusHeading = false } = {}) {
   const entry = visibleEntries().find(e => e.id === id); if (!entry) return;
   const shared = pointsUi && state.currentUser.role === 'member' && !entry.deletedAt && entry.type !== 'whisper';
   const comments = entry.comments || [];
@@ -648,7 +653,7 @@ function showDetail(id, commentId) {
       <p>${esc(comment.content)}</p><div class="comment-actions"><time datetime="${esc(comment.createdAt)}">${dateLabel(comment.createdAt, true, true)}</time>
       ${shared && comment.authorId !== state.currentUser.id ? `<button type="button" class="text-button" data-action="reply-comment" data-id="${esc(comment.id)}">回复</button>` : ''}</div></div></div>`;
   }).join('');
-  openDialog(`<h2>${esc(entry.title || (entry.type === 'whisper' ? '给自己的一页' : '日常的一页'))}</h2><p class="dialog-description">${esc(user(entry.authorId).name)} · ${dateLabel(entry.occurredAt, true, true)}${entry.type === 'whisper' ? ' · 仅作者和管理员可见' : ''}</p><p class="detail-body">${renderEntryText(entry.title, entry.content)}</p>
+  openDialog(`<h2${focusHeading ? ' tabindex="-1" autofocus' : ''}>${esc(entry.title || (entry.type === 'whisper' ? '给自己的一页' : '日常的一页'))}</h2><p class="dialog-description">${esc(user(entry.authorId).name)} · ${dateLabel(entry.occurredAt, true, true)}${entry.type === 'whisper' ? ' · 仅作者和管理员可见' : ''}</p><p class="detail-body">${renderEntryText(entry.title, entry.content)}</p>
     ${comments.length ? `<section class="comments" aria-label="留言">${commentsMarkup}</section>` : ''}
     <form id="comment-form" data-id="${esc(id)}"><div class="comment-reply-target" hidden><span></span><button type="button" class="text-button" data-action="cancel-comment-reply">取消回复</button></div>
     <label class="sr-only" for="comment-content">留言内容</label><textarea id="comment-content" name="content" rows="2" maxlength="2000" required placeholder="看到这段回忆，想起了什么？"></textarea><button class="primary" type="submit">留在这一页</button><p class="form-error" role="alert"></p></form>`, 'detail-dialog');
@@ -687,12 +692,13 @@ async function openPointsNotification(item) {
 function openLinkedEntry() {
   if (!state.currentUser || route() !== 'timeline') return;
   const id = new URLSearchParams(location.hash.split('?')[1] || '').get('entry');
-  if (id && visibleEntries().some(entry => entry.id === id && !entry.deletedAt)) showDetail(id);
+  if (id && visibleEntries().some(entry => entry.id === id && !entry.deletedAt)) showDetail(id, undefined, { focusHeading: true });
 }
 function showMedia(id, index = 0) {
   const entry = visibleEntries().find(e => e.id === id), file = entry?.media[index]; if (!file) return;
   if (file.unavailable) { toast('这份附件暂时无法加载，请刷新页面重试。', true); return; }
-  openDialog(mediaViewerMarkup({ file, title: entry.title, date: dateLabel(entry.occurredAt, true, true), index, count: entry.media.length, entryId: id }), 'media-viewer');
+  openDialog(mediaViewerMarkup({ file, title: entry.title, date: dateLabel(entry.occurredAt, true, true), index,
+    count: entry.media.length, entryId: id, linkToEntry: route() === 'album' }), 'media-viewer');
   const dialog = modalRoot.querySelector('dialog');
   dialog.setAttribute('aria-label', `${file.type === 'video' ? '视频' : '图片'}预览`);
   mediaViewer = mountMediaViewer(dialog);
@@ -986,7 +992,7 @@ document.addEventListener('submit', async event => {
 window.addEventListener('hashchange', () => {
   if (bootPending || (!provider && CONFIG.mode !== 'preview')) return;
   clearTimeout(searchTimer);
-  if (modalRoot.querySelector('.search-dialog, .feed-date-dialog, .detail-dialog, .trash-confirm-dialog')) closeModal();
+  if (modalRoot.querySelector('.search-dialog, .feed-date-dialog, .detail-dialog, .media-viewer, .trash-confirm-dialog')) closeModal();
   feedTagsExpanded = false;
   expandedEntries.clear();
   restoreLinkedFilters();
