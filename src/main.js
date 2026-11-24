@@ -15,6 +15,7 @@ import { entryTagsMarkup, mountEntryTags } from './entry-tags-editor.js';
 import { calendarGrid, feedDatePickerMarkup, mountFeedDatePicker, shiftCalendarMonth } from './feed-date-picker.js';
 import { mountTagOverflow } from './feed-tag-overflow.js';
 import { tagDistributionMarkup } from './tag-distribution.js';
+import { DEFAULT_TIMELINE_FILTERS, statisticsHref, statisticsMonthFromHash, timelineFilterHref, timelineFiltersFromHash } from './feed-links.js';
 import { postTrendMarkup } from './post-trend.js';
 import { mountAnniversarySorter } from './anniversary-sorter.js';
 import { anniversaryFields, mountAnniversaryEditor, readAnniversaries } from './anniversary-editor.js';
@@ -42,7 +43,7 @@ let pointsUi, pointsIdentity, stopCheckin;
 let commentRequest;
 const moodNames = { happy: '微笑', neutral: '一般', sad: '难受', unset: '未填写' };
 const moodIcons = { happy: 'smile', neutral: 'neutral', sad: 'sad' };
-const filters = { query: '', tag: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all', favoritesOnly: false, trash: false };
+const filters = { ...DEFAULT_TIMELINE_FILTERS };
 let filterIdentity = null;
 let state = { currentUser: null, users: [], entries: [], settings: {} }, loginPending = false, bootPending = true;
 let reconnectPending = false, reconnectError = null, reconnectAttempt, recoveryEpoch = 0;
@@ -86,6 +87,18 @@ function filtered() {
   const view = route();
   const rows = filterEntries(visibleEntries(), { ...filters, userId: state.currentUser?.id, type: view === 'events' ? 'event' : filters.type, favoritesOnly: view === 'favorites', trash: view === 'trash' });
   return selectedDay && isFeedView(view) ? rows.filter(row => dayKey(row.occurredAt) === selectedDay) : rows;
+}
+function restoreLinkedFilters() {
+  const linked = timelineFiltersFromHash(location.hash);
+  if (linked) Object.assign(filters, linked);
+  else if (route() === 'stats') Object.assign(filters, DEFAULT_TIMELINE_FILTERS, { month: statisticsMonthFromHash(location.hash) });
+  else Object.assign(filters, { query: '', tag: '', month: '', type: route() === 'events' ? 'event' : 'all' });
+  selectedDay = '';
+  if (filters.month) calendarCursor = filters.month;
+}
+function syncFilterLocation() {
+  if (route() === 'timeline') history.replaceState(null, '', timelineFilterHref(filters));
+  else if (route() === 'stats') history.replaceState(null, '', statisticsHref(filters.month));
 }
 const navItems = [['timeline', 'book', '时光线'], ['album', 'photo', '我们的相册'], ['events', 'calendar', '重要时刻'], ['stats', 'chart', '时光统计']];
 function navLink([id, symbol, label]) {
@@ -149,9 +162,10 @@ function render() {
   const identity = state?.currentUser?.id || null;
   if (identity !== filterIdentity) {
     clearTimeout(searchTimer);
-    Object.assign(filters, { query: '', tag: '', month: '', authorId: 'all' });
+    Object.assign(filters, DEFAULT_TIMELINE_FILTERS);
     calendarCursor = dayKey(new Date()).slice(0, 7);
     selectedDay = '';
+    restoreLinkedFilters();
     feedTagsExpanded = false;
     expandedEntries.clear();
     adminActivity = { days: 30, pending: false };
@@ -362,8 +376,20 @@ function renderAlbum() {
   const entries = filtered().filter(e => !e.deletedAt), allMedia = entries.flatMap(entry => entry.media.map((file, index) => ({ ...file, entry, index })));
   const media = allMedia.filter(file => filters.mediaType === 'all' || file.type === filters.mediaType);
   const counts = { all: allMedia.length, image: allMedia.filter(file => file.type !== 'video').length, video: allMedia.filter(file => file.type === 'video').length };
-  const items = media.map(file => `<button class="album-item" data-action="${file.unavailable ? 'retry-media' : 'media'}" data-id="${esc(file.entry.id)}" data-index="${file.index}">${file.unavailable ? `<span class="media-unavailable">附件暂时无法加载<small>${esc(file.error || '检查网络后重试')}</small><span>点击重新加载</span></span>` : file.type === 'video' ? `<video src="${safeUrl(file.url)}" preload="metadata"></video><span class="video-label">${icon('video')} 视频</span>` : `<img src="${safeUrl(file.url)}" alt="${esc(file.name || file.entry.title)}" loading="lazy" />`}<span class="album-caption"><strong>${esc(file.entry.title || '日常的一帧')}</strong><time>${dateLabel(file.entry.occurredAt, false, true)}</time></span></button>`).join('');
-  return `${heading('光影里的我们', `${media.length} 个${filters.mediaType === 'video' ? '视频' : filters.mediaType === 'image' ? '照片' : '片段'}，把那天再看一遍。`)}<div class="album-toolbar"><div class="segmented" aria-label="附件类型">${[['all', '全部'], ['image', '图片'], ['video', '视频']].map(([id, name]) => `<button data-action="filter-media" data-value="${id}" aria-pressed="${filters.mediaType === id}">${name}<span class="filter-count num">${counts[id]}</span></button>`).join('')}</div><label class="select-field">月份 <input id="filter-month" type="month" value="${esc(filters.month)}" /></label><button class="text-button" data-action="clear-filters">显示全部</button></div>${media.length ? `<div class="album-grid">${items}</div>` : `<div class="empty-state"><h2>${allMedia.length ? '这个分类里还没有片段' : '照片会慢慢装满这里'}</h2><p>${allMedia.length ? '试试其他附件类型，或者记录一个新片段。' : '记录时选一张喜欢的照片或一段短视频吧。'}</p><button class="secondary" data-action="new">记录一个片段</button></div>`}`;
+  const items = media.map(file => {
+    const title = file.entry.title || '日常的一帧', video = file.type === 'video';
+    const actionLabel = file.unavailable ? '重新加载附件' : video ? '播放视频' : '查看照片';
+    return `<button type="button" class="album-item${file.unavailable ? ' is-unavailable' : ''}" data-action="${file.unavailable ? 'retry-media' : 'media'}" data-id="${esc(file.entry.id)}" data-index="${file.index}" aria-label="${actionLabel}：${esc(title)}，${dateLabel(file.entry.occurredAt, true)}，第 ${file.index + 1} 个附件" title="${esc(title)}">
+      <span class="album-image-wrap">${file.unavailable
+        ? `<span class="media-unavailable">附件暂时无法加载<small>${esc(file.error || '检查网络后重试')}</small><span>点击重新加载</span></span>`
+        : video ? `<video class="album-photo" src="${safeUrl(file.url)}" preload="metadata" muted playsinline></video><span class="album-video-mark">${icon('play')}<span>视频</span></span>`
+          : `<img class="album-photo" src="${safeUrl(file.url)}" alt="${esc(file.name || title)}" loading="lazy" decoding="async" />`}
+        ${file.unavailable ? '' : `<span class="album-open-cue" aria-hidden="true">${video ? icon('play') : icon('photo')}<span>${actionLabel}</span></span>`}
+      </span>
+      <span class="album-caption"><span class="album-date-row"><time datetime="${esc(file.entry.occurredAt)}">${dateLabel(file.entry.occurredAt)}</time>${file.entry.media.length > 1 ? `<span class="album-position num" aria-hidden="true">${file.index + 1} / ${file.entry.media.length}</span>` : ''}</span><span class="album-title-row"><strong>${esc(title)}</strong>${icon('arrow', 'album-caption-arrow')}</span></span>
+    </button>`;
+  }).join('');
+  return `${heading('光影里的我们', `${media.length} 个${filters.mediaType === 'video' ? '视频' : filters.mediaType === 'image' ? '照片' : '片段'}，把那天再看一遍。`)}<div class="album-toolbar album-collection-toolbar"><div class="segmented" aria-label="附件类型">${[['all', '全部'], ['image', '图片'], ['video', '视频']].map(([id, name]) => `<button data-action="filter-media" data-value="${id}" aria-pressed="${filters.mediaType === id}">${name}<span class="filter-count num">${counts[id]}</span></button>`).join('')}</div><label class="select-field">月份 <input id="filter-month" type="month" value="${esc(filters.month)}" /></label><button class="text-button" data-action="clear-filters">显示全部</button></div>${media.length ? `<div class="album-grid album-photo-wall">${items}</div>` : `<div class="empty-state"><h2>${allMedia.length ? '这个分类里还没有片段' : '照片会慢慢装满这里'}</h2><p>${allMedia.length ? '试试其他附件类型，或者记录一个新片段。' : '记录时选一张喜欢的照片或一段短视频吧。'}</p><button class="secondary" data-action="new">记录一个片段</button></div>`}`;
 }
 function renderStats() {
   const entries = visibleEntries(), members = state.users.filter(user => user.role === 'member').slice(0, 2);
@@ -374,7 +400,7 @@ function renderStats() {
     <div class="stats-strip">${[['留下的回忆', stats.total, '条'], ['记录过的日子', stats.days, '天'], ['重要的事件', stats.events, '件'], ['记录的照片', stats.images, '张']].map(([name, value, unit]) => `<div><span>${name}</span><strong class="num">${value}<small>${unit}</small></strong></div>`).join('')}</div>
     <div class="stats-grid">${postTrendMarkup(entries, members, filters.month)}
     <section class="stat-panel"><h2>每个月的小事</h2><p class="muted">按发生日期统计，删除的记录不计入。</p><div class="chart-legend" aria-label="心情颜色">${['happy', 'neutral', 'sad', 'unset'].map(m => `<span class="mood-${m}"><i></i>${moodNames[m]}</span>`).join('')}</div><div class="bar-chart" role="img" aria-label="${esc(stats.months.map(m => `${m.month}：${m.count}条；${monthlyMoods(m.month).map(part => `${moodNames[part.mood]}${part.count}条`).join('，')}`).join('；') || '还没有记录')}"><div class="chart-scale"><span>${max}</span><span>0 条</span></div><div class="chart-bars">${stats.months.map(m => `<div class="bar-column"><span class="num">${m.count}</span><div class="bar-track"><div class="stacked-bar" style="height:${m.count / max * 100}%">${monthlyMoods(m.month).filter(part => part.count).map(part => `<span class="mood-${part.mood}" style="flex:${part.count}" title="${moodNames[part.mood]}：${part.count} 条"></span>`).join('')}</div></div><small>${esc(m.month.slice(2).replace('-', '.'))}</small></div>`).join('') || '<p class="muted">写下第一条后，这里会有变化。</p>'}</div></div></section>
-    <section class="stat-panel"><h2>写下这些时的心情</h2><p class="muted">${filled} 条填写了心情，${stats.moods.unset} 条未填写。</p><div class="mood-distribution">${['happy', 'neutral', 'sad'].map(m => `<div class="mood-stat mood-${m}">${icon(moodIcons[m])}<span>${moodNames[m]}</span><div class="mood-track"><span style="width:${filled ? stats.moods[m] / filled * 100 : 0}%"></span></div><strong class="num">${stats.moods[m]}<small> 条</small></strong></div>`).join('')}</div><p class="stat-footnote">每次记录都是当时的感受，心情分布不代表关系的好坏。</p></section>
+    <section class="stat-panel"><h2>写下这些时的心情</h2><p class="muted">${filled} 条填写了心情，${stats.moods.unset} 条未填写。</p><div class="mood-distribution">${['happy', 'neutral', 'sad'].map(m => `<a class="mood-stat mood-stat-link mood-${m}" href="${esc(timelineFilterHref({ mood: m, month: filters.month }))}" aria-label="查看${filters.month ? `${esc(filters.month)}的` : '全部'}${moodNames[m]}记录，共${stats.moods[m]}条">${icon(moodIcons[m])}<span>${moodNames[m]}</span><span class="mood-track" aria-hidden="true"><span style="width:${filled ? stats.moods[m] / filled * 100 : 0}%"></span></span><strong class="num">${stats.moods[m]}<small> 条</small></strong><span class="mood-view" aria-hidden="true">${icon('arrow')}</span></a>`).join('')}</div><p class="stat-footnote">每次记录都是当时的感受，心情分布不代表关系的好坏。</p></section>
     ${tagDistributionMarkup(rows)}</div>`;
 }
 function renderAnniversaries() {
@@ -700,23 +726,26 @@ document.addEventListener('click', async event => {
         filters.month = value.slice(0, 7);
         selectedDay = value.length === 10 ? value : '';
         if (filters.month) calendarCursor = filters.month;
+        syncFilterLocation();
         closeModal();
         render();
         scrollToPageTop();
         break;
       case 'filter-type': filters.type = value; render(); break;
-      case 'filter-tag': filters.tag = filters.tag === value ? '' : value; render(); break;
+      case 'filter-tag': filters.tag = filters.tag === value ? '' : value; syncFilterLocation(); render(); break;
       case 'refresh-admin-activity': await loadAdminActivity(); break;
       case 'filter-media': filters.mediaType = value; render(); break;
-      case 'clear-filters': clearTimeout(searchTimer); Object.assign(filters, { query: '', tag: '', type: 'all', mood: 'all', authorId: 'all', month: '', mediaType: 'all' }); selectedDay = ''; render(); break;
-      case 'search-tag': clearTimeout(searchTimer); filters.tag = value; filters.query = ''; filters.type = 'all'; selectedDay = ''; if (route() !== 'timeline') history.pushState(null, '', '#timeline'); render(); break;
+      case 'clear-filters': clearTimeout(searchTimer); Object.assign(filters, DEFAULT_TIMELINE_FILTERS); selectedDay = ''; syncFilterLocation(); render(); break;
+      case 'search-tag':
+        clearTimeout(searchTimer); filters.tag = value; filters.query = ''; filters.type = 'all'; selectedDay = '';
+        if (route() !== 'timeline') history.pushState(null, '', '#timeline');
+        syncFilterLocation(); render(); break;
       case 'stats-tag':
         event.preventDefault();
         clearTimeout(searchTimer);
-        Object.assign(filters, { tag: value, query: '', type: 'all', mood: 'all', authorId: 'all' });
-        selectedDay = ''; feedTagsExpanded = false;
-        if (filters.month) calendarCursor = filters.month;
-        history.pushState(null, '', '#timeline'); render(); scrollToPageTop();
+        history.pushState(null, '', timelineFilterHref({ tag: value, month: filters.month }));
+        restoreLinkedFilters(); feedTagsExpanded = false;
+        render(); scrollToPageTop();
         document.getElementById(`filter-tag-value-${encodeURIComponent(value)}`)?.focus({ preventScroll: true });
         break;
       case 'reaction': button.disabled = true; await provider.toggleReaction(id); render(); break;
@@ -853,8 +882,8 @@ document.addEventListener('change', async event => {
     }
     if (['user-switch', 'mobile-user-switch'].includes(event.target.id)) { await provider.switchUser(event.target.value); closeModal(); render(); }
     if (event.target.id === 'filter-author') { filters.authorId = event.target.value; render(); }
-    if (event.target.id === 'filter-mood') { filters.mood = event.target.value; render(); }
-    if (event.target.id === 'filter-month') { filters.month = event.target.value; render(); }
+    if (event.target.id === 'filter-mood') { filters.mood = event.target.value; syncFilterLocation(); render(); }
+    if (event.target.id === 'filter-month') { filters.month = event.target.value; syncFilterLocation(); render(); }
     if (event.target.id === 'admin-activity-period') await loadAdminActivity(Number(event.target.value));
   } catch (error) { toast(error.message, true); }
 });
@@ -960,11 +989,11 @@ window.addEventListener('hashchange', () => {
   if (modalRoot.querySelector('.search-dialog, .feed-date-dialog, .detail-dialog, .trash-confirm-dialog')) closeModal();
   feedTagsExpanded = false;
   expandedEntries.clear();
-  selectedDay = '';
-  Object.assign(filters, { query: '', tag: '', month: '', type: route() === 'events' ? 'event' : 'all' });
+  restoreLinkedFilters();
   render();
   openLinkedEntry();
   scrollToPageTop();
+  if (route() === 'timeline' && new URLSearchParams(location.hash.split('?')[1] || '').has('mood')) document.getElementById('filter-mood')?.focus({ preventScroll: true });
 });
 window.addEventListener('memory:session-ended', () => {
   unmountEntryPreviews?.();

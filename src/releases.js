@@ -2,6 +2,15 @@
 // Earlier product releases were reconstructed from the actual Git history.
 export const releaseHistory = Object.freeze([
   {
+    number: 35, date: '2026-11-24', version: 'v0.18.1', title: '常用标签与卡片交互',
+    changes: [
+      '首页和记录弹窗的可选标签按使用次数从高到低排列。',
+      '点击时光统计里的心情条，可以在时光线查看同一月份、同一心情的记录。',
+      '积分商城卡片重新整理封面、价格和库存，桌面悬停时轻微抬起，封面同步放大。',
+      '相册调整照片排版和卡片交互，桌面悬停可以看到预览提示。',
+    ],
+  },
+  {
     number: 34, date: '2026-11-23', version: 'v0.18.0', title: '瓜子开始积累共享回忆',
     changes: [
       '新发布的共享随记和事件会在后台自动形成摘要、主题和作者明确表达的感受。',

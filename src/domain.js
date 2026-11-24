@@ -192,16 +192,22 @@ export function filterEntries(entries, filters = {}) {
     || (instant(b.createdAt)?.getTime() ?? 0) - (instant(a.createdAt)?.getTime() ?? 0));
 }
 
-/** Collect only published, readable tags; keep options available when one tag is selected. */
+/** Rank readable tags by active-record use; ignore the selected tag when counting. */
 export function collectEntryTags(entries, user, filters = {}) {
-  const visible = (Array.isArray(entries) ? entries : []).filter(entry => canReadEntry(entry, user) && entry.status !== 'draft');
-  const tags = new Set();
+  const visible = (Array.isArray(entries) ? entries : []).filter(entry => canReadEntry(entry, user)
+    && (entry.status == null || entry.status === 'published'));
+  const counts = new Map();
   for (const entry of filterEntries(visible, { ...filters, tag: '' })) {
-    for (const tag of Array.isArray(entry.tags) ? entry.tags : []) {
-      if (typeof tag === 'string' && tag.trim()) tags.add(tag.trim());
+    const tags = new Set((Array.isArray(entry.tags) ? entry.tags : [])
+      .filter(tag => typeof tag === 'string' && tag.trim()).map(tag => tag.trim()));
+    for (const tag of tags) {
+      // Retain scoped recycle-bin options without letting deleted records boost
+      // popularity. Ordinary timeline and composer scopes already exclude them.
+      counts.set(tag, (counts.get(tag) || 0) + (entry.deletedAt ? 0 : 1));
     }
   }
-  return [...tags].sort((a, b) => a.localeCompare(b, 'zh-CN') || (a < b ? -1 : a > b ? 1 : 0));
+  return [...counts.keys()].sort((a, b) => counts.get(b) - counts.get(a)
+    || a.localeCompare(b, 'zh-CN') || (a < b ? -1 : a > b ? 1 : 0));
 }
 
 export function computeStats(entries, options = {}) {

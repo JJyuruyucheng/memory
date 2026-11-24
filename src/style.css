@@ -11,6 +11,7 @@
 @import url('./tag-distribution.css');
 @import url('./post-trend.css');
 @import url('./anniversary-calendar.css');
+@import url('./album.css');
 .anniversary-page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .points-desktop-bell { position: absolute; top: 35px; right: 14px; }
 .trash-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; color: var(--muted); }
@@ -225,6 +226,13 @@
 .mood-stat > span { color: var(--mood-ink); }
 .mood-stat .mood-track { background: var(--mood-bg); height: 8px; }
 .mood-stat .mood-track > span { background: var(--mood-color); }
+.mood-stat-link { min-height: 44px; padding: 8px 10px; margin: -4px -10px; border-radius: 8px; }
+.mood-stat-link:hover, .mood-stat-link:focus-visible { background: var(--mood-bg); }
+.mood-stat-link:focus-visible { outline: 2px solid var(--mood-ink); outline-offset: 2px; }
+.mood-stat-link .mood-track { min-width: 20px; }
+.mood-stat-link strong { flex-shrink: 0; width: auto; min-width: 39px; white-space: nowrap; }
+.mood-stat-link .mood-view { display: inline-flex; flex-shrink: 0; }
+.mood-stat-link .mood-view .icon { width: 15px; height: 15px; }
 .permission-note { display: flex; align-items: center; gap: 5px; }
 .permission-note .icon { width: 13px; height: 13px; }
 .settings-form fieldset:disabled { background: #f0f1ee; border-color: #dedfd9; }

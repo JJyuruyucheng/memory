@@ -104,16 +104,42 @@ test('tag filters match complete labels and combine with existing filters indepe
   assert.deepEqual(entries, snapshot);
 });
 
-test('tag options are deduplicated, sorted and retained across tag selection without mutating records', () => {
+test('tag options rank by record use and remain available across tag selection without mutating records', () => {
   const entries = [
     saved('first', { tags: ['总结', '感悟', '  ', '', '感悟'] }),
     saved('second', { tags: ['旅行', '总结', ' 感悟 '] }),
   ];
   const snapshot = structuredClone(entries);
-  assert.deepEqual(collectEntryTags(entries, { id: 'a' }, { tag: '感悟' }), ['感悟', '旅行', '总结']);
-  assert.deepEqual(collectEntryTags([...entries].reverse(), { id: 'a' }), ['感悟', '旅行', '总结']);
+  assert.deepEqual(collectEntryTags(entries, { id: 'a' }, { tag: '感悟' }), ['感悟', '总结', '旅行']);
+  assert.deepEqual(collectEntryTags([...entries].reverse(), { id: 'a' }), ['感悟', '总结', '旅行']);
   assert.deepEqual(filterEntries(entries, { tag: ' 感悟 ' }).map(entry => entry.id), ['first', 'second']);
   assert.deepEqual(entries, snapshot);
+});
+
+test('tag popularity counts each normalized tag once per record and uses Chinese alphabetical ties', () => {
+  const entries = [
+    saved('first', { tags: ['八', '八', ' 八 ', '热门'] }),
+    saved('second', { tags: ['热门', '阿'] }),
+  ];
+  const snapshot = structuredClone(entries);
+  assert.deepEqual(collectEntryTags(entries, { id: 'a' }), ['热门', '阿', '八']);
+  assert.deepEqual(collectEntryTags([...entries].reverse(), { id: 'a' }), ['热门', '阿', '八']);
+  assert.deepEqual(entries, snapshot);
+});
+
+test('deleted, unpublished and unreadable records cannot boost tag popularity', () => {
+  const entries = [
+    saved('first', { tags: ['八'] }),
+    saved('second', { tags: ['八'] }),
+    saved('third', { tags: ['阿'] }),
+    saved('deleted', { tags: ['阿'], deletedAt: '2026-11-03T00:00:00Z' }),
+    saved('draft', { tags: ['阿'], status: 'draft' }),
+    saved('unknown', { tags: ['阿'], status: 'unknown' }),
+    saved('private', { tags: ['阿'], type: 'whisper', authorId: 'b' }),
+  ];
+  assert.deepEqual(collectEntryTags(entries, { id: 'a', role: 'member' }), ['八', '阿']);
+  const afterDeletion = entries.map(entry => entry.id === 'second' ? { ...entry, deletedAt: '2026-11-04T00:00:00Z' } : entry);
+  assert.deepEqual(collectEntryTags(afterDeletion, { id: 'a', role: 'member' }), ['阿', '八']);
 });
 
 test('tag options respect member and administrator visibility and exclude every unpublished draft', () => {
@@ -151,6 +177,22 @@ test('tag options preserve the current event, favorite and other filter scope wh
   assert.deepEqual(collectEntryTags(entries, { id: 'a' }, scope), ['感悟', '旅行']);
   assert.deepEqual(filterEntries(entries, scope).map(entry => entry.id), ['target']);
   assert.deepEqual(collectEntryTags(entries, { id: 'a' }, { favoritesOnly: true }), []);
+});
+
+test('tag popularity uses the current filter scope rather than unrelated records', () => {
+  const entries = [
+    saved('first', { type: 'event', title: '散步', tags: ['八', '阿'], mood: 'happy', favoriteBy: ['a'] }),
+    saved('second', { type: 'event', title: '散步', tags: ['八'], mood: 'happy', favoriteBy: ['a'] }),
+    saved('note', { title: '散步', tags: ['阿'], mood: 'happy', favoriteBy: ['a'] }),
+    saved('not-favorite', { type: 'event', title: '散步', tags: ['阿'], mood: 'happy' }),
+    saved('other-month', { type: 'event', title: '散步', tags: ['阿'], mood: 'happy', favoriteBy: ['a'], occurredAt: '2026-10-01' }),
+    saved('other-query', { type: 'event', title: '晚饭', tags: ['阿'], mood: 'happy', favoriteBy: ['a'] }),
+    saved('other-author', { type: 'event', title: '散步', tags: ['阿'], mood: 'happy', favoriteBy: ['a'], authorId: 'b' }),
+  ];
+  const scope = { type: 'event', favoritesOnly: true, userId: 'a', authorId: 'a', mood: 'happy', month: '2026-11', query: '散步', tag: '阿' };
+  assert.equal(collectEntryTags(entries, { id: 'a' })[0], '阿');
+  assert.deepEqual(collectEntryTags(entries, { id: 'a' }, scope), ['八', '阿']);
+  assert.deepEqual(filterEntries(entries, scope).map(entry => entry.id), ['first']);
 });
 
 test('validation prevents empty, impossible-date, invalid-mood and unsupported uploads', () => {
